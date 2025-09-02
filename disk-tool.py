@@ -399,7 +399,7 @@ class TileFrame(QtWidgets.QFrame):
         self.__bgCol = QtGui.QColor(64, 64, 64)
         self.__txtCol = QtGui.QColor(38, 38, 38)
         self.__txtFont = QtGui.QFont('CopperBlack', 60, QtGui.QFont.Bold)
-        self.__txt = "Visualizer"
+        self.__txt = "Disk\nVisualizer"
         # Set strong policy for focusing keyboard events to Tileframe
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.setMouseTracking(True)
@@ -627,7 +627,7 @@ class DiskmapApp(QtWidgets.QApplication):
         self.__builderThread = None
         
         # Configure the GUIWindow (removed icon dependency)
-        self.__window = GUIWindow('Diskmap - Disk Visualization Utility',
+        self.__window = GUIWindow('Disk Visualization Utility',
                                   640,
                                   360)
         # Configure the Tileframe
@@ -912,8 +912,8 @@ class DiskmapApp(QtWidgets.QApplication):
     def __eventAbout(self):
         '''Display an information dialog about the program languages and tools
         used to create this application and the name of the developer.'''
-        message = 'Disk Space Visualization Utility\n\nPython 3, PyQt 5\n' + \
-            '\nCreated by Salinder Sidhu\nProgress Bar Enhancement Added'
+        message = 'Disk Space Visualization Utility\n\n' + \
+            '\nCreated by Tudor Marmureanu'
         # Render the message box
         QtWidgets.QMessageBox.information(self.__window,
                                           'About',
