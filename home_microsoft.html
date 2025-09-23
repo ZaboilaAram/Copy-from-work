@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Microsoft Corporation Home Page</title>
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            margin: 8px;
+            background-color: #ffffff;
+            color: #000000;
+            line-height: 1.3;
+        }
+
+        .header {
+            background-color: #000080;
+            color: #ffffff;
+            padding: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            font-family: "Times New Roman", serif;
+            letter-spacing: 1px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .navigation {
+            background-color: #cccccc;
+            border: 2px inset #cccccc;
+            padding: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .nav-link {
+            color: #0000ee;
+            text-decoration: underline;
+            margin: 0 15px;
+            font-weight: bold;
+        }
+
+        .nav-link:hover {
+            color: #ff0000;
+        }
+
+        .main-content {
+            display: table;
+            width: 100%;
+        }
+
+        .left-column {
+            display: table-cell;
+            width: 70%;
+            vertical-align: top;
+            padding-right: 20px;
+        }
+
+        .right-column {
+            display: table-cell;
+            width: 30%;
+            vertical-align: top;
+            background-color: #f0f0f0;
+            border: 1px solid #cccccc;
+            padding: 15px;
+        }
+
+        .section-header {
+            background-color: #000080;
+            color: #ffffff;
+            padding: 5px 10px;
+            font-weight: bold;
+            margin: 20px 0 10px 0;
+            font-size: 14px;
+        }
+
+        .product-box {
+            border: 2px solid #000080;
+            margin: 15px 0;
+            background-color: #f8f8f8;
+        }
+
+        .product-title {
+            background-color: #000080;
+            color: #ffffff;
+            padding: 8px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .product-content {
+            padding: 12px;
+        }
+
+        .download-button {
+            background-color: #ffff00;
+            border: 2px outset #ffff00;
+            padding: 5px 15px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px 0;
+            display: inline-block;
+            text-decoration: none;
+            color: #000000;
+        }
+
+        .download-button:hover {
+            background-color: #ffff80;
+        }
+
+        .download-button:active {
+            border: 2px inset #ffff00;
+        }
+
+        .news-section {
+            border: 1px solid #808080;
+            margin: 15px 0;
+            background-color: #ffffff;
+        }
+
+        .news-header {
+            background-color: #c0c0c0;
+            padding: 5px 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #808080;
+        }
+
+        .news-item {
+            padding: 10px;
+            border-bottom: 1px dotted #cccccc;
+        }
+
+        .news-date {
+            color: #008000;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .link-section {
+            margin: 15px 0;
+        }
+
+        .link-category {
+            font-weight: bold;
+            color: #800080;
+            margin: 10px 0 5px 0;
+            text-decoration: underline;
+        }
+
+        .link-item {
+            margin: 3px 0 3px 15px;
+            font-size: 11px;
+        }
+
+        .link-item a {
+            color: #0000ee;
+            text-decoration: underline;
+        }
+
+        .link-item a:visited {
+            color: #800080;
+        }
+
+        .footer {
+            margin-top: 30px;
+            border-top: 2px solid #000080;
+            padding: 15px;
+            background-color: #f0f0f0;
+            text-align: center;
+            font-size: 10px;
+        }
+
+        .warning-box {
+            background-color: #ffcccc;
+            border: 2px solid #ff0000;
+            padding: 10px;
+            margin: 15px 0;
+        }
+
+        .warning-title {
+            font-weight: bold;
+            color: #ff0000;
+        }
+
+        .feature-table {
+            border: 1px solid #000000;
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .feature-table th {
+            background-color: #cccccc;
+            border: 1px solid #000000;
+            padding: 5px;
+            font-weight: bold;
+        }
+
+        .feature-table td {
+            border: 1px solid #000000;
+            padding: 5px;
+            background-color: #ffffff;
+        }
+
+        .update-banner {
+            background-color: #ff0000;
+            color: #ffffff;
+            text-align: center;
+            padding: 8px;
+            margin: 10px 0;
+            font-weight: bold;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.7; }
+        }
+
+        .counter {
+            background-color: #000000;
+            color: #00ff00;
+            padding: 5px;
+            font-family: "Courier New", monospace;
+            text-align: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">Microsoft Corporation</div>
+        <div class="subtitle">The Leader in Personal Computer Software</div>
+    </div>
+
+    <div class="update-banner">
+        NEW! Internet Explorer 4.0 with Active Desktop Technology - Download Today!
+    </div>
+
+    <div class="navigation">
+        <a href="#" class="nav-link">Products</a>
+        <a href="#" class="nav-link">Downloads</a>
+        <a href="#" class="nav-link">Support</a>
+        <a href="#" class="nav-link">Developer</a>
+        <a href="#" class="nav-link">Corporate Info</a>
+        <a href="#" class="nav-link">What's New</a>
+    </div>
+
+    <div class="main-content">
+        <div class="left-column">
+            <div class="section-header">Featured Products</div>
+
+            <div class="product-box">
+                <div class="product-title">Microsoft Windows 98 - Second Edition</div>
+                <div class="product-content">
+                    The most reliable Windows ever! Enhanced Internet integration, improved hardware support, and better system performance. Perfect for home and business use.
+                    <br><br>
+                    <strong>System Requirements:</strong> 486DX/66 MHz processor, 16 MB RAM, 200 MB hard disk space
+                    <br><br>
+                    <a href="#" class="download-button">Download Trial Version</a>
+                    <a href="#" class="download-button">Order Full Version</a>
+                </div>
+            </div>
+
+            <div class="product-box">
+                <div class="product-title">Microsoft Office 2000 Premium</div>
+                <div class="product-content">
+                    The complete productivity solution for the new millennium! Includes Word, Excel, PowerPoint, Access, Outlook, Publisher, and FrontPage.
+                    <br><br>
+                    <table class="feature-table">
+                        <tr>
+                            <th>Application</th>
+                            <th>New Features</th>
+                        </tr>
+                        <tr>
+                            <td>Word 2000</td>
+                            <td>Smart Tags, Web Publishing</td>
+                        </tr>
+                        <tr>
+                            <td>Excel 2000</td>
+                            <td>Pivot Tables, Web Queries</td>
+                        </tr>
+                        <tr>
+                            <td>PowerPoint 2000</td>
+                            <td>Animation Effects, Web Presentations</td>
+                        </tr>
+                    </table>
+                    <a href="#" class="download-button">Free 30-Day Trial</a>
+                </div>
+            </div>
+
+            <div class="warning-box">
+                <div class="warning-title">Important Security Notice</div>
+                Please ensure you have the latest security updates installed. Visit Windows Update regularly to keep your system secure and up-to-date.
+            </div>
+
+            <div class="section-header">Latest Company News</div>
+
+            <div class="news-section">
+                <div class="news-header">Microsoft News Center</div>
+                <div class="news-item">
+                    <div class="news-date">September 15, 1999</div>
+                    <strong>Microsoft Announces .NET Initiative</strong><br>
+                    Revolutionary new programming model will transform how applications are built and deployed across the Internet.
+                </div>
+                <div class="news-item">
+                    <div class="news-date">August 28, 1999</div>
+                    <strong>Windows 2000 Release Candidate Available</strong><br>
+                    Business customers can now download and test the most stable Windows operating system ever created.
+                </div>
+                <div class="news-item">
+                    <div class="news-date">July 22, 1999</div>
+                    <strong>Microsoft Partners with Leading Hardware Vendors</strong><br>
+                    New partnerships ensure optimal performance and compatibility across a wide range of PC configurations.
+                </div>
+            </div>
+        </div>
+
+        <div class="right-column">
+            <div class="link-section">
+                <div class="link-category">Quick Downloads</div>
+                <div class="link-item"><a href="#">Windows Media Player 7.0</a></div>
+                <div class="link-item"><a href="#">DirectX 7.0a Runtime</a></div>
+                <div class="link-item"><a href="#">Internet Explorer 5.5</a></div>
+                <div class="link-item"><a href="#">Windows Script Host</a></div>
+                <div class="link-item"><a href="#">Microsoft Agent 2.0</a></div>
+            </div>
+
+            <div class="link-section">
+                <div class="link-category">Developer Resources</div>
+                <div class="link-item"><a href="#">Visual Studio 6.0 Service Pack</a></div>
+                <div class="link-item"><a href="#">Platform SDK Documentation</a></div>
+                <div class="link-item"><a href="#">MSDN Library Online</a></div>
+                <div class="link-item"><a href="#">ActiveX Control Gallery</a></div>
+                <div class="link-item"><a href="#">Win32 API Reference</a></div>
+            </div>
+
+            <div class="link-section">
+                <div class="link-category">Technical Support</div>
+                <div class="link-item"><a href="#">Knowledge Base Search</a></div>
+                <div class="link-item"><a href="#">Product Support Options</a></div>
+                <div class="link-item"><a href="#">Download Center</a></div>
+                <div class="link-item"><a href="#">Hardware Compatibility List</a></div>
+                <div class="link-item"><a href="#">Troubleshooting Wizards</a></div>
+            </div>
+
+            <div class="counter">
+                Visitors Today: 0047592
+                <br>
+                Total Visits: 2847593
+            </div>
+
+            <div class="link-section">
+                <div class="link-category">International Sites</div>
+                <div class="link-item"><a href="#">Microsoft UK</a></div>
+                <div class="link-item"><a href="#">Microsoft Germany</a></div>
+                <div class="link-item"><a href="#">Microsoft Japan</a></div>
+                <div class="link-item"><a href="#">Microsoft France</a></div>
+                <div class="link-item"><a href="#">Microsoft Canada</a></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <strong>Microsoft Corporation</strong><br>
+        One Microsoft Way, Redmond, WA 98052-6399<br>
+        Phone: (425) 882-8080 | Fax: (425) 936-7329<br><br>
+        Copyright 1999 Microsoft Corporation. All rights reserved.<br>
+        Microsoft, Windows, Windows NT, and the Windows logo are registered trademarks of Microsoft Corporation.<br>
+        Other product and company names mentioned herein may be trademarks of their respective owners.<br><br>
+        <em>This page was last updated on September 22, 1999 at 2:30 PM PST</em><br>
+        Best viewed with Internet Explorer 4.0 or higher at 800x600 resolution
+    </div>
+
+    <script>
+        // Visitor counter animation
+        function updateCounter() {
+            const counter = document.querySelector('.counter');
+            if (counter) {
+                const currentCount = parseInt(counter.textContent.match(/\d+/)[0]);
+                const newCount = currentCount + Math.floor(Math.random() * 3) + 1;
+                counter.innerHTML = `Visitors Today: ${newCount.toString().padStart(7, '0')}<br>Total Visits: ${(2847593 + newCount - 47592).toString()}`;
+            }
+        }
+
+        // Update counter every 10 seconds
+        setInterval(updateCounter, 10000);
+
+        // Classic alert interactions
+        document.querySelectorAll('a[href="#"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const linkText = this.textContent || this.innerText;
+                alert(`You clicked: ${linkText}\n\nThis feature is currently under construction. Please check back soon!`);
+            });
+        });
+
+        // Add some 90s flair
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Welcome to Microsoft Corporation - Built with Internet Explorer 4.0!');
+        });
+    </script>
+</body>
+</html>

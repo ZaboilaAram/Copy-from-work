@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Computing Division Home Page</title>
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            margin: 8px;
+            background-color: #ffffff;
+            color: #000000;
+            line-height: 1.3;
+        }
+
+        .header {
+            background-color: #000080;
+            color: #ffffff;
+            padding: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: bold;
+            font-family: "Times New Roman", serif;
+            letter-spacing: 1px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .navigation {
+            background-color: #cccccc;
+            border: 2px inset #cccccc;
+            padding: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .nav-link {
+            color: #0000ee;
+            text-decoration: underline;
+            margin: 0 15px;
+            font-weight: bold;
+        }
+
+        .nav-link:hover {
+            color: #ff0000;
+        }
+
+        .main-content {
+            display: table;
+            width: 100%;
+        }
+
+        .left-column {
+            display: table-cell;
+            width: 70%;
+            vertical-align: top;
+            padding-right: 20px;
+        }
+
+        .right-column {
+            display: table-cell;
+            width: 30%;
+            vertical-align: top;
+            background-color: #f0f0f0;
+            border: 1px solid #cccccc;
+            padding: 15px;
+        }
+
+        .section-header {
+            background-color: #000080;
+            color: #ffffff;
+            padding: 5px 10px;
+            font-weight: bold;
+            margin: 20px 0 10px 0;
+            font-size: 14px;
+        }
+
+        .product-box {
+            border: 2px solid #000080;
+            margin: 15px 0;
+            background-color: #f8f8f8;
+        }
+
+        .product-title {
+            background-color: #000080;
+            color: #ffffff;
+            padding: 8px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+
+        .product-content {
+            padding: 12px;
+        }
+
+        .download-button {
+            background-color: #ffff00;
+            border: 2px outset #ffff00;
+            padding: 5px 15px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 5px 0;
+            display: inline-block;
+            text-decoration: none;
+            color: #000000;
+        }
+
+        .download-button:hover {
+            background-color: #ffff80;
+        }
+
+        .download-button:active {
+            border: 2px inset #ffff00;
+        }
+
+        .news-section {
+            border: 1px solid #808080;
+            margin: 15px 0;
+            background-color: #ffffff;
+        }
+
+        .news-header {
+            background-color: #c0c0c0;
+            padding: 5px 10px;
+            font-weight: bold;
+            border-bottom: 1px solid #808080;
+        }
+
+        .news-item {
+            padding: 10px;
+            border-bottom: 1px dotted #cccccc;
+        }
+
+        .news-date {
+            color: #008000;
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .link-section {
+            margin: 15px 0;
+        }
+
+        .link-category {
+            font-weight: bold;
+            color: #800080;
+            margin: 10px 0 5px 0;
+            text-decoration: underline;
+        }
+
+        .link-item {
+            margin: 3px 0 3px 15px;
+            font-size: 11px;
+        }
+
+        .link-item a {
+            color: #0000ee;
+            text-decoration: underline;
+        }
+
+        .link-item a:visited {
+            color: #800080;
+        }
+
+        .footer {
+            margin-top: 30px;
+            border-top: 2px solid #000080;
+            padding: 15px;
+            background-color: #f0f0f0;
+            text-align: center;
+            font-size: 10px;
+        }
+
+        .warning-box {
+            background-color: #ffcccc;
+            border: 2px solid #ff0000;
+            padding: 10px;
+            margin: 15px 0;
+        }
+
+        .warning-title {
+            font-weight: bold;
+            color: #ff0000;
+        }
+
+        .feature-table {
+            border: 1px solid #000000;
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .feature-table th {
+            background-color: #cccccc;
+            border: 1px solid #000000;
+            padding: 5px;
+            font-weight: bold;
+        }
+
+        .feature-table td {
+            border: 1px solid #000000;
+            padding: 5px;
+            background-color: #ffffff;
+        }
+
+        .update-banner {
+            background-color: #ff0000;
+            color: #ffffff;
+            text-align: center;
+            padding: 8px;
+            margin: 10px 0;
+            font-weight: bold;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.7; }
+        }
+
+        .counter {
+            background-color: #000000;
+            color: #00ff00;
+            padding: 5px;
+            font-family: "Courier New", monospace;
+            text-align: center;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">Retro Computing Division</div>
+        <div class="subtitle">Our mission is to provide IT support departments, system administrators, developers, and office professionals with an all-in-one solution that enhances productivity and streamlines operations.</div>
+    </div>
+
+    <div class="update-banner">
+        NEW! Multiapp comes configured with C++ libraries and runs 100% offline - Download Today!
+    </div>
+
+    <div class="navigation">
+        <a href="####" class="nav-link">Products</a>
+        <a href="#" class="nav-link">Downloads</a>
+        <a href="##" class="nav-link">Support</a>
+        <a href="###" class="nav-link">Developer</a>
+        <a href="#" class="nav-link">Corporate Info</a>
+        <a href="#####" class="nav-link">What's New</a>
+    </div>
+
+    <div class="main-content">
+        <div class="left-column">
+            <div class="section-header">Featured Product</div>
+
+            <div class="product-box">
+                <div class="product-title">Multiapp 95 Professional - Offline Edition</div>
+                <div class="product-content">
+                    The most reliable Multiapp ever! The ultimate productivity and efficiency suite designed specifically for IT support departments. Revolutionary software combining over 50+ professional tools into a single, powerful executable file, streamlining various IT tasks from system monitoring to file management, network diagnostics, development tools, and advanced AI-powered productivity features. Perfect for home and business use.
+                    <br><br>
+                    <!--<strong>Minimum System Requirements:</strong> x64 (64-bit) Processor 1-2 GHz (Required), Windows 10 (build 1903+) or Windows 11, Intel i3 or AMD equivalent, 4GB RAM minimum, 500MB free disk space, Administrator privileges for full functionality, 100% zoom recommended (especially for laptops).<br><br><strong>Recommended System Specifications:</strong> Intel Core i5 or AMD Ryzen 5 (or equivalent), 8GB-16GB RAM (16GB for heavy development), SSD for faster file operations, 1920x1080+ resolution, Proper network permissions for file copying, Updated graphics drivers
+                    <br><br>-->
+                    <a href="#" class="download-button">Download Latest Version</a>
+                    <!--<a href="#" class="download-button">Order Full Version</a>-->
+                </div>
+            </div>
+
+            <div class="product-box">
+                <div class="product-title">Multiapp 95 Professional - Details</div>
+                <div class="product-content">
+                    The complete productivity solution for the IT departments!
+                    <br><br>
+                    <table class="feature-table">
+                        <tr>
+                            <th>Comprehensive Feature Set</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td><strong>System & Diagnostic Tools</strong></td>
+                            <td>Complete system management suite including system compatibility testing, hardware diagnostics & monitoring, disk utility visualizer, network troubleshooting, IT process automation, advanced terminal emulator, performance optimization, alert monitor, event viewer, manual & automatic repair tool for Multiapp, XML editor for Config, real-time system information, task manager, process viewer, and Multiapp dashboard for essential information.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>File Management Pro Tools</strong></td>
+                            <td>Professional file management capabilities with smart backup tool, advanced files & folders comparator, ZIP password recovery & maker, intelligent file organizer, Explorer mode, Copy App with network file copying, rename utility, file archeologist, archive management, file history tools, File Fisher searching, and Recovery Tunnel for advanced file recovery.</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Security Suite</strong></td>
+                            <td>Enterprise-grade security tools featuring military-grade file encryption, advanced password manager & generation tools, multi-level authentication system, terminal access restrictions, multiple password generators (Basic & Advanced V2), password storage and management, file encryption and security tools, ZIP password recovery, and safety tool for vulnerability avoidance.</td>
+                        </tr>
+						<tr>
+                            <td><strong>Office Suite Lite</strong></td>
+                            <td>Comprehensive office productivity suite with Office document reader for Word, PowerPoint & Excel, spreadsheet editor with formula support (SUM, AVERAGE, MIN, MAX, COUNT, PRODUCT, MEDIAN, CONCAT), PDF tools suite with encryption, image extraction, page manipulation, PDF to Word conversion, PDF viewer, paint app & whiteboard, and find & replace text tool.</td>
+                        </tr>
+						<tr>
+                            <td><strong>Development Tools</strong></td>
+                            <td>Complete development environment featuring full-featured Python IDE, advanced text editor with syntax highlighting, Markdown viewer, SQLite editor & reader with query tools, script agent for automation, multi file editor for configurations, project management capabilities, and syntax highlighting for multiple programming languages.</td>
+                        </tr>
+						<tr>
+                            <td><strong>AI & Productivity</strong></td>
+                            <td>Advanced AI-powered productivity suite with AI chatbot (95% Romanian language support), quick file finder, smart calendar & scheduling, calculator, task manager system, knowledge base system (Standard & Retro), account launcher & manager, workflow automation, pause manager for teams, screen recorder app, visual diagram creator, expense tracker with reporting, quiz creation and testing, clipboard history and contacts manager.</td>
+                        </tr>
+						<tr>
+                            <td><strong>Network & Connectivity Tools</strong></td>
+                            <td>Professional networking suite including network information display, network topology, network monitoring, port scanner, ping tool, network console with Wi-Fi password recovery, bandwidth monitoring with real-time graphs, device status listener, network traffic monitoring, and connection quality testing.</td>
+                        </tr>
+						<tr>
+                            <td><strong>Portable Application</strong></td>
+                            <td>Revolutionary deployment model with single executable requiring no installation, runs from anywhere (USB, another hard drive, network), automatic compatibility check, all features unlocked immediately, no external dependencies, optimized architecture with precompiled paths, direct bit allocation, and 18.8% - 20% faster copying files performance compared to traditional methods.</td>
+                        </tr>
+                    </table><br>
+					<table class="feature-table">
+						<tr>
+                            <th>Requirements</th>
+                            <th>Details</th>
+                        </tr>
+						<tr>
+                            <td><strong>Minimum System Requirements</strong></td>
+                            <td>x64 (64-bit) Processor 1-2 GHz (Required), Windows 10 (build 1903+) or Windows 11, Intel i3 or AMD equivalent, 4GB RAM minimum, 500MB free disk space, Administrator privileges for full functionality, 100% zoom recommended (especially for laptops).</td>
+                        </tr>
+						<tr>
+                            <td><strong>Recommended System Specifications</strong></td>
+							<td>Intel Core i5 or AMD Ryzen 5 (or equivalent), 8GB-16GB RAM (16GB for heavy development), SSD for faster file operations, 1920x1080+ resolution, Proper network permissions for file copying, Updated graphics drivers</td>
+                        </tr>
+					</table>
+                    <!--<a href="#" class="download-button">Free 30-Day Trial</a>-->
+                </div>
+            </div>
+
+            <div class="warning-box">
+                <div class="warning-title">Important Notice</div>
+                This software is designed exclusively for x64 (64-bit) systems
+            </div>
+
+            <div class="section-header">Latest News</div>
+
+            <div class="news-section">
+                <div class="news-header">News Center</div>
+                <div class="news-item">
+                    <div class="news-date">September 15, 2025</div>
+                    <strong>Retro Computing Division announces the most successful and stable version of Multiapp</strong><br>
+                    Customers can now download and test the most stable version of Multiapp ever created.
+                </div>
+                <div class="news-item">
+                    <div class="news-date">August 28, 2025</div>
+                    <strong>Retro Computing Division announces C++ integration</strong><br>
+                    Revolutionary new programming model will transform how application are built and used.
+                </div>
+                <div class="news-item">
+                    <div class="news-date">July 22, 2024</div>
+                    <strong>Multiapp support is now integrated </strong><br>
+                    Retro Computing Division offers you a user handbook integrated into Multiapp 95 Professional.
+                </div>
+            </div>
+        </div>
+
+        <div class="right-column">
+            <div class="link-section">
+                <div class="link-category">Quick Downloads</div>
+                <div class="link-item"><a href="#">Multiapp 95 Professional</a></div>
+            </div>
+
+            <div class="link-section">
+                <div class="link-category">Technical Support</div>
+                <div class="link-item"><a href="##">User handbook</a></div>
+            </div>
+
+            <div class="counter">
+                Visitors Today: 0047592
+                <br>
+                Total Visits: 2847593
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <strong>Retro Computing Division</strong><br>
+        Copyright 2024 Tudor Marmureanu. All rights reserved.<br>
+        <em>This page was last updated on September 24, 2025</em><br>
+    </div>
+
+    <script>
+        // Visitor counter animation
+        function updateCounter() {
+            const counter = document.querySelector('.counter');
+            if (counter) {
+                const currentCount = parseInt(counter.textContent.match(/\d+/)[0]);
+                const newCount = currentCount + Math.floor(Math.random() * 3) + 1;
+                counter.innerHTML = `Visitors Today: ${newCount.toString().padStart(7, '0')}<br>Total Visits: ${(2847593 + newCount - 47592).toString()}`;
+            }
+        }
+
+        // Update counter every 10 seconds
+        setInterval(updateCounter, 10000);
+
+        // Classic alert interactions
+        document.querySelectorAll('a[href="#"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const linkText = this.textContent || this.innerText;
+                alert(`${linkText}\n\nThis feature is currently under construction. Please check back soon!`);
+            });
+        });
+		
+		document.querySelectorAll('a[href="##"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const linkText = this.textContent || this.innerText;
+                alert(`${linkText}\n\nThis feature is currently incorporated in Multiapp 95 Professional.`);
+            });
+        });
+		
+		document.querySelectorAll('a[href="###"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const linkText = this.textContent || this.innerText;
+                alert(`${linkText}\n\nDeveloper: Tudor Marmureanu.`);
+            });
+        });
+		
+		document.querySelectorAll('a[href="####"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const linkText = this.textContent || this.innerText;
+                alert(`${linkText}\n\nAll apps are incorporated in Multiapp 95 Professional.`);
+            });
+        });
+		
+		document.querySelectorAll('a[href="#####"]').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const linkText = this.textContent || this.innerText;
+                alert(`${linkText}\n\nCustomers can now download and test the most stable version of Multiapp ever created (0.95.0).`);
+            });
+        });
+
+        // Add some 90s flair
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Welcome to Retro Computing Division!');
+        });
+    </script>
+</body>
+</html>
