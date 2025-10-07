@@ -2,7 +2,7 @@ def OUTLOOK():
     from datetime import datetime
     import os
     import tkinter as tk
-    from tkinter import messagebox
+    from tkinter import messagebox, simpledialog
     import sqlite3
 
     class RetroEmailClient:
@@ -16,6 +16,7 @@ def OUTLOOK():
             self.current_folder = "Inbox"
             self.folder_labels = {}
             self.show_folder_counts = True
+            self.custom_folders = []
             
             reply_to = {
                 "from": "suport@muap.ro",
@@ -61,8 +62,9 @@ def OUTLOOK():
             self.emails = []
             self.current_email = None
 
-            self.setup_ui()
             self.init_database()
+            self.setup_ui()
+            self.load_custom_folders()
             self.load_emails_from_db('Inbox')
             
         def init_database(self):
@@ -83,6 +85,12 @@ def OUTLOOK():
                     is_favorite INTEGER DEFAULT 0
                 )
             ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS custom_folders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    folder_name TEXT UNIQUE NOT NULL
+                )
+            ''')
             conn.commit()
             
             cursor.execute("SELECT COUNT(*) FROM emails WHERE folder='Inbox'")
@@ -96,6 +104,134 @@ def OUTLOOK():
             
             conn.close()
             
+        def load_custom_folders(self):
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT folder_name FROM custom_folders ORDER BY folder_name")
+            rows = cursor.fetchall()
+            conn.close()
+            
+            self.custom_folders = [row[0] for row in rows]
+            self.refresh_folder_list()
+
+        def refresh_folder_list(self):
+            for widget in self.folders_container.winfo_children():
+                widget.destroy()
+            
+            self.folder_labels = {}
+            
+            default_folders = ["Inbox", "Sent Items", "Favorites", "Drafts"]
+            
+            for folder in default_folders:
+                folder_frame = tk.Frame(self.folders_container, bg="white")
+                folder_frame.pack(fill="x")
+                
+                folder_btn = tk.Label(folder_frame, text=f"  {folder}", bg="white", anchor="w", 
+                                    font=("MS Sans Serif", 8), cursor="hand2")
+                folder_btn.pack(side="left", fill="x", expand=True)
+                folder_btn.bind("<Button-1>", lambda e, f=folder: self.switch_folder(f))
+                
+                if folder == self.current_folder:
+                    folder_btn.configure(bg="#316ac5", fg="white")
+                
+                self.folder_labels[folder] = folder_btn
+            
+            if self.custom_folders:
+                separator = tk.Frame(self.folders_container, bg="#c0c0c0", height=2)
+                separator.pack(fill="x", pady=2)
+                
+                for folder in self.custom_folders:
+                    folder_frame = tk.Frame(self.folders_container, bg="white")
+                    folder_frame.pack(fill="x")
+                    
+                    folder_btn = tk.Label(folder_frame, text=f"  {folder}", bg="white", anchor="w", 
+                                        font=("MS Sans Serif", 8), cursor="hand2")
+                    folder_btn.pack(side="left", fill="x", expand=True)
+                    folder_btn.bind("<Button-1>", lambda e, f=folder: self.switch_folder(f))
+                    folder_btn.bind("<Button-3>", lambda e, f=folder: self.show_folder_context_menu(e, f))
+                    
+                    if folder == self.current_folder:
+                        folder_btn.configure(bg="#316ac5", fg="white")
+                    
+                    self.folder_labels[folder] = folder_btn
+            
+            self.update_folder_counts()
+
+        def create_new_folder(self):
+            folder_name = simpledialog.askstring("New Folder", "Enter folder name:", parent=self.rootmailoutlook)
+            
+            if folder_name:
+                folder_name = folder_name.strip()
+                
+                if not folder_name:
+                    messagebox.showwarning("Invalid Name", "Folder name cannot be empty.")
+                    return
+                
+                default_folders = ["Inbox", "Sent Items", "Favorites", "Drafts"]
+                if folder_name in default_folders or folder_name in self.custom_folders:
+                    messagebox.showwarning("Duplicate Folder", "A folder with this name already exists.")
+                    return
+                
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("INSERT INTO custom_folders (folder_name) VALUES (?)", (folder_name,))
+                    conn.commit()
+                    self.custom_folders.append(folder_name)
+                    self.refresh_folder_list()
+                    messagebox.showinfo("Folder Created", f"Folder '{folder_name}' created successfully!")
+                except sqlite3.IntegrityError:
+                    messagebox.showwarning("Duplicate Folder", "A folder with this name already exists.")
+                finally:
+                    conn.close()
+
+        def show_folder_context_menu(self, event, folder_name):
+            menu = tk.Menu(self.rootmailoutlook, tearoff=0, bg="#c0c0c0")
+            menu.add_command(label="Delete Folder", command=lambda: self.delete_custom_folder(folder_name))
+            menu.post(event.x_root, event.y_root)
+
+        def delete_custom_folder(self, folder_name):
+            if messagebox.askyesno("Delete Folder", f"Are you sure you want to delete folder '{folder_name}'?\n\nAll emails in this folder will be moved to Inbox."):
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute("UPDATE emails SET folder='Inbox' WHERE folder=?", (folder_name,))
+                cursor.execute("DELETE FROM custom_folders WHERE folder_name=?", (folder_name,))
+                
+                conn.commit()
+                conn.close()
+                
+                self.custom_folders.remove(folder_name)
+                self.refresh_folder_list()
+                
+                if self.current_folder == folder_name:
+                    self.switch_folder("Inbox")
+                else:
+                    self.load_emails_from_db(self.current_folder)
+                
+                messagebox.showinfo("Folder Deleted", f"Folder '{folder_name}' deleted successfully!")
+
+        def move_email_to_folder(self, target_folder):
+            selection = self.email_listbox.curselection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Please select an email to move.")
+                return
+            
+            index = selection[0]
+            if index < len(self.emails):
+                email = self.emails[index]
+                email_id = email.get('id')
+                
+                if email_id:
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE emails SET folder=? WHERE id=?", (target_folder, email_id))
+                    conn.commit()
+                    conn.close()
+                    
+                    self.load_emails_from_db(self.current_folder)
+                    messagebox.showinfo("Email Moved", f"Email moved to '{target_folder}' successfully!")
+            
         def setup_ui(self):
             menubar = tk.Menu(self.rootmailoutlook, bg="#c0c0c0", relief="raised", bd=1)
             self.rootmailoutlook.config(menu=menubar)
@@ -103,6 +239,7 @@ def OUTLOOK():
             file_menu = tk.Menu(menubar, tearoff=0, bg="#c0c0c0")
             menubar.add_cascade(label="File", menu=file_menu)
             file_menu.add_command(label="New Message", command=self.new_message)
+            file_menu.add_command(label="New Folder", command=self.create_new_folder)
             file_menu.add_separator()
             file_menu.add_command(label="Exit", command=self.rootmailoutlook.destroy)
             
@@ -131,6 +268,7 @@ def OUTLOOK():
             
             tk.Button(toolbar, text="Send/Recv", command=self.send_receive, **btn_style).pack(side="left", padx=2)
             tk.Button(toolbar, text="New Msg", command=self.new_message, **btn_style).pack(side="left", padx=2)
+            tk.Button(toolbar, text="New Fld", command=self.create_new_folder, **btn_style).pack(side="left", padx=2)
             tk.Button(toolbar, text="Reply", command=self.reply_message, **btn_style).pack(side="left", padx=2)
             tk.Button(toolbar, text="Forward", command=self.forward_message, **btn_style).pack(side="left", padx=2)
             tk.Button(toolbar, text="Delete", command=self.delete_message, **btn_style).pack(side="left", padx=2)
@@ -145,19 +283,10 @@ def OUTLOOK():
             
             tk.Label(left_panel, text="Folders", bg="#c0c0c0", font=("MS Sans Serif", 8, "bold")).pack(anchor="w", padx=5, pady=2)
             
-            folders_frame = tk.Frame(left_panel, bg="white", relief="sunken", bd=1)
-            folders_frame.pack(fill="both", expand=True, padx=5, pady=(0, 5))
-            
-            folders = ["Inbox", "Sent Items", "Favorites", "Drafts"]
-            
-            for folder in folders:
-                folder_btn = tk.Label(folders_frame, text=f"  {folder}", bg="white", anchor="w", 
-                                    font=("MS Sans Serif", 8), cursor="hand2")
-                folder_btn.pack(fill="x")
-                folder_btn.bind("<Button-1>", lambda e, f=folder: self.switch_folder(f))
-                if folder == "Inbox":
-                    folder_btn.configure(bg="#316ac5", fg="white")
-                self.folder_labels[folder] = folder_btn
+            self.folders_container = tk.Frame(left_panel, bg="white", relief="sunken", bd=1)
+            self.folders_container.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+            self.refresh_folder_list()
             
             middle_panel = tk.Frame(main_frame, bg="#c0c0c0", relief="sunken", bd=2)
             middle_panel.pack(side="left", fill="both", expand=True, padx=(2, 2))
@@ -253,6 +382,14 @@ def OUTLOOK():
                 self.context_menu.add_command(label="Reply", command=self.reply_message)
                 self.context_menu.add_command(label="Forward", command=self.forward_message)
                 self.context_menu.add_separator()
+
+                move_menu = tk.Menu(self.context_menu, tearoff=0, bg="#c0c0c0")
+                self.context_menu.add_cascade(label="Move to Folder", menu=move_menu)
+
+                all_folders = ["Inbox", "Sent Items", "Favorites", "Drafts"] + self.custom_folders
+                for folder in all_folders:
+                    if folder != self.current_folder:
+                        move_menu.add_command(label=folder, command=lambda f=folder: self.move_email_to_folder(f))
                 self.context_menu.add_command(label="Mark as Favorite", command=self.toggle_favorite)
                 self.context_menu.add_separator()
                 self.context_menu.add_command(label="Delete", command=self.delete_message)
@@ -306,19 +443,40 @@ def OUTLOOK():
             cursor.execute("SELECT COUNT(*) FROM emails WHERE is_favorite=1")
             fav_count = cursor.fetchone()[0]
             
+            folder_counts = {}
+            for folder in self.custom_folders:
+                cursor.execute("SELECT COUNT(*) FROM emails WHERE folder=?", (folder,))
+                folder_counts[folder] = cursor.fetchone()[0]
+    
             conn.close()
             
             # Actualizează textul fiecărui folder
             if self.show_folder_counts:
-                self.folder_labels["Inbox"].config(text=f"  Inbox ({inbox_count})")
-                self.folder_labels["Sent Items"].config(text=f"  Sent Items ({sent_count})")
-                self.folder_labels["Drafts"].config(text=f"  Drafts ({drafts_count})")
-                self.folder_labels["Favorites"].config(text=f"  Favorites ({fav_count})")
+                if "Inbox" in self.folder_labels:
+                    self.folder_labels["Inbox"].config(text=f"  Inbox ({inbox_count})")
+                if "Sent Items" in self.folder_labels:
+                    self.folder_labels["Sent Items"].config(text=f"  Sent Items ({sent_count})")
+                if "Drafts" in self.folder_labels:
+                    self.folder_labels["Drafts"].config(text=f"  Drafts ({drafts_count})")
+                if "Favorites" in self.folder_labels:
+                    self.folder_labels["Favorites"].config(text=f"  Favorites ({fav_count})")
+                
+                for folder in self.custom_folders:
+                    if folder in self.folder_labels:
+                        self.folder_labels[folder].config(text=f"  {folder} ({folder_counts[folder]})")
             else:
-                self.folder_labels["Inbox"].config(text="  Inbox")
-                self.folder_labels["Sent Items"].config(text="  Sent Items")
-                self.folder_labels["Drafts"].config(text="  Drafts")
-                self.folder_labels["Favorites"].config(text="  Favorites")
+                if "Inbox" in self.folder_labels:
+                    self.folder_labels["Inbox"].config(text="  Inbox")
+                if "Sent Items" in self.folder_labels:
+                    self.folder_labels["Sent Items"].config(text="  Sent Items")
+                if "Drafts" in self.folder_labels:
+                    self.folder_labels["Drafts"].config(text="  Drafts")
+                if "Favorites" in self.folder_labels:
+                    self.folder_labels["Favorites"].config(text="  Favorites")
+                
+                for folder in self.custom_folders:
+                    if folder in self.folder_labels:
+                        self.folder_labels[folder].config(text=f"  {folder}")
             
         def switch_folder(self, folder):
             self.current_folder = folder
