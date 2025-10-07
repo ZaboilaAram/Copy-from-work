@@ -15,6 +15,7 @@ def OUTLOOK():
             self.db_path = os.path.join("Config", "emails.db")
             self.current_folder = "Inbox"
             self.folder_labels = {}
+            self.show_folder_counts = True
             
             reply_to = {
                 "from": "suport@muap.ro",
@@ -65,6 +66,9 @@ def OUTLOOK():
             self.load_emails_from_db('Inbox')
             
         def init_database(self):
+            # Creează directorul Config dacă nu există
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('''
@@ -114,7 +118,7 @@ def OUTLOOK():
             
             tools_menu = tk.Menu(menubar, tearoff=0, bg="#c0c0c0")
             menubar.add_cascade(label="Tools", menu=tools_menu)
-            tools_menu.add_command(label="Options...", command=lambda: messagebox.showinfo("Options", "Options dialog not implemented"))
+            tools_menu.add_command(label="Options...", command=self.show_options)
             
             help_menu = tk.Menu(menubar, tearoff=0, bg="#c0c0c0")
             menubar.add_cascade(label="Help", menu=help_menu)
@@ -144,7 +148,7 @@ def OUTLOOK():
             folders_frame = tk.Frame(left_panel, bg="white", relief="sunken", bd=1)
             folders_frame.pack(fill="both", expand=True, padx=5, pady=(0, 5))
             
-            folders = ["Inbox", "Sent Items", "Favorites"]
+            folders = ["Inbox", "Sent Items", "Favorites", "Drafts"]
             
             for folder in folders:
                 folder_btn = tk.Label(folders_frame, text=f"  {folder}", bg="white", anchor="w", 
@@ -182,17 +186,10 @@ def OUTLOOK():
             self.email_listbox.pack(side="left", fill="both", expand=True)
             scrollbar.config(command=self.email_listbox.yview)
             
-            self.email_listbox.bind("<Double-Button-1>", self.on_email_select)
+            self.email_listbox.bind("<Double-Button-1>", self.on_email_double_click)
             self.email_listbox.bind("<<ListboxSelect>>", self.on_email_select)
             self.email_listbox.bind("<Button-3>", self.show_context_menu)
             
-            self.context_menu = tk.Menu(self.rootmailoutlook, tearoff=0, bg="#c0c0c0")
-            self.context_menu.add_command(label="Reply", command=self.reply_message)
-            self.context_menu.add_command(label="Forward", command=self.forward_message)
-            self.context_menu.add_separator()
-            self.context_menu.add_command(label="Mark as Favorite", command=self.toggle_favorite)
-            self.context_menu.add_separator()
-            self.context_menu.add_command(label="Delete", command=self.delete_message)
             
             right_panel = tk.Frame(main_frame, bg="#c0c0c0", relief="sunken", bd=2)
             right_panel.pack(side="right", fill="both", expand=True, padx=(2, 0))
@@ -244,6 +241,22 @@ def OUTLOOK():
                 self.email_listbox.selection_set(self.email_listbox.nearest(event.y))
                 self.email_listbox.activate(self.email_listbox.nearest(event.y))
                 self.on_email_select()
+                
+                # Recreează meniul contextual în funcție de folder
+                self.context_menu = tk.Menu(self.rootmailoutlook, tearoff=0, bg="#c0c0c0")
+                
+                # Afișează "Open/Edit" doar în Drafts
+                if self.current_folder == "Drafts":
+                    self.context_menu.add_command(label="Open/Edit", command=self.open_or_edit_email)
+                    self.context_menu.add_separator()
+                
+                self.context_menu.add_command(label="Reply", command=self.reply_message)
+                self.context_menu.add_command(label="Forward", command=self.forward_message)
+                self.context_menu.add_separator()
+                self.context_menu.add_command(label="Mark as Favorite", command=self.toggle_favorite)
+                self.context_menu.add_separator()
+                self.context_menu.add_command(label="Delete", command=self.delete_message)
+                
                 self.context_menu.post(event.x_root, event.y_root)
             finally:
                 self.context_menu.grab_release()
@@ -253,9 +266,9 @@ def OUTLOOK():
             cursor = conn.cursor()
             
             if folder == "Favorites":
-                cursor.execute("SELECT * FROM emails WHERE is_favorite=1 ORDER BY date DESC")
+                cursor.execute("SELECT * FROM emails WHERE is_favorite=1 ORDER BY id DESC")
             else:
-                cursor.execute("SELECT * FROM emails WHERE folder=? ORDER BY date DESC", (folder,))
+                cursor.execute("SELECT * FROM emails WHERE folder=? ORDER BY id DESC", (folder,))
             
             rows = cursor.fetchall()
             conn.close()
@@ -274,6 +287,38 @@ def OUTLOOK():
                 })
             
             self.refresh_emails()
+            self.update_folder_counts()
+            
+        def update_folder_counts(self):
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Contorizează emailurile pentru fiecare folder
+            cursor.execute("SELECT COUNT(*) FROM emails WHERE folder='Inbox'")
+            inbox_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM emails WHERE folder='Sent Items'")
+            sent_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM emails WHERE folder='Drafts'")
+            drafts_count = cursor.fetchone()[0]
+
+            cursor.execute("SELECT COUNT(*) FROM emails WHERE is_favorite=1")
+            fav_count = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            # Actualizează textul fiecărui folder
+            if self.show_folder_counts:
+                self.folder_labels["Inbox"].config(text=f"  Inbox ({inbox_count})")
+                self.folder_labels["Sent Items"].config(text=f"  Sent Items ({sent_count})")
+                self.folder_labels["Drafts"].config(text=f"  Drafts ({drafts_count})")
+                self.folder_labels["Favorites"].config(text=f"  Favorites ({fav_count})")
+            else:
+                self.folder_labels["Inbox"].config(text="  Inbox")
+                self.folder_labels["Sent Items"].config(text="  Sent Items")
+                self.folder_labels["Drafts"].config(text="  Drafts")
+                self.folder_labels["Favorites"].config(text="  Favorites")
             
         def switch_folder(self, folder):
             self.current_folder = folder
@@ -286,6 +331,7 @@ def OUTLOOK():
                     label.configure(bg="white", fg="black")
             
             self.load_emails_from_db(folder)
+            self.update_folder_counts()
             
         def toggle_favorite(self):
             selection = self.email_listbox.curselection()
@@ -331,6 +377,18 @@ def OUTLOOK():
             selection = self.email_listbox.curselection()
             if selection:
                 self.show_email_preview(selection[0])
+                
+        def on_email_double_click(self, event=None):
+            if self.current_folder == "Drafts":
+                self.open_draft()
+            else:
+                self.on_email_select(event)
+
+        def open_or_edit_email(self):
+            if self.current_folder == "Drafts":
+                self.open_draft()
+            else:
+                messagebox.showinfo("Open Email", "Email opened in preview pane.")
         
         def show_email_preview(self, index):
             if 0 <= index < len(self.emails):
@@ -374,7 +432,7 @@ def OUTLOOK():
             
             btn_style = {"bg": "#c0c0c0", "relief": "raised", "bd": 2, "font": ("MS Sans Serif", 8)}
             tk.Button(toolbar, text="Send", command=lambda: self.send_message(compose_window), **btn_style).pack(side="left", padx=2)
-            tk.Button(toolbar, text="Save", command=lambda: messagebox.showinfo("Save", "Message saved to Drafts"), **btn_style).pack(side="left", padx=2)
+            tk.Button(toolbar, text="Save Draft", command=lambda: self.save_draft(compose_window), **btn_style).pack(side="left", padx=2)
             
             headers_frame = tk.Frame(compose_window, bg="#c0c0c0")
             headers_frame.pack(fill="x", padx=5, pady=5)
@@ -410,6 +468,7 @@ def OUTLOOK():
             compose_window.to_entry = to_entry
             compose_window.subject_entry = subject_entry
             compose_window.body_text = body_text
+            compose_window.draft_id = None
         
         def send_message(self, compose_window):
             to = compose_window.to_entry.get()
@@ -420,12 +479,25 @@ def OUTLOOK():
                 messagebox.showwarning("Incomplete", "Please fill in To and Subject fields.")
                 return
             
+            import getpass
+            current_user = getpass.getuser()
+            
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
+            
+            # Salvează în Sent Items
             cursor.execute('''
                 INSERT INTO emails (from_addr, to_addr, subject, date, body, folder)
                 VALUES (?, ?, ?, ?, ?, 'Sent Items')
             ''', ("Me", to, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
+            
+            # Dacă destinatarul este "Me", "me" sau numele utilizatorului, adaugă și în Inbox
+            if to.lower() == "me" or to.lower() == current_user.lower():
+                cursor.execute('''
+                    INSERT INTO emails (from_addr, to_addr, subject, date, body, folder)
+                    VALUES (?, ?, ?, ?, ?, 'Inbox')
+                ''', ("Me", "Me", subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
+            
             conn.commit()
             conn.close()
             
@@ -433,6 +505,108 @@ def OUTLOOK():
             compose_window.destroy()
             
             self.load_emails_from_db(self.current_folder)
+            
+        def save_draft(self, compose_window):
+            to = compose_window.to_entry.get()
+            subject = compose_window.subject_entry.get()
+            body = compose_window.body_text.get(1.0, tk.END)
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            draft_id = getattr(compose_window, 'draft_id', None)
+            
+            if draft_id:
+                # Actualizează draft-ul existent
+                cursor.execute('''
+                    UPDATE emails 
+                    SET to_addr=?, subject=?, body=?, date=?
+                    WHERE id=?
+                ''', (to, subject, body, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), draft_id))
+                msg = "Draft updated successfully!"
+            else:
+                # Creează un draft nou
+                cursor.execute('''
+                    INSERT INTO emails (from_addr, to_addr, subject, date, body, folder)
+                    VALUES (?, ?, ?, ?, ?, 'Drafts')
+                ''', ("Me", to, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
+                msg = "Draft saved successfully!"
+            
+            conn.commit()
+            conn.close()
+            
+            messagebox.showinfo("Draft Saved", msg)
+            compose_window.destroy()
+            
+            self.load_emails_from_db(self.current_folder)
+            
+        def open_draft(self):
+            if not self.current_email:
+                messagebox.showwarning("No Selection", "Please select a draft to edit.")
+                return
+            
+            if self.current_folder != "Drafts":
+                messagebox.showwarning("Not a Draft", "You can only edit drafts from the Drafts folder.")
+                return
+            
+            draft = self.current_email
+            
+            compose_window = tk.Toplevel(self.rootmailoutlook)
+            compose_window.title("Edit Draft")
+            compose_window.geometry("600x400")
+            compose_window.configure(bg="#c0c0c0")
+            compose_window.resizable(True, True)
+            
+            toolbar = tk.Frame(compose_window, bg="#c0c0c0", relief="raised", bd=1)
+            toolbar.pack(fill="x", padx=2, pady=2)
+            
+            btn_style = {"bg": "#c0c0c0", "relief": "raised", "bd": 2, "font": ("MS Sans Serif", 8)}
+            tk.Button(toolbar, text="Send", command=lambda: self.send_draft(compose_window), **btn_style).pack(side="left", padx=2)
+            tk.Button(toolbar, text="Save Draft", command=lambda: self.save_draft(compose_window), **btn_style).pack(side="left", padx=2)
+            
+            headers_frame = tk.Frame(compose_window, bg="#c0c0c0")
+            headers_frame.pack(fill="x", padx=5, pady=5)
+            
+            tk.Label(headers_frame, text="To:", bg="#c0c0c0", font=("MS Sans Serif", 8)).grid(row=0, column=0, sticky="w", padx=(0, 5))
+            to_entry = tk.Entry(headers_frame, font=("MS Sans Serif", 9))
+            to_entry.grid(row=0, column=1, sticky="ew", padx=(0, 5))
+            to_entry.insert(0, draft['to'])
+            
+            tk.Label(headers_frame, text="Subject:", bg="#c0c0c0", font=("MS Sans Serif", 8)).grid(row=1, column=0, sticky="w", padx=(0, 5), pady=2)
+            subject_entry = tk.Entry(headers_frame, font=("MS Sans Serif", 9))
+            subject_entry.grid(row=1, column=1, sticky="ew", pady=2)
+            subject_entry.insert(0, draft['subject'])
+            
+            headers_frame.columnconfigure(1, weight=1)
+            
+            body_frame = tk.Frame(compose_window, bg="#c0c0c0")
+            body_frame.pack(fill="both", expand=True, padx=5, pady=5)
+            
+            body_scrollbar = tk.Scrollbar(body_frame, bg="#c0c0c0")
+            body_scrollbar.pack(side="right", fill="y")
+            
+            body_text = tk.Text(body_frame, font=("MS Sans Serif", 9), yscrollcommand=body_scrollbar.set)
+            body_text.pack(side="left", fill="both", expand=True)
+            body_scrollbar.config(command=body_text.yview)
+            body_text.insert(1.0, draft['body'])
+            
+            compose_window.to_entry = to_entry
+            compose_window.subject_entry = subject_entry
+            compose_window.body_text = body_text
+            compose_window.draft_id = draft['id']
+
+        def send_draft(self, compose_window):
+            # Trimite draft-ul și îl șterge din Drafts
+            draft_id = getattr(compose_window, 'draft_id', None)
+            
+            if draft_id:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM emails WHERE id=?", (draft_id,))
+                conn.commit()
+                conn.close()
+            
+            self.send_message(compose_window)
         
         def delete_message(self):
             selection = self.email_listbox.curselection()
@@ -465,6 +639,50 @@ def OUTLOOK():
     All rights reserved."""
             
             messagebox.showinfo("About Mail Express", about_text)
+            
+        def show_options(self):
+            options_window = tk.Toplevel(self.rootmailoutlook)
+            options_window.title("Options")
+            options_window.geometry("400x200")
+            options_window.configure(bg="#c0c0c0")
+            options_window.resizable(False, False)
+            
+            # Frame principal
+            main_frame = tk.Frame(options_window, bg="#c0c0c0")
+            main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+            
+            # Grupare opțiuni
+            tk.Label(main_frame, text="Display Options", bg="#c0c0c0", 
+                     font=("MS Sans Serif", 8, "bold")).pack(anchor="w", pady=(0, 10))
+            
+            # Checkbox pentru folder counts
+            show_counts_var = tk.BooleanVar(value=self.show_folder_counts)
+            
+            check_frame = tk.Frame(main_frame, bg="#c0c0c0")
+            check_frame.pack(anchor="w", pady=5)
+            
+            tk.Checkbutton(check_frame, text="Show message count in folders", 
+                           variable=show_counts_var, bg="#c0c0c0",
+                           font=("MS Sans Serif", 8)).pack(side="left")
+            
+            # Frame pentru butoane
+            button_frame = tk.Frame(options_window, bg="#c0c0c0")
+            button_frame.pack(side="bottom", pady=10)
+            
+            btn_style = {"bg": "#c0c0c0", "relief": "raised", "bd": 2, 
+                         "font": ("MS Sans Serif", 8), "width": 10}
+            
+            def save_options():
+                self.show_folder_counts = show_counts_var.get()
+                self.update_folder_counts()
+                messagebox.showinfo("Options", "Settings saved successfully!")
+                options_window.destroy()
+            
+            def cancel_options():
+                options_window.destroy()
+            
+            tk.Button(button_frame, text="OK", command=save_options, **btn_style).pack(side="left", padx=5)
+            tk.Button(button_frame, text="Cancel", command=cancel_options, **btn_style).pack(side="left", padx=5)
 
     def mainoutlook():
         rootmailoutlook = tk.Tk()
