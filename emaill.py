@@ -1,3 +1,22 @@
+#
+import os
+import sqlite3
+from tkinter import messagebox
+
+try:
+    conn = sqlite3.connect(os.path.join("Config", "extensions.db"))
+    cursor = conn.cursor()
+    cursor.execute("SELECT enabled FROM extensions WHERE extension_id='0x00087'")
+    result = cursor.fetchone()
+    conn.close()
+    
+    if not result or not result[0]:
+        messagebox.showerror("Extension Required", "0x00087 extension is not enabled.")
+        exit()
+except:
+    messagebox.showerror("Error", "Could not verify extension.")
+    exit()
+#
 def OUTLOOK():
     from datetime import datetime
     import os
