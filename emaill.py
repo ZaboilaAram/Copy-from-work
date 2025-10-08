@@ -38,6 +38,13 @@ def OUTLOOK():
                 {
                     "from": "suport@muap.ro",
                     "to": "Me",
+                    "subject": "Tips and Tricks",
+                    "date": datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), 
+                    "body": "Quick steps after you closing this window:\n\n• Click Go to user handbook button to close this window\n• In that section, you will find a user manual for Multiapp 95 Professional.\n• Read each menu and follow the documentation at every step.\n\nIt is very important to use this software in the configured folder and not to delete anything!\n\nMuap Support Team"
+                },
+                {
+                    "from": "suport@muap.ro",
+                    "to": "Me",
                     "subject": "Re: Tips and Tricks",
                     "date": datetime.now().strftime("%a %m/%d/%Y %I:%M %p"),
                     "body": (
@@ -54,10 +61,10 @@ def OUTLOOK():
                 {
                     "from": "suport@muap.ro",
                     "to": "Me",
-                    "subject": "Tips and Tricks",
+                    "subject": "Product key",
                     "date": datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), 
-                    "body": "Quick steps after you closing this window:\n\n• Click Go to user handbook button to close this window\n• In that section, you will find a user manual for Multiapp 95 Professional.\n• Read each menu and follow the documentation at every step.\n\nIt is very important to use this software in the configured folder and not to delete anything!\n\nMuap Support Team"
-                }
+                    "body": "Here is the serial number for your product:\n\nR46BX-JHR2J-PG7ER-24QFG-MWKVR\n\n• It is recommended that this information remain confidential. Thank you for your understanding.\n\nMuap Support Team"
+                },
             ]
             
             self.emails = []
