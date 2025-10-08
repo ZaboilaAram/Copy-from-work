@@ -17,6 +17,7 @@ def OUTLOOK():
             self.folder_labels = {}
             self.show_folder_counts = True
             self.custom_folders = []
+            self.user_name = "Me"
             
             reply_to = {
                 "from": "suport@muap.ro",
@@ -91,8 +92,22 @@ def OUTLOOK():
                     folder_name TEXT UNIQUE NOT NULL
                 )
             ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    user_name TEXT DEFAULT 'Me'
+                )
+            ''')
             conn.commit()
             
+            cursor.execute("SELECT user_name FROM settings WHERE id=1")
+            result = cursor.fetchone()
+            if result:
+                self.user_name = result[0]
+            else:
+                cursor.execute("INSERT INTO settings (id, user_name) VALUES (1, 'Me')")
+                conn.commit()
+                
             cursor.execute("SELECT COUNT(*) FROM emails WHERE folder='Inbox'")
             if cursor.fetchone()[0] == 0:
                 for email in self.initial_emails:
@@ -647,14 +662,13 @@ def OUTLOOK():
             cursor.execute('''
                 INSERT INTO emails (from_addr, to_addr, subject, date, body, folder)
                 VALUES (?, ?, ?, ?, ?, 'Sent Items')
-            ''', ("Me", to, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
+            ''', (self.user_name, to, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
             
-            # Dacă destinatarul este "Me", "me" sau numele utilizatorului, adaugă și în Inbox
-            if to.lower() == "me" or to.lower() == current_user.lower():
+            if to.lower() == "me" or to.lower() == current_user.lower() or to.lower() == self.user_name.lower():
                 cursor.execute('''
                     INSERT INTO emails (from_addr, to_addr, subject, date, body, folder)
                     VALUES (?, ?, ?, ?, ?, 'Inbox')
-                ''', ("Me", "Me", subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
+                ''', (self.user_name, self.user_name, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
             
             conn.commit()
             conn.close()
@@ -687,7 +701,7 @@ def OUTLOOK():
                 cursor.execute('''
                     INSERT INTO emails (from_addr, to_addr, subject, date, body, folder)
                     VALUES (?, ?, ?, ?, ?, 'Drafts')
-                ''', ("Me", to, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
+                ''', (self.user_name, to, subject, datetime.now().strftime("%a %m/%d/%Y %I:%M %p"), body))
                 msg = "Draft saved successfully!"
             
             conn.commit()
@@ -822,6 +836,20 @@ def OUTLOOK():
             tk.Checkbutton(check_frame, text="Show message count in folders", 
                            variable=show_counts_var, bg="#c0c0c0",
                            font=("MS Sans Serif", 8)).pack(side="left")
+                           
+            # User Settings
+            tk.Label(main_frame, text="User Settings", bg="#c0c0c0", 
+                     font=("MS Sans Serif", 8, "bold")).pack(anchor="w", pady=(15, 10))
+            
+            name_frame = tk.Frame(main_frame, bg="#c0c0c0")
+            name_frame.pack(anchor="w", pady=5)
+            
+            tk.Label(name_frame, text="Display Name:", bg="#c0c0c0",
+                     font=("MS Sans Serif", 8)).pack(side="left", padx=(0, 5))
+            
+            user_name_entry = tk.Entry(name_frame, font=("MS Sans Serif", 9), width=20)
+            user_name_entry.pack(side="left")
+            user_name_entry.insert(0, self.user_name)
             
             # Frame pentru butoane
             button_frame = tk.Frame(options_window, bg="#c0c0c0")
@@ -832,6 +860,21 @@ def OUTLOOK():
             
             def save_options():
                 self.show_folder_counts = show_counts_var.get()
+                new_name = user_name_entry.get().strip()
+                
+                # Dacă e gol, setează "Me"
+                if not new_name:
+                    new_name = "Me"
+                
+                self.user_name = new_name
+                
+                # Salvează în baza de date
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("UPDATE settings SET user_name=? WHERE id=1", (new_name,))
+                conn.commit()
+                conn.close()
+                
                 self.update_folder_counts()
                 messagebox.showinfo("Options", "Settings saved successfully!")
                 options_window.destroy()
