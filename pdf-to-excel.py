@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import pandas as pd
-import PyPDF2
+import pdfplumber
 import re
 from pathlib import Path
 import threading
@@ -11,7 +11,7 @@ class PDFtoExcelConverter:
     def __init__(self, rootexceltopdf):
         self.rootexceltopdf = rootexceltopdf
         self.rootexceltopdf.title("PDF to Excel/CSV Converter")
-        self.rootexceltopdf.geometry("600x550")
+        self.rootexceltopdf.geometry("600x650")
         self.rootexceltopdf.resizable(False, False)
         
         # Windows 95 color scheme
@@ -20,7 +20,6 @@ class PDFtoExcelConverter:
         self.text_bg = "#ffffff"
         self.highlight = "#000080"
         
-        # Configure rootexceltopdf background
         self.rootexceltopdf.configure(bg=self.bg_color)
         
         # Variables
@@ -31,11 +30,11 @@ class PDFtoExcelConverter:
         self.setup_ui()
         
     def setup_ui(self):
-        # Main frame with Windows 95 style
+        # Main frame
         main_frame = tk.Frame(self.rootexceltopdf, bg=self.bg_color, padx=20, pady=20)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Title with Windows 95 style
+        # Title
         title_frame = tk.Frame(main_frame, bg=self.highlight, relief=tk.RAISED, bd=2)
         title_frame.pack(fill=tk.X, pady=(0, 15))
         
@@ -44,7 +43,7 @@ class PDFtoExcelConverter:
                               bg=self.highlight, fg="white", pady=8)
         title_label.pack()
         
-        # Select PDF
+        # PDF File Selection
         pdf_frame = tk.Frame(main_frame, bg=self.bg_color)
         pdf_frame.pack(fill=tk.X, pady=5)
         
@@ -61,7 +60,7 @@ class PDFtoExcelConverter:
                                 font=("MS Sans Serif", 8), padx=10)
         self.pdf_btn.pack(side=tk.LEFT)
         
-        # Select output destination
+        # Output File Selection
         output_frame = tk.Frame(main_frame, bg=self.bg_color)
         output_frame.pack(fill=tk.X, pady=5)
         
@@ -78,13 +77,13 @@ class PDFtoExcelConverter:
                                    font=("MS Sans Serif", 8), padx=10)
         self.output_btn.pack(side=tk.LEFT)
         
-        # Options frame with Windows 95 group box style
+        # Options Frame
         options_frame = tk.LabelFrame(main_frame, text="Options", bg=self.bg_color,
                                      relief=tk.GROOVE, bd=2, font=("MS Sans Serif", 8, "bold"),
                                      padx=10, pady=10)
         options_frame.pack(fill=tk.BOTH, expand=True, pady=15)
         
-        # Output format
+        # Output Format
         format_frame = tk.Frame(options_frame, bg=self.bg_color)
         format_frame.pack(anchor=tk.W, pady=5)
         
@@ -96,47 +95,49 @@ class PDFtoExcelConverter:
         format_radio_frame = tk.Frame(options_frame, bg=self.bg_color)
         format_radio_frame.pack(anchor=tk.W, padx=20)
         
-        self.radio_xlsx = tk.Radiobutton(format_radio_frame, text="Excel (.xlsx)", 
-                                        variable=self.output_format, value="xlsx",
-                                        command=self.update_output_extension,
-                                        bg=self.bg_color, font=("MS Sans Serif", 8),
-                                        activebackground=self.bg_color)
-        self.radio_xlsx.pack(anchor=tk.W)
+        tk.Radiobutton(format_radio_frame, text="Excel (.xlsx)", 
+                      variable=self.output_format, value="xlsx",
+                      command=self.update_output_extension,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W)
         
-        self.radio_csv = tk.Radiobutton(format_radio_frame, text="CSV (.csv)", 
-                                       variable=self.output_format, value="csv",
-                                       command=self.update_output_extension,
-                                       bg=self.bg_color, font=("MS Sans Serif", 8),
-                                       activebackground=self.bg_color)
-        self.radio_csv.pack(anchor=tk.W)
+        tk.Radiobutton(format_radio_frame, text="CSV (.csv)", 
+                      variable=self.output_format, value="csv",
+                      command=self.update_output_extension,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W)
         
-        # Conversion mode
+        # Conversion Mode
         mode_frame = tk.Frame(options_frame, bg=self.bg_color)
         mode_frame.pack(anchor=tk.W, pady=5)
         
         tk.Label(mode_frame, text="Conversion mode:", bg=self.bg_color,
                 font=("MS Sans Serif", 8)).pack(side=tk.LEFT)
         
-        self.mode = tk.StringVar(value="text")
+        self.mode = tk.StringVar(value="auto")
         
         radio_frame = tk.Frame(options_frame, bg=self.bg_color)
         radio_frame.pack(anchor=tk.W, padx=20)
         
-        self.radio_text = tk.Radiobutton(radio_frame, text="Structured text", 
-                                        variable=self.mode, value="text", 
-                                        command=self.toggle_delimiter,
-                                        bg=self.bg_color, font=("MS Sans Serif", 8),
-                                        activebackground=self.bg_color)
-        self.radio_text.pack(anchor=tk.W)
+        tk.Radiobutton(radio_frame, text="Auto-detect (tables first)", 
+                      variable=self.mode, value="auto",
+                      command=self.toggle_delimiter,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W)
         
-        self.radio_simple = tk.Radiobutton(radio_frame, text="Simple text (line by line)", 
-                                          variable=self.mode, value="simple",
-                                          command=self.toggle_delimiter,
-                                          bg=self.bg_color, font=("MS Sans Serif", 8),
-                                          activebackground=self.bg_color)
-        self.radio_simple.pack(anchor=tk.W)
+        tk.Radiobutton(radio_frame, text="Structured text", 
+                      variable=self.mode, value="text", 
+                      command=self.toggle_delimiter,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W)
         
-        # Delimiter
+        tk.Radiobutton(radio_frame, text="Simple text (line by line)", 
+                      variable=self.mode, value="simple",
+                      command=self.toggle_delimiter,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W)
+        
+        # Delimiter Options
         delim_frame = tk.Frame(options_frame, bg=self.bg_color)
         delim_frame.pack(anchor=tk.W, pady=5)
         
@@ -144,28 +145,48 @@ class PDFtoExcelConverter:
                                        bg=self.bg_color, font=("MS Sans Serif", 8))
         self.delimiter_label.pack(side=tk.LEFT)
         
-        self.delimiter = ttk.Combobox(delim_frame, values=["Auto-detect", "Tab", "Space", "Comma (,)", "Semicolon (;)", "Pipe (|)", "Colon (:)"], 
-                                     width=15, font=("MS Sans Serif", 8))
+        self.delimiter = ttk.Combobox(delim_frame, 
+                                     values=["Auto-detect", "Tab", "Space", "Comma (,)", 
+                                            "Semicolon (;)", "Pipe (|)", "Colon (:)"], 
+                                     width=15, font=("MS Sans Serif", 8), state='disabled')
         self.delimiter.set("Auto-detect")
         self.delimiter.pack(side=tk.LEFT, padx=5)
         
-        # All pages checkbox
+        # Additional Options
         self.all_pages = tk.BooleanVar(value=True)
-        self.all_pages_check = tk.Checkbutton(options_frame, text="Combine all pages into one sheet", 
-                                             variable=self.all_pages,
-                                             bg=self.bg_color, font=("MS Sans Serif", 8),
-                                             activebackground=self.bg_color)
-        self.all_pages_check.pack(anchor=tk.W, pady=5)
+        tk.Checkbutton(options_frame, text="Combine all pages into one sheet", 
+                      variable=self.all_pages,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W, pady=5)
         
-        # Clean data checkbox
         self.clean_data = tk.BooleanVar(value=True)
-        self.clean_data_check = tk.Checkbutton(options_frame, text="Clean empty rows/columns", 
-                                               variable=self.clean_data,
-                                               bg=self.bg_color, font=("MS Sans Serif", 8),
-                                               activebackground=self.bg_color)
-        self.clean_data_check.pack(anchor=tk.W, pady=2)
+        tk.Checkbutton(options_frame, text="Clean empty rows/columns", 
+                      variable=self.clean_data,
+                      bg=self.bg_color, font=("MS Sans Serif", 8),
+                      activebackground=self.bg_color).pack(anchor=tk.W, pady=2)
+                      
+        # Progress bar (using Canvas for retro look)
+        progress_frame = tk.Frame(main_frame, bg=self.bg_color)
+        progress_frame.pack(fill=tk.X, pady=5)
+
+        self.progress_canvas = tk.Canvas(progress_frame, height=11, bg="#c0c0c0",
+                                        relief=tk.SUNKEN, bd=2)
+        self.progress_canvas.pack(fill=tk.X)
+        self.progress_active = False
+
+        # Convert Button
+        button_frame = tk.Frame(main_frame, bg=self.bg_color)
+        button_frame.pack(pady=10)
         
-        # Convert button - bigger and centered
+        # Status Bar
+        status_frame = tk.Frame(main_frame, relief=tk.SUNKEN, bd=2, bg="white")
+        status_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        tk.Label(status_frame, textvariable=self.status,
+                bg="white", font=("MS Sans Serif", 8),
+                anchor=tk.W, padx=5, pady=2).pack(fill=tk.X)
+                
+        # Convert Button
         button_frame = tk.Frame(main_frame, bg=self.bg_color)
         button_frame.pack(pady=10)
         
@@ -175,24 +196,6 @@ class PDFtoExcelConverter:
                                      padx=30, pady=5)
         self.convert_btn.pack()
         
-        # Progress bar (using Canvas for retro look)
-        progress_frame = tk.Frame(main_frame, bg=self.bg_color)
-        progress_frame.pack(fill=tk.X, pady=5)
-        
-        self.progress_canvas = tk.Canvas(progress_frame, height=11, bg="#c0c0c0",
-                                        relief=tk.SUNKEN, bd=2)
-        self.progress_canvas.pack(fill=tk.X)
-        self.progress_active = False
-        
-        # Status bar
-        status_frame = tk.Frame(main_frame, relief=tk.SUNKEN, bd=2, bg="white")
-        status_frame.pack(fill=tk.X, pady=(10, 0))
-        
-        status_label = tk.Label(status_frame, textvariable=self.status,
-                               bg="white", font=("MS Sans Serif", 8),
-                               anchor=tk.W, padx=5, pady=2)
-        status_label.pack(fill=tk.X)
-    
     def animate_progress(self):
         """Animate progress bar Windows 95 style"""
         if self.progress_active:
@@ -217,8 +220,9 @@ class PDFtoExcelConverter:
             self.progress_pos = (self.progress_pos + 1) % 20
             self.rootexceltopdf.after(100, self.animate_progress)
     
+    
     def update_output_extension(self):
-        """Update output file extension based on format selection"""
+        """Update output file extension based on format"""
         current_path = self.output_path.get()
         if current_path:
             path_obj = Path(current_path)
@@ -227,19 +231,20 @@ class PDFtoExcelConverter:
             self.output_path.set(str(new_path))
     
     def select_pdf(self):
+        """Select PDF file"""
         filename = filedialog.askopenfilename(
             title="Select PDF File",
             filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")]
         )
         if filename:
             self.pdf_path.set(filename)
-            # Auto-suggest output filename based on format
             extension = ".xlsx" if self.output_format.get() == "xlsx" else ".csv"
             output_name = Path(filename).stem + extension
             output_dir = Path(filename).parent
             self.output_path.set(str(output_dir / output_name))
     
     def select_output(self):
+        """Select output file"""
         format_type = self.output_format.get()
         if format_type == "xlsx":
             filetypes = [("Excel files", "*.xlsx"), ("All files", "*.*")]
@@ -257,45 +262,16 @@ class PDFtoExcelConverter:
             self.output_path.set(filename)
     
     def toggle_delimiter(self):
-        """Enable/disable delimiter options based on mode"""
-        if self.mode.get() == "simple":
+        """Enable/disable delimiter based on mode"""
+        if self.mode.get() in ["simple", "auto"]:
             self.delimiter.config(state='disabled')
             self.delimiter_label.config(foreground='gray')
         else:
             self.delimiter.config(state='normal')
             self.delimiter_label.config(foreground='black')
     
-    def disable_all_controls(self):
-        """Disable all controls during conversion"""
-        self.pdf_entry.config(state='disabled')
-        self.pdf_btn.config(state='disabled')
-        self.output_entry.config(state='disabled')
-        self.output_btn.config(state='disabled')
-        self.radio_text.config(state='disabled')
-        self.radio_simple.config(state='disabled')
-        self.radio_xlsx.config(state='disabled')
-        self.radio_csv.config(state='disabled')
-        self.delimiter.config(state='disabled')
-        self.all_pages_check.config(state='disabled')
-        self.clean_data_check.config(state='disabled')
-        self.convert_btn.config(state='disabled')
-    
-    def enable_all_controls(self):
-        """Re-enable all controls after conversion"""
-        self.pdf_entry.config(state='normal')
-        self.pdf_btn.config(state='normal')
-        self.output_entry.config(state='normal')
-        self.output_btn.config(state='normal')
-        self.radio_text.config(state='normal')
-        self.radio_simple.config(state='normal')
-        self.radio_xlsx.config(state='normal')
-        self.radio_csv.config(state='normal')
-        self.all_pages_check.config(state='normal')
-        self.clean_data_check.config(state='normal')
-        self.convert_btn.config(state='normal')
-        self.toggle_delimiter()
-    
     def get_delimiter(self):
+        """Get selected delimiter"""
         delim_map = {
             "Auto-detect": None,
             "Tab": "\t",
@@ -308,8 +284,8 @@ class PDFtoExcelConverter:
         return delim_map.get(self.delimiter.get(), None)
     
     def auto_detect_delimiter(self, text):
-        """Auto-detect the most likely delimiter in the text"""
-        sample_lines = text.split('\n')[:10]  # Check first 10 lines
+        """Auto-detect delimiter in text"""
+        sample_lines = text.split('\n')[:10]
         sample_text = '\n'.join([line for line in sample_lines if line.strip()])
         
         delimiters = ['\t', ',', ';', '|', ':']
@@ -317,101 +293,170 @@ class PDFtoExcelConverter:
         
         for delim in delimiters:
             count = sample_text.count(delim)
-            # Check if delimiter appears consistently across lines
             lines_with_delim = sum(1 for line in sample_lines if delim in line)
-            if lines_with_delim >= len(sample_lines) * 0.5:  # At least 50% of lines
+            if lines_with_delim >= len(sample_lines) * 0.5:
                 delimiter_counts[delim] = count
         
         if delimiter_counts:
             return max(delimiter_counts, key=delimiter_counts.get)
         
-        # Check for multiple spaces (columnar data)
         if re.search(r'\s{2,}', sample_text):
             return " "
         
-        return "\t"  # Default to tab
+        return "\t"
     
-    def extract_text_from_pdf(self, pdf_path):
-        """Extract text from PDF using PyPDF2"""
-        text_by_page = []
+    def extract_data_from_pdf(self, pdf_path):
+        """Extract text and tables from PDF"""
+        pages_data = []
         
         try:
-            with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                num_pages = len(pdf_reader.pages)
-                
-                for page_num in range(num_pages):
-                    page = pdf_reader.pages[page_num]
+            with pdfplumber.open(pdf_path) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    page_data = {
+                        'text': '',
+                        'tables': [],
+                        'page_num': page_num + 1
+                    }
+                    
+                    # Extract tables
+                    tables = page.extract_tables()
+                    if tables:
+                        valid_tables = []
+                        for table in tables:
+                            if table and len(table) > 0:
+                                has_content = any(
+                                    any(cell and str(cell).strip() for cell in row)
+                                    for row in table
+                                )
+                                if has_content:
+                                    valid_tables.append(table)
+                        page_data['tables'] = valid_tables
+                    
+                    # Extract text
                     text = page.extract_text()
                     if text and text.strip():
-                        text_by_page.append(text)
+                        page_data['text'] = text
+                    
+                    pages_data.append(page_data)
+                    
         except Exception as e:
             raise Exception(f"Error reading PDF: {str(e)}")
         
-        return text_by_page
+        return pages_data
     
     def clean_cell_value(self, value):
-        """Clean and normalize cell values"""
+        """Clean cell value"""
         if value is None:
             return ""
         
         value = str(value).strip()
-        
-        # Remove multiple spaces
         value = re.sub(r'\s+', ' ', value)
-        
-        # Remove common PDF artifacts
         value = value.replace('\x00', '').replace('\ufffd', '')
         
         return value
     
+    def table_to_dataframe(self, table):
+        """Convert table to DataFrame"""
+        if not table or len(table) == 0:
+            return None
+        
+        # Clean table data
+        cleaned_table = []
+        for row in table:
+            cleaned_row = [self.clean_cell_value(cell) for cell in row]
+            if any(cell for cell in cleaned_row):
+                cleaned_table.append(cleaned_row)
+        
+        if not cleaned_table:
+            return None
+        
+        # Check if first row is header
+        if len(cleaned_table) > 1:
+            first_row = cleaned_table[0]
+            non_empty = sum(1 for cell in first_row if cell)
+            
+            if non_empty >= len(first_row) * 0.5:
+                headers = []
+                for i, cell in enumerate(first_row):
+                    if cell:
+                        headers.append(cell)
+                    else:
+                        # Use data from first data row for empty headers
+                        if len(cleaned_table) > 1 and i < len(cleaned_table[1]):
+                            next_cell = cleaned_table[1][i]
+                            if next_cell:
+                                headers.append(f"{next_cell[:20]}")
+                            else:
+                                headers.append(f'Col_{i+1}')
+                        else:
+                            headers.append(f'Col_{i+1}')
+                
+                # Ensure unique headers
+                seen = {}
+                for i, h in enumerate(headers):
+                    if h in seen:
+                        seen[h] += 1
+                        headers[i] = f"{h}_{seen[h]}"
+                    else:
+                        seen[h] = 0
+                
+                df = pd.DataFrame(cleaned_table[1:], columns=headers)
+            else:
+                columns = [f'Col_{i+1}' for i in range(len(cleaned_table[0]))]
+                df = pd.DataFrame(cleaned_table, columns=columns)
+        else:
+            columns = [f'Col_{i+1}' for i in range(len(cleaned_table[0]))]
+            df = pd.DataFrame(cleaned_table, columns=columns)
+        
+        return df
+    
     def parse_structured_text(self, text, delimiter):
-        """Parse structured text into DataFrame with improved error handling"""
+        """Parse structured text to DataFrame"""
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         
         if not lines:
             return None
         
-        # Auto-detect delimiter if not specified
+        # Auto-detect delimiter
         if delimiter is None:
             delimiter = self.auto_detect_delimiter(text)
         
         data = []
         for line in lines:
+            # Skip separator lines
+            if re.match(r'^[\-=_\s|]+$', line):
+                continue
+                
             try:
                 if delimiter == " ":
-                    # For spaces, split on multiple spaces
                     row = re.split(r'\s{2,}', line)
                     row = [self.clean_cell_value(cell) for cell in row if cell.strip()]
                 elif delimiter == "\t":
-                    # For tabs, split normally
                     row = [self.clean_cell_value(cell) for cell in line.split(delimiter)]
+                elif delimiter == "|":
+                    row = [self.clean_cell_value(cell) for cell in line.split(delimiter)]
+                    row = [cell for cell in row if cell]
                 else:
-                    # For other delimiters, split and clean
                     row = [self.clean_cell_value(cell) for cell in line.split(delimiter)]
                 
-                # Only add rows with content
                 if row and any(cell for cell in row):
                     data.append(row)
             except Exception:
-                continue  # Skip problematic lines
+                continue
         
         if not data:
             return None
         
-        # Find the most common number of columns (likely the correct structure)
         col_counts = [len(row) for row in data]
         if not col_counts:
             return None
         
         most_common_cols = max(set(col_counts), key=col_counts.count)
         
-        # Filter out rows that differ significantly from the expected column count
-        # Allow tolerance of ±1 column
+        # Filter and normalize data
         filtered_data = []
         for row in data:
-            if abs(len(row) - most_common_cols) <= 1:
-                # Normalize row length
+            if abs(len(row) - most_common_cols) <= 2:
                 if len(row) < most_common_cols:
                     row = row + [''] * (most_common_cols - len(row))
                 elif len(row) > most_common_cols:
@@ -419,37 +464,61 @@ class PDFtoExcelConverter:
                 filtered_data.append(row)
         
         if not filtered_data:
-            # If filtering removed everything, use original data
             max_cols = max(len(row) for row in data)
             filtered_data = [row + [''] * (max_cols - len(row)) for row in data]
         
-        # Detect if first row is header
+        # Detect header
         if len(filtered_data) > 1:
             first_row = filtered_data[0]
-            # Header detection: check if first row contains mostly text and second row contains numbers
-            is_likely_header = True
-            for cell in first_row:
-                if cell and cell.replace('.', '').replace(',', '').replace('-', '').isdigit():
-                    is_likely_header = False
-                    break
+            second_row = filtered_data[1]
+            
+            is_likely_header = False
+            if all(cell.strip() for cell in first_row):
+                numeric_count = 0
+                text_count = 0
+                for cell in first_row:
+                    if cell:
+                        clean_cell = cell.replace('.', '').replace(',', '').replace('-', '').replace('+', '').replace('$', '').strip()
+                        if clean_cell.isdigit() or (clean_cell.replace('.', '', 1).isdigit()):
+                            numeric_count += 1
+                        elif len(cell) > 0:
+                            text_count += 1
+                
+                if text_count > len(first_row) * 0.6:
+                    is_likely_header = True
             
             if is_likely_header:
-                # Use first row as header
-                headers = [str(cell) if cell else f'Column_{i+1}' for i, cell in enumerate(first_row)]
+                headers = []
+                for i, cell in enumerate(first_row):
+                    if cell.strip():
+                        headers.append(str(cell).strip())
+                    else:
+                        # Use value from first data row for empty headers
+                        if i < len(second_row) and second_row[i]:
+                            headers.append(f"{second_row[i][:20]}")
+                        else:
+                            headers.append(f'Col_{i+1}')
+                
+                # Ensure unique headers
+                seen = {}
+                for i, h in enumerate(headers):
+                    if h in seen:
+                        seen[h] += 1
+                        headers[i] = f"{h}_{seen[h]}"
+                    else:
+                        seen[h] = 0
                 df = pd.DataFrame(filtered_data[1:], columns=headers)
             else:
-                # Generate generic column names
-                columns = [f'Column_{i+1}' for i in range(len(filtered_data[0]))]
+                columns = [f'Col_{i+1}' for i in range(len(filtered_data[0]))]
                 df = pd.DataFrame(filtered_data, columns=columns)
         else:
-            # Single row - use generic column names
-            columns = [f'Column_{i+1}' for i in range(len(filtered_data[0]))]
+            columns = [f'Col_{i+1}' for i in range(len(filtered_data[0]))]
             df = pd.DataFrame(filtered_data, columns=columns)
         
         return df
     
     def parse_simple_text(self, text):
-        """Parse simple text into DataFrame (one line = one entry)"""
+        """Parse simple text (line by line)"""
         lines = [self.clean_cell_value(line) for line in text.split('\n') if line.strip()]
         
         if not lines:
@@ -459,59 +528,50 @@ class PDFtoExcelConverter:
         return df
     
     def clean_dataframe(self, df):
-        """Clean DataFrame by removing empty rows and columns"""
+        """Clean DataFrame"""
         if df is None or df.empty:
             return df
         
-        # Remove completely empty rows
         df = df.dropna(how='all')
-        
-        # Remove completely empty columns
         df = df.dropna(axis=1, how='all')
         
-        # Remove columns that are entirely empty strings
         for col in df.columns:
             if df[col].astype(str).str.strip().eq('').all():
                 df = df.drop(columns=[col])
         
-        # Reset index
         df = df.reset_index(drop=True)
         
         return df
     
     def save_to_excel(self, dfs, output_path, combine_pages):
-        """Save DataFrames to Excel with error handling"""
+        """Save to Excel"""
         try:
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
                 if combine_pages:
-                    # Combine all dataframes
                     combined_df = pd.concat([df for _, df in dfs], ignore_index=True)
                     if self.clean_data.get():
                         combined_df = self.clean_dataframe(combined_df)
                     combined_df.to_excel(writer, sheet_name='All_Pages', index=False)
                 else:
-                    # Save each page separately
                     for page_num, df in dfs:
                         if self.clean_data.get():
                             df = self.clean_dataframe(df)
-                        sheet_name = f"Page_{page_num}"[:31]  # Excel sheet name limit
+                        sheet_name = f"Page_{page_num}"[:31]
                         df.to_excel(writer, sheet_name=sheet_name, index=False)
             return True
         except Exception as e:
-            raise Exception(f"Error saving Excel file: {str(e)}")
+            raise Exception(f"Error saving Excel: {str(e)}")
     
     def save_to_csv(self, dfs, output_path, combine_pages):
-        """Save DataFrames to CSV with error handling"""
+        """Save to CSV"""
         try:
             if combine_pages:
-                # Combine all dataframes
                 combined_df = pd.concat([df for _, df in dfs], ignore_index=True)
                 if self.clean_data.get():
                     combined_df = self.clean_dataframe(combined_df)
                 combined_df.to_csv(output_path, index=False, encoding='utf-8-sig', 
                                   quoting=csv.QUOTE_MINIMAL, escapechar='\\')
             else:
-                # For multiple pages in CSV, save to multiple files or append with separator
                 if len(dfs) == 1:
                     df = dfs[0][1]
                     if self.clean_data.get():
@@ -519,12 +579,10 @@ class PDFtoExcelConverter:
                     df.to_csv(output_path, index=False, encoding='utf-8-sig',
                              quoting=csv.QUOTE_MINIMAL, escapechar='\\')
                 else:
-                    # Save with page separators
                     all_dfs = []
                     for page_num, df in dfs:
                         if self.clean_data.get():
                             df = self.clean_dataframe(df)
-                        # Add a separator row with page info
                         separator = pd.DataFrame([[f'=== Page {page_num} ===' + '='*50]], 
                                                 columns=['Page Separator'])
                         all_dfs.append(separator)
@@ -535,26 +593,26 @@ class PDFtoExcelConverter:
                                    quoting=csv.QUOTE_MINIMAL, escapechar='\\')
             return True
         except Exception as e:
-            raise Exception(f"Error saving CSV file: {str(e)}")
+            raise Exception(f"Error saving CSV: {str(e)}")
     
     def convert(self):
+        """Start conversion"""
         if not self.pdf_path.get():
             messagebox.showerror("Error", "Please select a PDF file!")
             return
         
         if not self.output_path.get():
-            messagebox.showerror("Error", "Please specify the output file!")
+            messagebox.showerror("Error", "Please specify output file!")
             return
         
-        # Validate output path extension matches format
         output_ext = Path(self.output_path.get()).suffix.lower()
         expected_ext = ".xlsx" if self.output_format.get() == "xlsx" else ".csv"
         
         if output_ext != expected_ext:
             response = messagebox.askyesno(
                 "Extension Mismatch",
-                f"The output file extension ({output_ext}) doesn't match the selected format ({expected_ext}).\n\n"
-                f"Do you want to change it to {expected_ext}?"
+                f"Output extension ({output_ext}) doesn't match format ({expected_ext}).\n\n"
+                f"Change to {expected_ext}?"
             )
             if response:
                 new_path = Path(self.output_path.get()).with_suffix(expected_ext)
@@ -562,54 +620,82 @@ class PDFtoExcelConverter:
             else:
                 return
         
-        # Run conversion in separate thread
         thread = threading.Thread(target=self.run_conversion)
         thread.daemon = True
         thread.start()
     
     def run_conversion(self):
+        """Run conversion process"""
         try:
-            self.disable_all_controls()
+            # Disable controls
+            self.convert_btn.config(state='disabled')
             self.progress_active = True
             self.animate_progress()
-            self.status.set("Extracting text from PDF...")
+            self.status.set("Extracting data from PDF...")
             
-            pages_text = self.extract_text_from_pdf(self.pdf_path.get())
+            pages_data = self.extract_data_from_pdf(self.pdf_path.get())
             
-            if not pages_text:
+            if not pages_data:
                 self.rootexceltopdf.after(0, lambda: messagebox.showwarning(
-                    "Warning", "Could not extract text from PDF! The PDF might be image-based or encrypted."))
+                    "Warning", "Could not extract data from PDF!"))
                 return
             
-            self.status.set(f"Processing {len(pages_text)} page(s)...")
+            
+            self.status.set(f"Processing {len(pages_data)} page(s)...")
             
             mode = self.mode.get()
             delimiter = self.get_delimiter()
             
             dfs = []
             errors = []
+            total_pages = len(pages_data)
             
-            for i, text in enumerate(pages_text):
+            for idx, page_data in enumerate(pages_data):
+                page_num = page_data['page_num']
+                df = None
+                
+                # Update progress
+                progress = 20 + int((idx / total_pages) * 60)
+                
+                self.status.set(f"Processing page {page_num}/{total_pages}...")
+                
                 try:
-                    if mode == "text":
-                        df = self.parse_structured_text(text, delimiter)
-                    else:
-                        df = self.parse_simple_text(text)
+                    if mode == "auto":
+                        # Try tables first
+                        if page_data['tables']:
+                            for table in page_data['tables']:
+                                df = self.table_to_dataframe(table)
+                                if df is not None and not df.empty:
+                                    break
+                        
+                        # Fallback to structured text
+                        if df is None or df.empty:
+                            if page_data['text']:
+                                df = self.parse_structured_text(page_data['text'], None)
+                    
+                    elif mode == "text":
+                        if page_data['text']:
+                            df = self.parse_structured_text(page_data['text'], delimiter)
+                    
+                    elif mode == "simple":
+                        if page_data['text']:
+                            df = self.parse_simple_text(page_data['text'])
                     
                     if df is not None and not df.empty:
-                        dfs.append((i + 1, df))
+                        dfs.append((page_num, df))
                     else:
-                        errors.append(f"Page {i+1}: No data extracted")
+                        errors.append(f"Page {page_num}: No data extracted")
+                        
                 except Exception as e:
-                    errors.append(f"Page {i+1}: {str(e)}")
+                    errors.append(f"Page {page_num}: {str(e)}")
             
             if not dfs:
                 error_msg = "Could not extract data from PDF!\n\n"
                 if errors:
                     error_msg += "Errors:\n" + "\n".join(errors[:5])
-                self.rootexceltopdf.after(0, lambda msg=error_msg: messagebox.showwarning(
-                    "Warning", msg))
+                self.rootexceltopdf.after(0, lambda msg=error_msg: messagebox.showwarning("Warning", msg))
                 return
+            
             
             self.status.set("Saving file...")
             
@@ -621,27 +707,27 @@ class PDFtoExcelConverter:
             else:
                 self.save_to_csv(dfs, self.output_path.get(), combine_pages)
             
+            
+            
             success_msg = f"Conversion completed successfully!\n\n"
-            success_msg += f"Pages processed: {len(dfs)}/{len(pages_text)}\n"
+            success_msg += f"Pages processed: {len(dfs)}/{len(pages_data)}\n"
             success_msg += f"Output: {Path(self.output_path.get()).name}"
             
             if errors:
                 success_msg += f"\n\nWarnings: {len(errors)} page(s) had issues"
             
-            self.status.set("Conversion completed successfully!")
-            self.rootexceltopdf.after(0, lambda msg=success_msg: messagebox.showinfo(
-                "Success", msg))
+            self.status.set("Conversion completed!")
+            self.rootexceltopdf.after(0, lambda msg=success_msg: messagebox.showinfo("Success", msg))
             
         except Exception as e:
             self.status.set("Conversion error!")
             error_msg = f"An error occurred:\n\n{str(e)}"
-            self.rootexceltopdf.after(0, lambda msg=error_msg: messagebox.showerror(
-                "Error", msg))
+            self.rootexceltopdf.after(0, lambda msg=error_msg: messagebox.showerror("Error", msg))
         
         finally:
             self.progress_active = False
             self.progress_canvas.delete("all")
-            self.rootexceltopdf.after(0, self.enable_all_controls)
+            self.rootexceltopdf.after(0, lambda: self.convert_btn.config(state='normal'))
 
 if __name__ == "__main__":
     rootexceltopdf = tk.Tk()
