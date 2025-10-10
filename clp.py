@@ -254,7 +254,7 @@ class Win95ColorPicker:
         # print(f"  RGB: {r}, {g}, {b}")
         # print(f"  HSL: {h_hsl}°, {s_hsl}%, {l}%")
         # print(f"  HSV: {h_hsv}°, {s_hsv}%, {v}%")
-        self.rootclpicker.quit()
+        self.rootclpicker.destroy()
 
 if __name__ == "__main__":
     rootclpicker = tk.Tk()
