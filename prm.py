@@ -5,11 +5,11 @@ import calendar
 import sqlite3
 
 class ProjectManager:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Project Manager")
-        self.root.geometry("1000x700")
-        self.root.configure(bg="#c0c0c0")
+    def __init__(self, rootprojectmngr45):
+        self.rootprojectmngr45 = rootprojectmngr45
+        self.rootprojectmngr45.title("Project Manager")
+        self.rootprojectmngr45.geometry("1000x700")
+        self.rootprojectmngr45.configure(bg="#c0c0c0")
         
         # Data storage
         self.selected_project_id = None
@@ -61,8 +61,8 @@ class ProjectManager:
         self.conn.commit()
         
     def create_menu(self):
-        menubar = tk.Menu(self.root, bg=self.bg_color)
-        self.root.config(menu=menubar)
+        menubar = tk.Menu(self.rootprojectmngr45, bg=self.bg_color)
+        self.rootprojectmngr45.config(menu=menubar)
         
         file_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
         menubar.add_cascade(label="File", menu=file_menu)
@@ -76,7 +76,7 @@ class ProjectManager:
         
     def create_widgets(self):
         # Title bar style frame
-        title_frame = tk.Frame(self.root, bg="#000080", height=30)
+        title_frame = tk.Frame(self.rootprojectmngr45, bg="#000080", height=30)
         title_frame.pack(fill=tk.X, padx=2, pady=2)
         
         title_label = tk.Label(title_frame, text="Project Manager", 
@@ -85,7 +85,7 @@ class ProjectManager:
         title_label.pack(side=tk.LEFT, padx=5, pady=5)
         
         # Main container
-        main_frame = tk.Frame(self.root, bg=self.bg_color, relief=tk.RAISED, bd=2)
+        main_frame = tk.Frame(self.rootprojectmngr45, bg=self.bg_color, relief=tk.RAISED, bd=2)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
         
         # Top container for calendar and main content
@@ -103,19 +103,24 @@ class ProjectManager:
         
         list_frame = tk.Frame(left_panel, relief=tk.SUNKEN, bd=2)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
+
         scrollbar = tk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
+
+        xscrollbar = tk.Scrollbar(list_frame, orient=tk.HORIZONTAL)
+        xscrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+
         self.project_listbox = tk.Listbox(list_frame, 
                                          bg="white", 
                                          fg=self.text_color,
                                          font=("MS Sans Serif", 8),
                                          selectmode=tk.SINGLE,
                                          exportselection=False,
-                                         yscrollcommand=scrollbar.set)
+                                         yscrollcommand=scrollbar.set,
+                                         xscrollcommand=xscrollbar.set)
         self.project_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=self.project_listbox.yview)
+        xscrollbar.config(command=self.project_listbox.xview)
         self.project_listbox.bind("<<ListboxSelect>>", self.on_project_select)
         
         # Buttons for project list
@@ -277,16 +282,21 @@ class ProjectManager:
         # Tasks list
         task_frame = tk.Frame(right_panel, relief=tk.SUNKEN, bd=2)
         task_frame.pack(fill=tk.BOTH, expand=True)
-        
+
         task_scroll = tk.Scrollbar(task_frame)
         task_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        
+
+        xtask_scroll = tk.Scrollbar(task_frame, orient=tk.HORIZONTAL)
+        xtask_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+
         self.task_listbox = tk.Listbox(task_frame, 
                                        bg="white",
                                        font=("MS Sans Serif", 7),
-                                       yscrollcommand=task_scroll.set)
+                                       yscrollcommand=task_scroll.set,
+                                       xscrollcommand=xtask_scroll.set)
         self.task_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         task_scroll.config(command=self.task_listbox.yview)
+        xtask_scroll.config(command=self.task_listbox.xview)
         self.task_listbox.bind("<Double-Button-1>", self.toggle_task)
         
         # Delete task button
@@ -297,7 +307,7 @@ class ProjectManager:
         self.del_task_btn.pack(pady=5)
         
         # Status bar
-        status_bar = tk.Frame(self.root, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
+        status_bar = tk.Frame(self.rootprojectmngr45, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
         self.status_label = tk.Label(status_bar, text="Ready", 
@@ -420,7 +430,7 @@ class ProjectManager:
             day = int(day_text)
             self.selected_date = f"{self.current_year}-{self.current_month:02d}-{day:02d}"
             
-            context_menu = tk.Menu(self.root, tearoff=0, bg=self.bg_color)
+            context_menu = tk.Menu(self.rootprojectmngr45, tearoff=0, bg=self.bg_color)
             context_menu.add_command(label="Add Task", command=self.add_task)
             context_menu.add_separator()
             
@@ -627,14 +637,14 @@ class ProjectManager:
         
     def show_about(self):
         messagebox.showinfo("About", 
-                          "Project Manager v1.0\nRetro Windows 95 Edition\n\nManage your projects with style!")
+                          "Project Manager v1.0\n\nManage your projects with style!")
     
     def on_closing(self):
         self.conn.close()
-        self.root.quit()
+        self.rootprojectmngr45.quit()
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = ProjectManager(root)
-    root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    root.mainloop()
+    rootprojectmngr45 = tk.Tk()
+    app = ProjectManager(rootprojectmngr45)
+    rootprojectmngr45.protocol("WM_DELETE_WINDOW", app.on_closing)
+    rootprojectmngr45.mainloop()
