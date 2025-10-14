@@ -58,13 +58,16 @@ class ProgrammerCalculator:
                 font=('MS Sans Serif', 8)).grid(row=0, column=0, sticky='w', pady=2)
         
         self.base_var = tk.StringVar(value="DEC")
-        for i, base in enumerate(["HEX", "DEC", "OCT", "BIN"]):
+        bases = ["HEX", "DEC", "OCT", "BIN"]
+        for i, base in enumerate(bases):
+            row = (i // 2) + 1  # 0,1 -> row 1; 2,3 -> row 2
+            col = i % 2          # 0,2 -> col 0; 1,3 -> col 1
             rb = tk.Radiobutton(base_frame, text=base, variable=self.base_var,
                                value=base, bg='#c0c0c0', 
                                font=('MS Sans Serif', 8),
                                command=self.change_base,
                                activebackground='#c0c0c0')
-            rb.grid(row=i+1, column=0, sticky='w', pady=1)
+            rb.grid(row=row, column=col, sticky='w', pady=1, padx=5)
         
         # Right side - Bit width selection
         bit_frame = tk.Frame(options_frame, bg='#c0c0c0')
@@ -74,13 +77,16 @@ class ProgrammerCalculator:
                 font=('MS Sans Serif', 8)).grid(row=0, column=0, sticky='w', pady=2)
         
         self.bit_var = tk.StringVar(value="32")
-        for i, bits in enumerate(["8", "16", "32", "64"]):
+        bits_list = ["8", "16", "32", "64"]
+        for i, bits in enumerate(bits_list):
+            row = (i // 2) + 1  # 0,1 -> row 1; 2,3 -> row 2
+            col = i % 2          # 0,2 -> col 0; 1,3 -> col 1
             rb = tk.Radiobutton(bit_frame, text=bits, variable=self.bit_var,
                                value=bits, bg='#c0c0c0', 
                                font=('MS Sans Serif', 8),
                                command=self.change_bit_width,
                                activebackground='#c0c0c0')
-            rb.grid(row=i+1, column=0, sticky='w', pady=1)
+            rb.grid(row=row, column=col, sticky='w', pady=1, padx=5)
         
         # Shift mode selection frame - initially hidden
         self.shift_frame = tk.Frame(main_frame, bg='#c0c0c0')
