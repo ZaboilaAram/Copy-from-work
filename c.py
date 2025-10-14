@@ -21,7 +21,7 @@ class ProgrammerCalculator:
         
         # Color scheme for button states
         self.colors = {
-            'enabled': '#4A90E2',   # Light navy blue
+            'enabled': '#009aa2',   # Light navy blue
             'disabled': '#c0c0c0'   # Gray (same as window bg)
         }
         
