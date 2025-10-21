@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox
 class Win95PyCompiler:
     def __init__(self, rootplainpy):
         self.rootplainpy = rootplainpy
-        self.rootplainpy.title("Python File Merger")
+        self.rootplainpy.title("Python Script Merger")
         self.rootplainpy.geometry("500x400")
         self.rootplainpy.resizable(False, False)
         
@@ -24,7 +24,7 @@ class Win95PyCompiler:
         title_frame = tk.Frame(self.rootplainpy, bg="#000080", height=25)
         title_frame.pack(fill=tk.X, pady=(0, 2))
         
-        title_label = tk.Label(title_frame, text="Python File Merger", 
+        title_label = tk.Label(title_frame, text="Python Script Merger", 
                               bg="#000080", fg="white", font=("MS Sans Serif", 9, "bold"))
         title_label.pack(side=tk.LEFT, padx=5, pady=2)
         
@@ -72,13 +72,19 @@ class Win95PyCompiler:
                       anchor=tk.W).pack(fill=tk.X, pady=2)
         
         # Output filename
-        output_frame = tk.LabelFrame(main_frame, text="Output Filename", 
+        output_frame = tk.LabelFrame(main_frame, text="Output File", 
                                      bg=self.bg_color, font=("MS Sans Serif", 8, "bold"))
         output_frame.pack(fill=tk.X, pady=(0, 10))
         
         self.output_entry = tk.Entry(output_frame, font=("MS Sans Serif", 8))
         self.output_entry.insert(0, "compiled_scripts.txt")
-        self.output_entry.pack(fill=tk.X, padx=5, pady=5)
+        self.output_entry.pack(fill=tk.X, padx=5, pady=(5, 0))
+        
+        save_btn = tk.Button(output_frame, text="Browse...", 
+                            command=self.browse_save_location,
+                            width=15, relief=tk.RAISED, 
+                            font=("MS Sans Serif", 8))
+        save_btn.pack(pady=5)
         
         # Compile button
         compile_btn = tk.Button(main_frame, text="Compile Python Files", 
@@ -100,6 +106,18 @@ class Win95PyCompiler:
             folder_name = os.path.basename(folder)
             self.folder_label.config(text=f"Selected: {folder_name}")
             self.status_bar.config(text=f"Folder selected: {folder}")
+    
+    def browse_save_location(self):
+        file_path = filedialog.asksaveasfilename(
+            title="Save Output File As",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+            initialfile="compiled_scripts.txt"
+        )
+        if file_path:
+            self.output_entry.delete(0, tk.END)
+            self.output_entry.insert(0, file_path)
+            self.status_bar.config(text=f"Output location: {file_path}")
     
     def compile_files(self):
         if not self.selected_folder:
