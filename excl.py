@@ -26,7 +26,7 @@ class ExcelLite:
         self.formula_mode = False
         
         # Max rows and columns
-        self.MAX_ROWS = 100
+        self.MAX_ROWS = 50
         self.MAX_COLS = 26  # A-Z
         
         # Column widths
