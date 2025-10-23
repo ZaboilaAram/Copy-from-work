@@ -268,7 +268,7 @@ class ExcelLite:
             self.select_cell(row, col)
         
         try:
-            self.context_menu.tk_popup(event.x_rootexcellite2, event.y_rootexcellite2)
+            self.context_menu.tk_popup(event.x_root, event.y_root)
         finally:
             self.context_menu.grab_release()
     
@@ -371,13 +371,13 @@ class ExcelLite:
         # Check if click is near the right edge
         if widget_width - event.x <= self.resize_grip_width:
             self.resize_column = col
-            self.resize_start_x = event.x_rootexcellite2
+            self.resize_start_x = event.x_root
             self.resize_start_width = self.column_widths[col + 1]
     
     def on_header_drag(self, event, col):
         """Resize column"""
         if self.resize_column == col and self.resize_start_x is not None:
-            delta = event.x_rootexcellite2 - self.resize_start_x
+            delta = event.x_root - self.resize_start_x
             new_width = max(5, self.resize_start_width + delta // 7)  # Minimum width 5
             self.column_widths[col + 1] = new_width
             
