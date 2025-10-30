@@ -6,10 +6,10 @@ from pathlib import Path
 
 
 class CodeVisualizer:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Python Code Logic Visualizer")
-        self.root.geometry("1400x850")
+    def __init__(self, rootVIS):
+        self.rootVIS = rootVIS
+        self.rootVIS.title("Python Code Logic Visualizer")
+        self.rootVIS.geometry("1400x850")
         
         # Windows 95 color scheme
         self.bg_color = "#c0c0c0"
@@ -21,7 +21,7 @@ class CodeVisualizer:
         self.text_bg = "#ffffff"
         self.text_fg = "#000000"
         
-        self.root.configure(bg=self.bg_color)
+        self.rootVIS.configure(bg=self.bg_color)
         
         self.current_file = None
         self.parsed_data = []
@@ -35,7 +35,7 @@ class CodeVisualizer:
         
     def setup_ui(self):
         # Title bar simulation
-        title_frame = tk.Frame(self.root, bg=self.title_bar, height=30)
+        title_frame = tk.Frame(self.rootVIS, bg=self.title_bar, height=30)
         title_frame.pack(side=tk.TOP, fill=tk.X)
         title_frame.pack_propagate(False)
         
@@ -44,7 +44,7 @@ class CodeVisualizer:
                 font=("MS Sans Serif", 10, "bold")).pack(side=tk.LEFT, padx=5)
         
         # Toolbar
-        toolbar_frame = tk.Frame(self.root, bg=self.bg_color, relief=tk.RAISED, bd=2)
+        toolbar_frame = tk.Frame(self.rootVIS, bg=self.bg_color, relief=tk.RAISED, bd=2)
         toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
         
         self.create_win95_button(toolbar_frame, "Open File", self.open_file, 100).pack(side=tk.LEFT, padx=2, pady=2)
@@ -72,7 +72,7 @@ class CodeVisualizer:
         self.status_label.pack(side=tk.RIGHT, padx=10)
         
         # Main container with sunken border
-        main_container = tk.Frame(self.root, bg=self.bg_color, relief=tk.SUNKEN, bd=2)
+        main_container = tk.Frame(self.rootVIS, bg=self.bg_color, relief=tk.SUNKEN, bd=2)
         main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Create main PanedWindow for horizontal resizing
@@ -225,7 +225,7 @@ class CodeVisualizer:
         self.info_text.bind('<Button-5>', lambda e: self._on_mousewheel(e, self.info_text))
         
         # Status bar at bottom
-        status_bar = tk.Frame(self.root, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
+        status_bar = tk.Frame(self.rootVIS, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
         self.status_text = tk.Label(status_bar, text="Ready", bg=self.bg_color, 
@@ -251,7 +251,7 @@ class CodeVisualizer:
             
         def on_click(e):
             frame.config(relief=tk.SUNKEN, bd=2)
-            self.root.after(100, lambda: frame.config(relief=tk.RAISED, bd=2))
+            self.rootVIS.after(100, lambda: frame.config(relief=tk.RAISED, bd=2))
             command()
             
         btn.bind('<Enter>', on_enter)
@@ -819,7 +819,7 @@ class CodeVisualizer:
             self.step_label.config(text=f"Step: {self.current_step}/{len(self.parsed_data)}")
             
             if self.auto_play and self.current_step < len(self.parsed_data):
-                self.root.after(1000, self.next_step)
+                self.rootVIS.after(1000, self.next_step)
         else:
             self.auto_play = False
             self.status_text.config(text="Reached end of execution")
@@ -1050,9 +1050,9 @@ class CodeVisualizer:
 
 
 def main():
-    rootdbgrrr = tk.Tk()
-    app = CodeVisualizer(rootdbgrrr)
-    rootdbgrrr.mainloop()
+    rootVISdbgrrr = tk.Tk()
+    app = CodeVisualizer(rootVISdbgrrr)
+    rootVISdbgrrr.mainloop()
 
 
 if __name__ == "__main__":
