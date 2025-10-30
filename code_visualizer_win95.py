@@ -30,6 +30,9 @@ class CodeVisualizer:
         self.auto_play = False
         self.folder_files = {}  # Dictionary to store file paths
         self.current_folder = None  # Store current folder path
+        self.tooltip_window = None  # For displaying code tooltips
+        self.tooltip_id = None  # For delayed tooltip display
+        self.code_lines = []  # Store original code lines for tooltip
         
         self.setup_ui()
         
@@ -204,6 +207,8 @@ class CodeVisualizer:
         self.canvas.bind('<MouseWheel>', lambda e: self._on_canvas_mousewheel(e))
         self.canvas.bind('<Button-4>', lambda e: self._on_canvas_mousewheel(e))
         self.canvas.bind('<Button-5>', lambda e: self._on_canvas_mousewheel(e))
+        self.canvas.bind('<Motion>', self.on_canvas_motion)
+        self.canvas.bind('<Leave>', self.hide_tooltip)
         
         # Bottom part - Info panel
         info_panel = tk.Frame(right_paned, bg=self.bg_color)
@@ -287,6 +292,7 @@ class CodeVisualizer:
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 code = f.read()
+                self.code_lines = code.split('\n')
             
             self.code_text.config(state=tk.NORMAL)
             self.code_text.delete(1.0, tk.END)
@@ -465,7 +471,8 @@ class CodeVisualizer:
                     'type': 'if',
                     'line': node.lineno,
                     'depth': self.depth,
-                    'has_else': len(node.orelse) > 0
+                    'has_else': len(node.orelse) > 0,
+                    'end_line': node.end_lineno
                 })
                 self.depth += 1
                 self.generic_visit(node)
@@ -659,6 +666,7 @@ class CodeVisualizer:
         
         for idx, item in enumerate(self.tree_structure):
             x = x_start + (item['depth'] * x_spacing)
+            icon_id = f"icon_{idx}"
             
             # Draw connection line to parent
             if item['depth'] > 0:
@@ -682,10 +690,17 @@ class CodeVisualizer:
             
             if item['type'] in ['module', 'class']:
                 # Folder icon
-                self.draw_folder_icon(x, y, color, is_current)
+                ids = self.draw_folder_icon(x, y, color, is_current)
             else:
                 # File/document icon
-                self.draw_file_icon(x, y, color, is_current)
+                ids = self.draw_file_icon(x, y, color, is_current)
+            
+            # Tag all icon elements with item data
+            for canvas_id in ids:
+                self.canvas.itemconfig(canvas_id, tags=(icon_id,))
+                # Store item data
+                self.canvas.tag_bind(icon_id, '<Enter>', lambda e, item=item: self.show_tooltip(e, item))
+                self.canvas.tag_bind(icon_id, '<Leave>', lambda e: self.hide_tooltip())
             
             # Draw label
             label = item['name']
@@ -767,29 +782,39 @@ class CodeVisualizer:
         outline = "#FF0000" if is_current else "black"
         width = 2 if is_current else 1
         
+        ids = []
         # Folder tab
-        self.canvas.create_polygon(x, y + 3, x + 6, y + 3, x + 8, y, x + 12, y,
+        id1 = self.canvas.create_polygon(x, y + 3, x + 6, y + 3, x + 8, y, x + 12, y,
                                   fill=color, outline=outline, width=width)
+        ids.append(id1)
         # Folder body
-        self.canvas.create_rectangle(x, y + 3, x + 16, y + 16,
+        id2 = self.canvas.create_rectangle(x, y + 3, x + 16, y + 16,
                                     fill=color, outline=outline, width=width)
+        ids.append(id2)
+        return ids
         
     def draw_file_icon(self, x, y, color, is_current):
         # Document icon
         outline = "#FF0000" if is_current else "black"
         width = 2 if is_current else 1
         
+        ids = []
         # Document body
-        self.canvas.create_rectangle(x + 2, y, x + 14, y + 16,
+        id1 = self.canvas.create_rectangle(x + 2, y, x + 14, y + 16,
                                     fill="white", outline=outline, width=width)
+        ids.append(id1)
         # Folded corner
-        self.canvas.create_polygon(x + 14, y, x + 14, y + 4, x + 10, y,
+        id2 = self.canvas.create_polygon(x + 14, y, x + 14, y + 4, x + 10, y,
                                   fill="#C0C0C0", outline=outline, width=width)
+        ids.append(id2)
         
         # Lines on document
         for i in range(3):
-            self.canvas.create_line(x + 4, y + 4 + (i * 3), x + 12, y + 4 + (i * 3),
+            id3 = self.canvas.create_line(x + 4, y + 4 + (i * 3), x + 12, y + 4 + (i * 3),
                                    fill=color, width=1)
+            ids.append(id3)
+        
+        return ids
         
     def get_short_label(self, element):
         elem_type = element['type']
@@ -1049,6 +1074,95 @@ class CodeVisualizer:
         self.status_text.config(text="Reset complete")
 
 
+    def on_canvas_motion(self, event):
+        """Handle mouse motion over canvas to show tooltips"""
+        # Cancel any pending tooltip
+        if self.tooltip_id:
+            self.rootVIS.after_cancel(self.tooltip_id)
+            self.tooltip_id = None
+        
+        # Schedule tooltip to appear after 500ms
+        self.tooltip_id = self.rootVIS.after(500, lambda: self._check_tooltip(event))
+    
+    def _check_tooltip(self, event):
+        """Check if mouse is over an item and show tooltip"""
+        x = self.canvas.canvasx(event.x)
+        y = self.canvas.canvasy(event.y)
+        items = self.canvas.find_overlapping(x-5, y-5, x+5, y+5)
+        
+        for item in items:
+            tags = self.canvas.gettags(item)
+            if tags and tags[0].startswith('icon_'):
+                # Found an icon, get its index
+                idx = int(tags[0].split('_')[1])
+                if idx < len(self.tree_structure):
+                    self.show_tooltip(event, self.tree_structure[idx])
+                break
+    
+    def show_tooltip(self, event, item):
+        """Show tooltip with code snippet"""
+        self.hide_tooltip()
+        
+        if 'line' not in item or not self.code_lines:
+            return
+        
+        line_num = item['line']
+        end_line = item.get('end_line', line_num)
+        
+        # Get code snippet
+        if line_num <= len(self.code_lines):
+            # Get up to 5 lines of code
+            start_line = line_num - 1
+            end_line_idx = min(end_line, start_line + 5)
+            code_snippet = '\n'.join(self.code_lines[start_line:end_line_idx])
+            
+            # Limit snippet length
+            if len(code_snippet) > 200:
+                code_snippet = code_snippet[:200] + "..."
+            
+            # Create tooltip window
+            self.tooltip_window = tk.Toplevel(self.rootVIS)
+            self.tooltip_window.wm_overrideredirect(True)
+            self.tooltip_window.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+            
+            # Tooltip frame with border
+            frame = tk.Frame(self.tooltip_window, 
+                           bg=self.button_face, 
+                           relief=tk.RAISED, 
+                           bd=2)
+            frame.pack()
+            
+            # Title
+            title_label = tk.Label(frame, 
+                                  text=f"{item['type'].upper()} (Line {line_num})",
+                                  bg=self.title_bar,
+                                  fg="white",
+                                  font=("MS Sans Serif", 8, "bold"),
+                                  padx=5,
+                                  pady=2)
+            title_label.pack(fill=tk.X)
+            
+            # Code snippet
+            code_label = tk.Label(frame,
+                                text=code_snippet,
+                                bg="#FFFFCC",
+                                fg="black",
+                                font=("Courier New", 8),
+                                justify=tk.LEFT,
+                                padx=5,
+                                pady=5)
+            code_label.pack()
+    
+    def hide_tooltip(self, event=None):
+        """Hide tooltip window"""
+        if self.tooltip_id:
+            self.rootVIS.after_cancel(self.tooltip_id)
+            self.tooltip_id = None
+        
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+            
 def main():
     rootVISdbgrrr = tk.Tk()
     app = CodeVisualizer(rootVISdbgrrr)
