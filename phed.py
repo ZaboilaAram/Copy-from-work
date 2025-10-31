@@ -226,7 +226,7 @@ class PathsEditor:
         
         # Info label
         info_label = tk.Label(main_frame, 
-                            text="Network: name: \\\\server\\share | Local: name C:\\folder (no spaces in path)",
+                            text="Network: name: \\\\server\\share | Local: name C:\\folder (no spaces in path name)",
                             bg='#c0c0c0', font=('MS Sans Serif', 7), fg='#000080')
         info_label.pack(pady=5)
 
