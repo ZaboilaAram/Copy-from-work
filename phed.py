@@ -164,7 +164,7 @@ class PathsEditor:
         title_label.pack(pady=3)
         
         # Main frame
-        main_frame = tk.Frame(self.rootpthsed, bg='#c0c0c0', relief=tk.RIDGE, bd=2)
+        main_frame = tk.Frame(self.rootpthsed, bg='#c0c0c0', relief=tk.RIDGE, bd=3)
         main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
         
         # Input section
@@ -175,14 +175,14 @@ class PathsEditor:
         name_label = tk.Label(input_frame, text="Name:", bg='#c0c0c0', 
                              font=('MS Sans Serif', 8))
         name_label.grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.name_entry = tk.Entry(input_frame, width=50, font=('MS Sans Serif', 8))
+        self.name_entry = tk.Entry(input_frame, width=50, font=('MS Sans Serif', 8), bd=3)
         self.name_entry.grid(row=0, column=1, padx=5, pady=5)
         
         # Path
         path_label = tk.Label(input_frame, text="Path:", bg='#c0c0c0', 
                              font=('MS Sans Serif', 8))
         path_label.grid(row=1, column=0, sticky=tk.W, pady=5)
-        self.path_entry = tk.Entry(input_frame, width=50, font=('MS Sans Serif', 8))
+        self.path_entry = tk.Entry(input_frame, width=50, font=('MS Sans Serif', 8), bd=3)
         self.path_entry.grid(row=1, column=1, padx=5, pady=5)
         
         # Buttons frame
@@ -190,21 +190,21 @@ class PathsEditor:
         button_frame.pack(pady=5)
         
         add_button = tk.Button(button_frame, text="Add Path", command=self.add_path,
-                              width=12, font=('MS Sans Serif', 8), relief=tk.RAISED, bd=2)
+                              width=12, font=('MS Sans Serif', 8), relief=tk.RAISED, bd=5)
         add_button.grid(row=0, column=0, padx=5)
         
         edit_button = tk.Button(button_frame, text="Edit Selected", 
                                command=self.edit_selected,
-                               width=12, font=('MS Sans Serif', 8), relief=tk.RAISED, bd=2)
+                               width=12, font=('MS Sans Serif', 8), relief=tk.RAISED, bd=5)
         edit_button.grid(row=0, column=1, padx=5)
         
         delete_button = tk.Button(button_frame, text="Delete Selected", 
                                  command=self.delete_selected,
-                                 width=12, font=('MS Sans Serif', 8), relief=tk.RAISED, bd=2)
+                                 width=12, font=('MS Sans Serif', 8), relief=tk.RAISED, bd=5)
         delete_button.grid(row=0, column=2, padx=5)
         
         # List section
-        list_frame = tk.Frame(main_frame, bg='#c0c0c0', relief=tk.SUNKEN, bd=2)
+        list_frame = tk.Frame(main_frame, bg='#c0c0c0', relief=tk.SUNKEN, bd=3)
         list_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
         
         list_label = tk.Label(list_frame, text="Current Paths:", bg='#c0c0c0',

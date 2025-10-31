@@ -217,7 +217,7 @@ class ProfilesEditor:
         title_label.pack(pady=3)
         
         # Main frame
-        main_frame = tk.Frame(self.rootprofed, bg='#c0c0c0', relief=tk.RIDGE, bd=2)
+        main_frame = tk.Frame(self.rootprofed, bg='#c0c0c0', relief=tk.RIDGE, bd=3)
         main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
         
         # Top buttons
@@ -227,19 +227,19 @@ class ProfilesEditor:
         add_profile_btn = tk.Button(button_frame, text="New Profile", 
                                    command=self.add_new_profile,
                                    width=15, font=('MS Sans Serif', 8), 
-                                   relief=tk.RAISED, bd=2)
+                                   relief=tk.RAISED, bd=5)
         add_profile_btn.grid(row=0, column=0, padx=5)
         
         delete_profile_btn = tk.Button(button_frame, text="Delete Profile", 
                                       command=self.delete_profile,
                                       width=15, font=('MS Sans Serif', 8), 
-                                      relief=tk.RAISED, bd=2)
+                                      relief=tk.RAISED, bd=5)
         delete_profile_btn.grid(row=0, column=1, padx=5)
         
         add_items_btn = tk.Button(button_frame, text="Add/Edit Items", 
                                  command=self.add_items_to_profile,
                                  width=15, font=('MS Sans Serif', 8), 
-                                 relief=tk.RAISED, bd=2, bg='#ffff00')
+                                 relief=tk.RAISED, bd=5, bg='#ffff00')
         add_items_btn.grid(row=0, column=2, padx=5)
         
         # Content frame with two columns
@@ -247,7 +247,7 @@ class ProfilesEditor:
         content_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
         
         # Left column - Profiles list
-        left_frame = tk.Frame(content_frame, bg='#c0c0c0', relief=tk.SUNKEN, bd=2)
+        left_frame = tk.Frame(content_frame, bg='#c0c0c0', relief=tk.SUNKEN, bd=3)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
         profiles_label = tk.Label(left_frame, text="Profiles:", bg='#c0c0c0',
@@ -265,7 +265,7 @@ class ProfilesEditor:
         scrollbar1.config(command=self.profile_listbox.yview)
         
         # Right column - Selected items
-        right_frame = tk.Frame(content_frame, bg='#c0c0c0', relief=tk.SUNKEN, bd=2)
+        right_frame = tk.Frame(content_frame, bg='#c0c0c0', relief=tk.SUNKEN, bd=3)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
         
         selected_label = tk.Label(right_frame, text="Selected Items:", bg='#c0c0c0',
