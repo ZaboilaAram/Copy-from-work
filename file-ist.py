@@ -31,7 +31,7 @@ class ForensicTimelineBuilder:
         
         title_label = tk.Label(
             title_frame, 
-            text="Forensic Timeline Builder v1.5 Professional",
+            text="Forensic Timeline Builder",
             bg='#000080', 
             fg='#ffffff',
             font=('MS Sans Serif', 14, 'bold')
