@@ -14,6 +14,8 @@ class CustomTitleBar:
         
         self.parent.overrideredirect(True)
         
+        self.parent.bind("<Map>", self.on_map)
+        
         self.title_bar = tk.Frame(parent, bg="#000080", relief=tk.RAISED, bd=1)
         self.title_bar.pack(side=tk.TOP, fill=tk.X)
         
@@ -50,6 +52,11 @@ class CustomTitleBar:
         self.y = 0
         self.maximized = False
         
+    def on_map(self, event):
+        """Called when window is restored from minimized state"""
+        # Small delay to ensure window is fully mapped
+        self.parent.after(10, lambda: self.parent.overrideredirect(True))
+        
     def start_move(self, event):
         self.x = event.x
         self.y = event.y
@@ -63,7 +70,13 @@ class CustomTitleBar:
             self.parent.geometry(f"+{x}+{y}")
             
     def minimize_window(self):
-        self.parent.iconify()
+        try:
+            self.parent.iconify()
+        except:
+            # If iconify fails due to overrideredirect, use withdraw instead
+            self.parent.withdraw()
+            # Schedule restoration - add to taskbar alternative
+            self.parent.after(100, lambda: self.parent.deiconify())
         
     def maximize_window(self):
         if not self.maximized:
@@ -80,10 +93,10 @@ class CustomTitleBar:
         self.title_label.config(text="  " + title)
 
 class MO95Office:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Microsoft Office")
-        self.root.geometry("1000x700")
+    def __init__(self, rootmo95):
+        self.rootmo95 = rootmo95
+        self.rootmo95.title("Multiapp Office")
+        self.rootmo95.geometry("1000x700")
         
         # Colors
         self.bg_color = "#C0C0C0"
@@ -92,14 +105,15 @@ class MO95Office:
         self.gray_dark = "#808080"
         self.gray_light = "#DFDFDF"
         
-        self.title_bar = CustomTitleBar(self.root, "Microsoft Office - Untitled")
-        self.root.configure(bg=self.bg_color)
+        self.title_bar = CustomTitleBar(self.rootmo95, "Multiapp Office - Untitled")
+        self.rootmo95.configure(bg=self.bg_color)
         
         # Document state
         self.current_file = None
         self.document_modified = False
         self.recent_files = []
         self.find_index = "1.0"
+        self.tables = {}
         
         # Page margins in inches
         self.left_margin = 1.25
@@ -130,16 +144,16 @@ class MO95Office:
         self.text_editor.bind("<Control-h>", lambda e: self.replace_text())
         
         # Handle close event
-        self.root.bind("<<AppClose>>", lambda e: self.exit_application())
+        self.rootmo95.bind("<<AppClose>>", lambda e: self.exit_application())
         
         # Handle window resize to update margins
-        self.root.bind("<Configure>", self.on_window_resize)
+        self.rootmo95.bind("<Configure>", self.on_window_resize)
         
         self.load_recent_files()
         
     def create_menu(self):
-        menubar = tk.Menu(self.root, bg=self.bg_color, relief=tk.FLAT, bd=0)
-        self.root.config(menu=menubar)
+        menubar = tk.Menu(self.rootmo95, bg=self.bg_color, relief=tk.FLAT, bd=0)
+        self.rootmo95.config(menu=menubar)
         
         # File Menu
         file_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
@@ -228,12 +242,12 @@ class MO95Office:
         # Help Menu
         help_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
         menubar.add_cascade(label="Help", menu=help_menu)
-        help_menu.add_command(label="About Microsoft Office", command=self.show_about)
+        help_menu.add_command(label="About Multiapp Office", command=self.show_about)
         
         # Keyboard shortcuts
-        self.root.bind("<Control-n>", lambda e: self.new_document())
-        self.root.bind("<Control-o>", lambda e: self.open_document())
-        self.root.bind("<Control-s>", lambda e: self.save_document())
+        self.rootmo95.bind("<Control-n>", lambda e: self.new_document())
+        self.rootmo95.bind("<Control-o>", lambda e: self.open_document())
+        self.rootmo95.bind("<Control-s>", lambda e: self.save_document())
         
     def toggle_margin_padding(self):
         """Toggle între frame-based și tag-based margins"""
@@ -260,17 +274,40 @@ class MO95Office:
                     saved_tags[tag] = [(str(ranges[i]), str(ranges[i+1])) 
                                       for i in range(0, len(ranges), 2)]
         
+        # Salvează datele tabelelor
+        saved_tables = []
+        for table_id, table_info in self.tables.items():
+            try:
+                frame = table_info['frame']
+                table_data = []
+                for row_frame in frame.winfo_children():
+                    row_data = []
+                    for text_widget in row_frame.winfo_children():
+                        if isinstance(text_widget, tk.Text):
+                            row_data.append(text_widget.get("1.0", "end-1c"))
+                    if row_data:
+                        table_data.append(row_data)
+                
+                saved_tables.append({
+                    'position': table_info['position'],
+                    'rows': table_info['rows'],
+                    'cols': table_info['cols'],
+                    'data': table_data
+                })
+            except:
+                pass
+        
         # Distruge container-ul vechi
         self.editor_container.destroy()
         
         # Recreează editor-ul
         self.create_editor()
         
-        # Restaurează conținutul
+        # Restituie conținutul
         self.text_editor.delete("1.0", tk.END)
         self.text_editor.insert("1.0", content)
         
-        # Restaurează tag-urile
+        # Restituie tag-urile
         for tag, ranges in saved_tags.items():
             # Re-configurează tag-ul dacă e nevoie
             if tag.startswith("color_"):
@@ -286,7 +323,57 @@ class MO95Office:
                 except:
                     pass
         
-        # Restaurează poziția cursorului
+        # Restituie tabelele
+        self.tables = {}
+        for table_info in saved_tables:
+            try:
+                rows = table_info['rows']
+                cols = table_info['cols']
+                position = table_info['position']
+                data = table_info['data']
+                
+                # Creează frame-ul tabelului
+                table_frame = tk.Frame(self.text_editor, bg="black", relief=tk.SOLID, bd=1)
+                
+                for r in range(rows):
+                    row_frame = tk.Frame(table_frame, bg="white")
+                    row_frame.grid(row=r, column=0, sticky="ew")
+                    table_frame.grid_rowconfigure(r, weight=1)
+                    
+                    text_widgets = []
+                    for c in range(cols):
+                        text = tk.Text(row_frame, width=15, height=1, 
+                                      relief=tk.SOLID, bd=1, wrap=tk.WORD,
+                                      font=(self.current_font_family, self.current_font_size))
+                        text.grid(row=0, column=c, padx=0, pady=0, sticky="nsew")
+                        row_frame.grid_columnconfigure(c, weight=1)
+                        
+                        # Inserează datele
+                        if r < len(data) and c < len(data[r]):
+                            text.insert("1.0", data[r][c])
+                        
+                        text_widgets.append(text)
+                    
+                    # Bind auto-resize pentru acest rând
+                    for txt in text_widgets:
+                        txt.bind('<KeyRelease>', lambda e, t=txt, rw=text_widgets: self.auto_resize_table_row(e, t, rw))
+                
+                # Inserează tabelul
+                self.text_editor.mark_set(tk.INSERT, position)
+                self.text_editor.window_create(position, window=table_frame)
+                
+                # Salvează referința
+                table_id = f"table_{len(self.tables)}"
+                self.tables[table_id] = {
+                    'frame': table_frame,
+                    'rows': rows,
+                    'cols': cols,
+                    'position': position
+                }
+            except Exception as e:
+                print(f"Error restoring table: {e}")
+        
+        # Restituie poziția cursorului
         try:
             self.text_editor.mark_set(tk.INSERT, cursor_pos)
             self.text_editor.see(cursor_pos)
@@ -297,7 +384,7 @@ class MO95Office:
         self.text_editor.edit_modified(False)
         
     def create_toolbar(self):
-        toolbar_frame = tk.Frame(self.root, bg=self.bg_color, relief=tk.RAISED, bd=1)
+        toolbar_frame = tk.Frame(self.rootmo95, bg=self.bg_color, relief=tk.RAISED, bd=1)
         toolbar_frame.pack(side=tk.TOP, fill=tk.X, padx=1, pady=1)
         
         self.create_toolbar_button(toolbar_frame, "New", self.new_document)
@@ -320,7 +407,7 @@ class MO95Office:
         self.create_toolbar_button(toolbar_frame, "Table", self.insert_table)
         
     def create_format_bar(self):
-        format_frame = tk.Frame(self.root, bg=self.bg_color, relief=tk.RAISED, bd=1)
+        format_frame = tk.Frame(self.rootmo95, bg=self.bg_color, relief=tk.RAISED, bd=1)
         format_frame.pack(side=tk.TOP, fill=tk.X, padx=1, pady=1)
         
         tk.Label(format_frame, text="Font:", bg=self.bg_color, 
@@ -368,7 +455,7 @@ class MO95Office:
         self.create_toolbar_button(format_frame, "Highlight", self.change_highlight_color)
         
     def create_ruler(self):
-        ruler_frame = tk.Frame(self.root, bg=self.white, height=25, relief=tk.SUNKEN, bd=1)
+        ruler_frame = tk.Frame(self.rootmo95, bg=self.white, height=25, relief=tk.SUNKEN, bd=1)
         ruler_frame.pack(side=tk.TOP, fill=tk.X, padx=1)
         ruler_frame.pack_propagate(False)
         
@@ -384,7 +471,7 @@ class MO95Office:
         self.dragging_margin = None
         
         # Initial draw after a delay to ensure proper sizing
-        self.root.after(100, self.draw_ruler)
+        self.rootmo95.after(100, self.draw_ruler)
         
     def draw_ruler(self):
         """Draw ruler with current margins"""
@@ -422,7 +509,7 @@ class MO95Office:
         
         # Calculate margin positions
         left_margin_x = self.left_margin * pixels_per_inch
-        right_margin_x = (paper_width - self.right_margin) * pixels_per_inch
+        right_margin_x = (paper_width - self.right_margin) * pixels_per_inch - 19
         
         # Draw left margin marker (triangle pointing right)
         self.left_marker = self.ruler_canvas.create_polygon(
@@ -454,7 +541,7 @@ class MO95Office:
         pixels_per_inch = width / paper_width
         
         left_margin_x = self.left_margin * pixels_per_inch
-        right_margin_x = (paper_width - self.right_margin) * pixels_per_inch
+        right_margin_x = (paper_width - self.right_margin) * pixels_per_inch - 19
         
         # Check if clicking near left margin marker
         if abs(event.x - left_margin_x) < 15:
@@ -487,8 +574,10 @@ class MO95Office:
             self.draw_ruler()
             self.apply_margins_to_document(margin_type='left')
         elif self.dragging_margin == "right":
-            # inches este poziția de pe grid (de la stânga)
-            # right_margin trebuie să fie distanța de la dreapta pentru documentul propriu-zis
+            # Compensate for the -19 pixel offset when dragging
+            adjusted_x = event.x + 19
+            inches = adjusted_x / pixels_per_inch
+            
             right_inches = paper_width - inches
             self.right_margin = max(0, min(6, right_inches))
             # Only update right margin in document
@@ -496,7 +585,10 @@ class MO95Office:
             self.apply_margins_to_document(margin_type='right')
 
         # Afișează poziția absolută de pe grid pentru ambele
-        right_position_on_grid = paper_width - self.right_margin
+        # Afișează poziția absolută de pe grid pentru ambele
+        offset_inches = 19 / pixels_per_inch
+        right_position_on_grid = paper_width - self.right_margin - offset_inches
+        #right_position_on_grid = paper_width - self.right_margin - (19 / pixels_per_inch)
         self.status_label.config(text=f"Margins: Left={self.left_margin:.2f}\" Right={right_position_on_grid:.2f}\" (grid position)")
         
     def on_ruler_release(self, event):
@@ -550,7 +642,7 @@ class MO95Office:
             pass
         
     def create_editor(self):
-        self.editor_container = tk.Frame(self.root, bg=self.gray_dark)
+        self.editor_container = tk.Frame(self.rootmo95, bg=self.gray_dark)
         self.editor_container.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=4, pady=4)
         
         scrollbar = tk.Scrollbar(self.editor_container, orient=tk.VERTICAL)
@@ -610,7 +702,7 @@ class MO95Office:
         self.text_editor.bind("<<Modified>>", self.on_text_modified)
         
         # Initial update
-        self.root.after(100, self.update_status)
+        self.rootmo95.after(100, self.update_status)
         
     def on_mousewheel(self, event):
         """Handle mouse wheel scrolling"""
@@ -640,7 +732,7 @@ class MO95Office:
         self.update_word_count()
         
     def create_statusbar(self):
-        statusbar = tk.Frame(self.root, bg=self.gray_light, relief=tk.SUNKEN, bd=1)
+        statusbar = tk.Frame(self.rootmo95, bg=self.gray_light, relief=tk.SUNKEN, bd=1)
         statusbar.pack(side=tk.BOTTOM, fill=tk.X)
         
         self.status_label = tk.Label(statusbar, text="Ready", bg=self.gray_light, 
@@ -701,14 +793,14 @@ class MO95Office:
     
     def on_window_resize(self, event=None):
         """Handle window resize to update ruler and margins"""
-        # Only process resize events from the root window
-        if event and event.widget != self.root:
+        # Only process resize events from the rootmo95 window
+        if event and event.widget != self.rootmo95:
             return
         # Redraw ruler and reapply margins with new scale
-        self.root.after(50, lambda: (self.draw_ruler(), self.apply_margins_to_document()))
+        self.rootmo95.after(50, lambda: (self.draw_ruler(), self.apply_margins_to_document()))
             
     def update_title(self):
-        title = "Microsoft Office - "
+        title = "Multiapp Office - "
         if self.current_file:
             title += os.path.basename(self.current_file)
         else:
@@ -719,7 +811,7 @@ class MO95Office:
         
     def new_document(self):
         if self.document_modified:
-            response = messagebox.askyesnocancel("Microsoft Office", 
+            response = messagebox.askyesnocancel("Multiapp Office", 
                                                  "Do you want to save changes?")
             if response is None:
                 return
@@ -734,7 +826,7 @@ class MO95Office:
         
     def open_document(self):
         if self.document_modified:
-            response = messagebox.askyesnocancel("Microsoft Office", 
+            response = messagebox.askyesnocancel("Multiapp Office", 
                                                  "Do you want to save changes?")
             if response is None:
                 return
@@ -743,20 +835,20 @@ class MO95Office:
                 
         filename = filedialog.askopenfilename(
             defaultextension=".mo95",
-            filetypes=[("MO95 Documents", "*.mo95"), ("All Files", "*.*")]
+            filetypes=[("MO95 Documents", "*.mo95")]
         )
         
         if filename:
             try:
                 tree = ET.parse(filename)
-                root = tree.getroot()
+                rootmo95 = tree.getroot()
                 
-                content_elem = root.find('content')
+                content_elem = rootmo95.find('content')
                 if content_elem is not None and content_elem.text:
                     self.text_editor.delete("1.0", tk.END)
                     self.text_editor.insert("1.0", content_elem.text)
                 
-                formatting_elem = root.find('formatting')
+                formatting_elem = rootmo95.find('formatting')
                 if formatting_elem is not None:
                     for fmt in formatting_elem.findall('format'):
                         start_idx = fmt.get('start')
@@ -776,7 +868,7 @@ class MO95Office:
                                 
                                 self.text_editor.tag_add(tag, start_idx, end_idx)
                 
-                page_setup_elem = root.find('page_setup')
+                page_setup_elem = rootmo95.find('page_setup')
                 if page_setup_elem is not None:
                     self.left_margin = float(page_setup_elem.get('left_margin', 1.25))
                     self.right_margin = float(page_setup_elem.get('right_margin', 1.25))
@@ -784,6 +876,69 @@ class MO95Office:
                     self.bottom_margin = float(page_setup_elem.get('bottom_margin', 1.0))
                     self.draw_ruler()
                     self.apply_margins_to_document()
+                    
+                font_elem = rootmo95.find('font_settings')
+                if font_elem is not None:
+                    self.current_font_family = font_elem.get('family', 'Arial')
+                    self.current_font_size = int(font_elem.get('size', 12))
+                    
+                    self.font_var.set(self.current_font_family)
+                    self.size_var.set(str(self.current_font_size))
+                    self.text_editor.configure(font=(self.current_font_family, self.current_font_size))
+                    self.update_tag_fonts()
+                
+                # Restaurează tabelele
+                self.tables = {}
+                tables_elem = rootmo95.find('tables')
+                if tables_elem is not None:
+                    for table in tables_elem.findall('table'):
+                        try:
+                            position = table.get('position')
+                            rows = int(table.get('rows'))
+                            cols = int(table.get('cols'))
+                            
+                            # Creează frame-ul tabelului
+                            table_frame = tk.Frame(self.text_editor, bg="black", relief=tk.SOLID, bd=1)
+                            
+                            for r in range(rows):
+                                row_frame = tk.Frame(table_frame, bg="white")
+                                row_frame.grid(row=r, column=0, sticky="ew")
+                                table_frame.grid_rowconfigure(r, weight=1)
+                                
+                                text_widgets = []
+                                for c in range(cols):
+                                    text = tk.Text(row_frame, width=15, height=1, 
+                                                  relief=tk.SOLID, bd=1, wrap=tk.WORD,
+                                                  font=(self.current_font_family, self.current_font_size))
+                                    text.grid(row=0, column=c, padx=0, pady=0, sticky="nsew")
+                                    row_frame.grid_columnconfigure(c, weight=1)
+                                    
+                                    # Găsește conținutul
+                                    for cell in table.findall('cell'):
+                                        if int(cell.get('row')) == r and int(cell.get('col')) == c:
+                                            if cell.text:
+                                                text.insert("1.0", cell.text)
+                                    
+                                    text_widgets.append(text)
+                                
+                                # Bind auto-resize pentru acest rând
+                                for txt in text_widgets:
+                                    txt.bind('<KeyRelease>', lambda e, t=txt, rw=text_widgets: self.auto_resize_table_row(e, t, rw))
+                            
+                            # Inserează tabelul
+                            self.text_editor.mark_set(tk.INSERT, position)
+                            self.text_editor.window_create(position, window=table_frame)
+                            
+                            # Salvează referința
+                            table_id = f"table_{len(self.tables)}"
+                            self.tables[table_id] = {
+                                'frame': table_frame,
+                                'rows': rows,
+                                'cols': cols,
+                                'position': position
+                            }
+                        except Exception as e:
+                            print(f"Error loading table: {e}")
                 
                 self.current_file = filename
                 self.document_modified = False
@@ -793,7 +948,32 @@ class MO95Office:
                 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to open document:\n{str(e)}")
-                
+    
+    def auto_resize_table_row(self, event=None, txt=None, row_texts=None):
+        """Auto-resize table row based on content"""
+        if row_texts is None:
+            row_texts = []
+        
+        # Calculate required lines for this text
+        content = txt.get("1.0", "end-1c")
+        if content:
+            # Estimate lines needed based on content length and width
+            chars_per_line = 15  # Approximate chars that fit in width
+            lines_needed = max(1, (len(content) // chars_per_line) + 1)
+            
+            # Find max height needed in this row
+            max_height = lines_needed
+            for t in row_texts:
+                t_content = t.get("1.0", "end-1c")
+                t_lines = max(1, (len(t_content) // chars_per_line) + 1)
+                max_height = max(max_height, t_lines)
+            
+            # Apply height to all text widgets in row
+            for t in row_texts:
+                t.config(height=max_height)
+        else:
+            txt.config(height=1)
+        
     def save_document(self):
         if self.current_file:
             self.save_to_file(self.current_file)
@@ -803,7 +983,7 @@ class MO95Office:
     def save_as_document(self):
         filename = filedialog.asksaveasfilename(
             defaultextension=".mo95",
-            filetypes=[("MO95 Documents", "*.mo95"), ("All Files", "*.*")]
+            filetypes=[("MO95 Documents", "*.mo95")]
         )
         
         if filename:
@@ -814,14 +994,34 @@ class MO95Office:
             
     def save_to_file(self, filename):
         try:
-            root = ET.Element('mo95_document')
-            root.set('version', '2.0')
+            rootmo95 = ET.Element('mo95_document')
+            rootmo95.set('version', '2.0')
             
             content = self.text_editor.get("1.0", "end-1c")
-            content_elem = ET.SubElement(root, 'content')
+            content_elem = ET.SubElement(rootmo95, 'content')
             content_elem.text = content
             
-            formatting_elem = ET.SubElement(root, 'formatting')
+            # Salvează tabelele
+            tables_elem = ET.SubElement(rootmo95, 'tables')
+            for table_id, table_info in self.tables.items():
+                try:
+                    table_elem = ET.SubElement(tables_elem, 'table')
+                    table_elem.set('position', table_info['position'])
+                    table_elem.set('rows', str(table_info['rows']))
+                    table_elem.set('cols', str(table_info['cols']))
+                    
+                    frame = table_info['frame']
+                    for r, row_frame in enumerate(frame.winfo_children()):
+                        for c, text_widget in enumerate(row_frame.winfo_children()):
+                            if isinstance(text_widget, tk.Text):
+                                cell_elem = ET.SubElement(table_elem, 'cell')
+                                cell_elem.set('row', str(r))
+                                cell_elem.set('col', str(c))
+                                cell_elem.text = text_widget.get("1.0", "end-1c")
+                except:
+                    pass
+            
+            formatting_elem = ET.SubElement(rootmo95, 'formatting')
             all_tags = self.text_editor.tag_names()
             
             for tag in all_tags:
@@ -836,19 +1036,23 @@ class MO95Office:
                         fmt_elem.set('end', str(ranges[i+1]))
                         fmt_elem.set('tags', tag)
             
-            page_setup_elem = ET.SubElement(root, 'page_setup')
+            page_setup_elem = ET.SubElement(rootmo95, 'page_setup')
             page_setup_elem.set('left_margin', str(self.left_margin))
             page_setup_elem.set('right_margin', str(self.right_margin))
             page_setup_elem.set('top_margin', str(self.top_margin))
             page_setup_elem.set('bottom_margin', str(self.bottom_margin))
             page_setup_elem.set('orientation', 'portrait')
             
-            metadata_elem = ET.SubElement(root, 'metadata')
+            metadata_elem = ET.SubElement(rootmo95, 'metadata')
             metadata_elem.set('created', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            metadata_elem.set('application', 'Microsoft Office MO95')
+            metadata_elem.set('application', 'Multiapp Office MO95')
             metadata_elem.set('version', '2.0')
             
-            xml_str = minidom.parseString(ET.tostring(root)).toprettyxml(indent="  ")
+            font_elem = ET.SubElement(rootmo95, 'font_settings')
+            font_elem.set('family', self.current_font_family)
+            font_elem.set('size', str(self.current_font_size))
+            
+            xml_str = minidom.parseString(ET.tostring(rootmo95)).toprettyxml(indent="  ")
             
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write(xml_str)
@@ -862,14 +1066,14 @@ class MO95Office:
             
     def exit_application(self):
         if self.document_modified:
-            response = messagebox.askyesnocancel("Microsoft Office", 
+            response = messagebox.askyesnocancel("Multiapp Office", 
                                                  "Do you want to save changes before exiting?")
             if response is None:
                 return
             elif response:
                 self.save_document()
         self.save_recent_files()
-        self.root.quit()
+        self.rootmo95.quit()
         
     def undo(self):
         try:
@@ -913,11 +1117,11 @@ class MO95Office:
         self.text_editor.see(tk.INSERT)
         
     def find_text(self):
-        find_window = tk.Toplevel(self.root)
+        find_window = tk.Toplevel(self.rootmo95)
         find_window.title("Find")
         find_window.geometry("400x120")
         find_window.configure(bg=self.bg_color)
-        find_window.transient(self.root)
+        find_window.transient(self.rootmo95)
         
         tk.Label(find_window, text="Find what:", bg=self.bg_color,
                 font=("MS Sans Serif", 8)).grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
@@ -954,11 +1158,11 @@ class MO95Office:
                                                                       padx=10, pady=10)
         
     def replace_text(self):
-        replace_window = tk.Toplevel(self.root)
+        replace_window = tk.Toplevel(self.rootmo95)
         replace_window.title("Replace")
         replace_window.geometry("450x160")
         replace_window.configure(bg=self.bg_color)
-        replace_window.transient(self.root)
+        replace_window.transient(self.rootmo95)
         
         tk.Label(replace_window, text="Find what:", bg=self.bg_color,
                 font=("MS Sans Serif", 8)).grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
@@ -1051,11 +1255,11 @@ class MO95Office:
             pass
             
     def change_font(self):
-        font_window = tk.Toplevel(self.root)
+        font_window = tk.Toplevel(self.rootmo95)
         font_window.title("Font")
         font_window.geometry("350x400")
         font_window.configure(bg=self.bg_color)
-        font_window.transient(self.root)
+        font_window.transient(self.rootmo95)
         font_window.grab_set()
         
         font_frame = tk.Frame(font_window, bg=self.white, relief=tk.SUNKEN, bd=1)
@@ -1087,6 +1291,17 @@ class MO95Office:
                 self.font_var.set(self.current_font_family)
                 self.text_editor.configure(font=(self.current_font_family, self.current_font_size))
                 self.update_tag_fonts()
+                
+                for table_id, table_info in self.tables.items():
+                    try:
+                        frame = table_info['frame']
+                        for row_frame in frame.winfo_children():
+                            for text_widget in row_frame.winfo_children():
+                                if isinstance(text_widget, tk.Text):
+                                    text_widget.configure(font=(self.current_font_family, self.current_font_size))
+                    except:
+                        pass
+                
                 font_window.destroy()
         
         button_frame = tk.Frame(font_window, bg=self.bg_color)
@@ -1102,10 +1317,30 @@ class MO95Office:
         self.text_editor.configure(font=(self.current_font_family, self.current_font_size))
         self.update_tag_fonts()
         
+        for table_id, table_info in self.tables.items():
+            try:
+                frame = table_info['frame']
+                for row_frame in frame.winfo_children():  # <-- Corectare aici
+                    for text_widget in row_frame.winfo_children():
+                        if isinstance(text_widget, tk.Text):
+                            text_widget.configure(font=(self.current_font_family, self.current_font_size))
+            except:
+                pass
+        
     def on_size_change(self, value):
         self.current_font_size = int(value)
         self.text_editor.configure(font=(self.current_font_family, self.current_font_size))
         self.update_tag_fonts()
+        
+        for table_id, table_info in self.tables.items():
+            try:
+                frame = table_info['frame']
+                for row_frame in frame.winfo_children():
+                    for text_widget in row_frame.winfo_children():
+                        if isinstance(text_widget, tk.Text):
+                            text_widget.configure(font=(self.current_font_family, self.current_font_size))
+            except:
+                pass
         
     def update_tag_fonts(self):
         self.text_editor.tag_configure("bold", font=(self.current_font_family, 
@@ -1136,56 +1371,106 @@ class MO95Office:
                 pass
                 
     def insert_table(self):
-        """Insert ASCII text-based table into document"""
-        table_window = tk.Toplevel(self.root)
-        table_window.title("Insert Table")
-        table_window.geometry("350x200")
-        table_window.configure(bg=self.bg_color)
-        table_window.transient(self.root)
-        table_window.grab_set()
+        """Insert Excel-like table with auto-resizing rows"""
+        dialog = tk.Toplevel(self.rootmo95)
+        dialog.title("Insert Table")
+        dialog.geometry("300x150")
+        dialog.configure(bg=self.bg_color)
+        dialog.transient(self.rootmo95)
+        dialog.grab_set()
         
-        content_frame = tk.Frame(table_window, bg=self.white, relief=tk.SUNKEN, bd=1)
-        content_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        tk.Label(dialog, text="Rows:", bg=self.bg_color).grid(row=0, column=0, padx=10, pady=10)
+        rows_entry = tk.Entry(dialog, width=10)
+        rows_entry.grid(row=0, column=1, padx=10, pady=10)
+        rows_entry.insert(0, "3")
         
-        tk.Label(content_frame, text="Number of rows:", bg=self.white,
-                font=("MS Sans Serif", 8)).grid(row=0, column=0, padx=20, pady=15, sticky=tk.W)
-        rows_entry = tk.Entry(content_frame, width=10, font=("MS Sans Serif", 9))
-        rows_entry.grid(row=0, column=1, padx=10, pady=15)
-        rows_entry.insert(0, "5")
-        
-        tk.Label(content_frame, text="Number of columns:", bg=self.white,
-                font=("MS Sans Serif", 8)).grid(row=1, column=0, padx=20, pady=15, sticky=tk.W)
-        cols_entry = tk.Entry(content_frame, width=10, font=("MS Sans Serif", 9))
-        cols_entry.grid(row=1, column=1, padx=10, pady=15)
-        cols_entry.insert(0, "4")
+        tk.Label(dialog, text="Columns:", bg=self.bg_color).grid(row=1, column=0, padx=10, pady=10)
+        cols_entry = tk.Entry(dialog, width=10)
+        cols_entry.grid(row=1, column=1, padx=10, pady=10)
+        cols_entry.insert(0, "3")
         
         def create_table():
             try:
                 rows = int(rows_entry.get())
                 cols = int(cols_entry.get())
+                dialog.destroy()
                 
-                if rows < 1 or cols < 1 or rows > 50 or cols > 20:
-                    messagebox.showerror("Error", "Invalid table size\n(1-50 rows, 1-20 cols)")
-                    return
+                # Create table frame
+                table_frame = tk.Frame(self.text_editor, bg="black", relief=tk.SOLID, bd=1)
                 
-                # Generate ASCII table
-                table_text = self.generate_ascii_table(rows, cols)
+                # Store all text widgets for each row
+                row_widgets = []
                 
-                self.text_editor.insert(tk.INSERT, "\n" + table_text + "\n")
+                for r in range(rows):
+                    row_frame = tk.Frame(table_frame, bg="white")
+                    row_frame.grid(row=r, column=0, sticky="ew")
+                    table_frame.grid_rowconfigure(r, weight=1)
+                    
+                    text_widgets = []
+                    for c in range(cols):
+                        # Use Text widget instead of Entry for multi-line support
+                        text = tk.Text(row_frame, width=15, height=1, 
+                                      relief=tk.SOLID, bd=1, wrap=tk.WORD,
+                                      font=(self.current_font_family, self.current_font_size))
+                        text.grid(row=0, column=c, padx=0, pady=0, sticky="nsew")
+                        row_frame.grid_columnconfigure(c, weight=1)
+                        
+                        # Auto-resize function for this text widget
+                        def auto_resize(event=None, txt=text, row_texts=None):
+                            if row_texts is None:
+                                row_texts = []
+                            
+                            # Calculate required lines for this text
+                            content = txt.get("1.0", "end-1c")
+                            if content:
+                                # Estimate lines needed based on content length and width
+                                chars_per_line = 15  # Approximate chars that fit in width
+                                lines_needed = max(1, (len(content) // chars_per_line) + 1)
+                                
+                                # Find max height needed in this row
+                                max_height = lines_needed
+                                for t in row_texts:
+                                    t_content = t.get("1.0", "end-1c")
+                                    t_lines = max(1, (len(t_content) // chars_per_line) + 1)
+                                    max_height = max(max_height, t_lines)
+                                
+                                # Apply height to all text widgets in row
+                                for t in row_texts:
+                                    t.config(height=max_height)
+                            else:
+                                txt.config(height=1)
+                        
+                        text_widgets.append(text)
+                    
+                    # Bind auto-resize to all text widgets in this row
+                    # for txt in text_widgets:
+                        # txt.bind('<KeyRelease>', lambda e, t=txt, rw=text_widgets: auto_resize(e, t, rw))
+                    for txt in text_widgets:
+                        txt.bind('<KeyRelease>', lambda e, t=txt, rw=text_widgets: self.auto_resize_table_row(e, t, rw))
+                    
+                    row_widgets.append(text_widgets)
                 
-                table_window.destroy()
-                self.status_label.config(text=f"Table inserted: {rows}x{cols}")
+                # Make table frame expandable
+                table_frame.grid_columnconfigure(0, weight=1)
+                
+                # Insert frame into text widget
+                insert_pos = self.text_editor.index(tk.INSERT)
+                self.text_editor.window_create(tk.INSERT, window=table_frame)
+                self.text_editor.insert(tk.INSERT, "\n")
+                
+                # Salvează referința la tabel
+                table_id = f"table_{len(self.tables)}"
+                self.tables[table_id] = {
+                    'frame': table_frame,
+                    'rows': rows,
+                    'cols': cols,
+                    'position': insert_pos
+                }
                 
             except ValueError:
                 messagebox.showerror("Error", "Please enter valid numbers")
         
-        button_frame = tk.Frame(table_window, bg=self.bg_color)
-        button_frame.pack(pady=10)
-        
-        tk.Button(button_frame, text="Insert", command=create_table, width=10, 
-                 bg=self.bg_color, font=("MS Sans Serif", 8)).pack(side=tk.LEFT, padx=5)
-        tk.Button(button_frame, text="Cancel", command=table_window.destroy, width=10,
-                 bg=self.bg_color, font=("MS Sans Serif", 8)).pack(side=tk.LEFT, padx=5)
+        tk.Button(dialog, text="Insert", command=create_table, bg=self.bg_color).grid(row=2, column=0, columnspan=2, pady=20)
     
     def generate_ascii_table(self, rows, cols):
         """Generate ASCII table with borders"""
@@ -1272,11 +1557,11 @@ class MO95Office:
         
     def page_setup(self):
         """Functional page setup dialog with proper margin controls"""
-        setup_window = tk.Toplevel(self.root)
+        setup_window = tk.Toplevel(self.rootmo95)
         setup_window.title("Page Setup")
         setup_window.geometry("400x320")
         setup_window.configure(bg=self.bg_color)
-        setup_window.transient(self.root)
+        setup_window.transient(self.rootmo95)
         setup_window.grab_set()
         
         margins_frame = tk.LabelFrame(setup_window, text="Margins (inches)", 
@@ -1305,24 +1590,33 @@ class MO95Office:
                 font=("MS Sans Serif", 8)).grid(row=3, column=0, padx=10, pady=10, sticky=tk.W)
         right_entry = tk.Entry(margins_frame, width=10, font=("MS Sans Serif", 9))
         right_entry.grid(row=3, column=1, padx=10, pady=10)
-        right_entry.insert(0, str(self.right_margin))
+        #right_entry.insert(0, str(self.right_margin))
+        paper_width = 8.5
+        #right_position_on_grid = paper_width - self.right_margin
+        right_position_on_grid = paper_width - self.right_margin - (19 / ((self.ruler_canvas.winfo_width() if self.ruler_canvas.winfo_width() > 1 else 800) / paper_width))
+        right_entry.insert(0, str(round(right_position_on_grid, 2)))
         
         def apply_setup():
             try:
                 #new_top = float(top_entry.get())
                 #new_bottom = float(bottom_entry.get())
                 new_left = float(left_entry.get())
-                new_right = float(right_entry.get())
+                new_right_position = float(right_entry.get())  # poziție de pe grid
+                paper_width = 8.5
+                #new_right = paper_width - new_right_position  # convertește în distanță de la dreapta
+                new_right = paper_width - new_right_position - (19 / ((self.ruler_canvas.winfo_width() if self.ruler_canvas.winfo_width() > 1 else 800) / paper_width))
                 
                 # Validate margins
                 #if new_top < 0 or new_top > 5:
                     #raise ValueError("Top margin must be between 0 and 5 inches")
                 #if new_bottom < 0 or new_bottom > 5:
                     #raise ValueError("Bottom margin must be between 0 and 5 inches")
-                if new_left < 0 or new_left > 6:
-                    raise ValueError("Left margin must be between 0 and 6 inches")
-                if new_right < 0 or new_right > 6:
-                    raise ValueError("Right margin must be between 0 and 6 inches")
+                if new_right_position < 0 or new_right_position > 8.5:
+                    raise ValueError("Right position must be between 0 and 8.5 inches")
+                # if new_left < 0 or new_left > 6:
+                    # raise ValueError("Left margin must be between 0 and 6 inches")
+                # if new_right < 0 or new_right > 6:
+                    # raise ValueError("Right margin must be between 0 and 6 inches")
                 
                 # Apply new margins
                 #self.top_margin = new_top
@@ -1335,7 +1629,9 @@ class MO95Office:
                 self.apply_margins_to_document()
                 
                 setup_window.destroy()
-                self.status_label.config(text=f"Page setup updated - Margins: L={self.left_margin:.2f}\" R={self.right_margin:.2f}\"")
+                #right_position_on_grid = paper_width - self.right_margin
+                right_position_on_grid = paper_width - self.right_margin - (19 / ((self.ruler_canvas.winfo_width() if self.ruler_canvas.winfo_width() > 1 else 800) / paper_width))
+                self.status_label.config(text=f"Margins: Left={self.left_margin:.2f}\" Right={right_position_on_grid:.2f}\" (from edges)")
                 messagebox.showinfo("Page Setup", "Margins updated successfully!")
                 
             except ValueError as e:
@@ -1400,23 +1696,23 @@ class MO95Office:
             self.update_recent_menu()
             
     def show_about(self):
-        about_window = tk.Toplevel(self.root)
-        about_window.title("About Microsoft Office")
+        about_window = tk.Toplevel(self.rootmo95)
+        about_window.title("About Multiapp Office")
         about_window.geometry("450x300")
         about_window.configure(bg=self.bg_color)
-        about_window.transient(self.root)
+        about_window.transient(self.rootmo95)
         about_window.grab_set()
         
         title_frame = tk.Frame(about_window, bg=self.title_blue, height=35)
         title_frame.pack(fill=tk.X)
         title_frame.pack_propagate(False)
-        tk.Label(title_frame, text="Microsoft Office MO95", bg=self.title_blue, 
+        tk.Label(title_frame, text="Multiapp Office MO95", bg=self.title_blue, 
                 fg=self.white, font=("MS Sans Serif", 11, "bold")).pack(expand=True)
         
         content_frame = tk.Frame(about_window, bg=self.white)
         content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
-        tk.Label(content_frame, text="Microsoft Office", bg=self.white, 
+        tk.Label(content_frame, text="Multiapp Office", bg=self.white, 
                 font=("Arial", 18, "bold")).pack(pady=20)
         tk.Label(content_frame, text="Professional Edition", bg=self.white, 
                 font=("Arial", 10)).pack()
@@ -1424,7 +1720,7 @@ class MO95Office:
                 font=("Arial", 10)).pack(pady=5)
         tk.Label(content_frame, text="With Toggle Margin Padding", bg=self.white, 
                 font=("Arial", 9, "italic")).pack(pady=5)
-        tk.Label(content_frame, text="Copyright © 1995 Microsoft Corporation", 
+        tk.Label(content_frame, text="Copyright © 2025 Retro Computing Division", 
                 bg=self.white, font=("MS Sans Serif", 8)).pack(pady=10)
         tk.Label(content_frame, text="All rights reserved.", bg=self.white, 
                 font=("MS Sans Serif", 8)).pack()
@@ -1433,6 +1729,6 @@ class MO95Office:
                  bg=self.bg_color, font=("MS Sans Serif", 8)).pack(pady=15)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = MO95Office(root)
-    root.mainloop()
+    rootmo95 = tk.Tk()
+    app = MO95Office(rootmo95)
+    rootmo95.mainloop()
