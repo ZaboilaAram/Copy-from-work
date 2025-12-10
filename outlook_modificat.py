@@ -56,9 +56,21 @@ self.attachments_frame.pack(fill="x", padx=2, pady=(0, 2))
 tk.Label(self.attachments_frame, text="Attachments: ", bg="#f0f0f0", 
          font=("MS Sans Serif", 8)).pack(side="left", padx=5)
 
-self.attachments_listbox = tk.Listbox(self.attachments_frame, bg="white", 
-                                       font=("MS Sans Serif", 8), height=2)
-self.attachments_listbox.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+# Container pentru listbox + scrollbar
+attachments_container = tk.Frame(self.attachments_frame, bg="white")
+attachments_container.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+
+# Scrollbar vertical
+attachments_scrollbar = tk.Scrollbar(attachments_container, bg="#c0c0c0")
+attachments_scrollbar.pack(side="right", fill="y")
+
+# Listbox cu scrollbar
+self.attachments_listbox = tk.Listbox(attachments_container, bg="white", 
+                                       font=("MS Sans Serif", 8), height=2,
+                                       yscrollcommand=attachments_scrollbar.set)
+self.attachments_listbox.pack(side="left", fill="both", expand=True)
+attachments_scrollbar.config(command=self.attachments_listbox.yview)
+
 self.attachments_listbox.bind("<Double-Button-1>", self.view_attachment)
 self.attachments_listbox.bind("<Button-3>", self.show_attachment_context_menu)
 
