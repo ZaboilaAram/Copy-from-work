@@ -42,8 +42,13 @@ def init_database(self):
 
 ############################################################
 
-# În setup_ui(), după self.date_label.pack():
+# În metoda setup_ui(), în secțiunea toolbar, după butonul "Delete":
 
+self.back_to_email_btn = tk.Button(toolbar, text="Back to Email", 
+                                    command=self.show_email_content, **btn_style)
+# Nu îl afișăm încă, îl vom afișa doar când e nevoie
+
+# În setup_ui(), după self.date_label.pack():
 # FRAME PENTRU ATAȘAMENTE
 self.attachments_frame = tk.Frame(right_panel, bg="#f0f0f0", relief="raised", bd=1)
 self.attachments_frame.pack(fill="x", padx=2, pady=(0, 2))
@@ -123,59 +128,47 @@ def show_email_preview(self, index):
 Class RetroMailClient
 
   def view_attachment(self, event=None):
-    """Deschide atașamentul într-o fereastră separată"""
-    selection = self.attachments_listbox.curselection()
-    if not selection or not self.current_email:
-        return
-    
-    index = selection[0]
-    file_name = self.current_email['attachments'][index]
-    
-    # Încarcă conținutul din baza de date
-    conn = sqlite3.connect(self.db_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT file_content FROM attachments WHERE email_id=? AND file_name=?", 
-                   (self.current_email['id'], file_name))
-    result = cursor.fetchone()
-    conn.close()
-    
-    if not result:
-        messagebox.showerror("Error", "Attachment not found!")
-        return
-    
-    file_content = result[0]
-    
-    # Fereastră de vizualizare
-    view_window = tk.Toplevel(self.rootmailoutlook)
-    view_window.title(f"View Attachment - {file_name}")
-    view_window.geometry("700x500")
-    view_window.configure(bg="#c0c0c0")
-    
-    # Toolbar
-    toolbar = tk.Frame(view_window, bg="#c0c0c0", relief="raised", bd=1)
-    toolbar.pack(fill="x", padx=2, pady=2)
-    
-    btn_style = {"bg": "#c0c0c0", "relief": "raised", "bd": 2, "font": ("MS Sans Serif", 8)}
-    tk.Button(toolbar, text="Save As...", 
-              command=lambda: self.save_attachment_from_viewer(file_name, file_content), 
-              **btn_style).pack(side="left", padx=2)
-    tk.Button(toolbar, text="Close", command=view_window.destroy, 
-              **btn_style).pack(side="left", padx=2)
-    
-    # Text widget pentru conținut
-    text_frame = tk.Frame(view_window, bg="#c0c0c0")
-    text_frame.pack(fill="both", expand=True, padx=5, pady=5)
-    
-    scrollbar = tk.Scrollbar(text_frame)
-    scrollbar.pack(side="right", fill="y")
-    
-    text_widget = tk.Text(text_frame, font=("Courier New", 9), 
-                         yscrollcommand=scrollbar.set, wrap="word")
-    text_widget.pack(side="left", fill="both", expand=True)
-    scrollbar.config(command=text_widget.yview)
-    
-    text_widget.insert(1.0, file_content)
-    text_widget.config(state="disabled")
+            """Afișează atașamentul în panoul de preview"""
+            selection = self.attachments_listbox.curselection()
+            if not selection or not self.current_email:
+                return
+            
+            index = selection[0]
+            file_name = self.current_email['attachments'][index]
+            
+            # Încarcă conținutul din baza de date
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT file_content FROM attachments WHERE email_id=? AND file_name=?", 
+                           (self.current_email['id'], file_name))
+            result = cursor.fetchone()
+            conn.close()
+            
+            if not result:
+                messagebox.showerror("Error", "Attachment not found!")
+                return
+            
+            file_content = result[0]
+            
+            # Afișează în panoul de body
+            self.email_body.config(state="normal")
+            self.email_body.delete(1.0, tk.END)
+            self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+            self.email_body.config(state="disabled")
+            
+            # Afișează butonul "Back to Email"
+            self.back_to_email_btn.pack(side="left", padx=2)
+
+        def show_email_content(self):
+            """Revine la afișarea conținutului email-ului"""
+            if self.current_email:
+                self.email_body.config(state="normal")
+                self.email_body.delete(1.0, tk.END)
+                self.email_body.insert(1.0, self.current_email['body'])
+                self.email_body.config(state="disabled")
+                
+                # Ascunde butonul "Back to Email"
+                self.back_to_email_btn.pack_forget()
 
 def show_attachment_context_menu(self, event):
     """Meniu contextual pentru atașamente"""
