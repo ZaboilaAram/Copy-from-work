@@ -86,6 +86,9 @@ self.attachments_inner_frame.bind("<Configure>",
 )
 
 # Apoi continuă cu body_container...
+body_container = tk.Frame(right_panel, bg="#c0c0c0")
+body_container.pack(fill="both", expand=True, padx=2, pady=2)
+self.body_container = body_container #ADAUGAT
 
 ############################################################
 def load_emails_from_db(self, folder):
@@ -126,53 +129,58 @@ def load_emails_from_db(self, folder):
 ############################################################
 
 def show_email_preview(self, index):
-            if 0 <= index < len(self.emails):
-                email = self.emails[index]
-                self.current_email = email
+    if 0 <= index < len(self.emails):
+        email = self.emails[index]
+        self.current_email = email
+        
+        self.from_label.config(text=f"From: {email['from']}")
+        self.to_label.config(text=f"To: {email['to']}")
+        self.subject_label.config(text=f"Subject: {email['subject']}")
+        self.date_label.config(text=f"Date: {email['date']}")
+        
+        # ACTUALIZEAZĂ LISTA DE ATAȘAMENTE - ORIZONTAL CA LABELS
+        # Șterge labels-urile vechi
+        for widget in self.attachments_inner_frame.winfo_children():
+            widget.destroy()
+        
+        # Arată sau ascunde frame-ul de atașamente
+        if email.get('attachments'):
+            # Ascunde mai întâi pentru a reseta poziția
+            self.attachments_frame.pack_forget()
+            # Apoi afișează înainte de body_container
+            self.attachments_frame.pack(fill="x", padx=2, pady=0, before=self.body_container)
+            
+            for i, att in enumerate(email['attachments']):
+                # Creează un label pentru fiecare atașament
+                att_label = tk.Label(
+                    self.attachments_inner_frame,
+                    text=f"📎 {att}",
+                    bg="white",
+                    fg="black",
+                    font=("MS Sans Serif", 8, "underline"),
+                    cursor="hand2",
+                    padx=5
+                )
+                att_label.pack(side="left", padx=2)
                 
-                self.from_label.config(text=f"From: {email['from']}")
-                self.to_label.config(text=f"To: {email['to']}")
-                self.subject_label.config(text=f"Subject: {email['subject']}")
-                self.date_label.config(text=f"Date: {email['date']}")
+                # Double-click pentru a vizualiza
+                att_label.bind("<Double-Button-1>", lambda e, idx=i: self.view_attachment_by_index(idx))
                 
-                # ACTUALIZEAZĂ LISTA DE ATAȘAMENTE - ORIZONTAL CA LABELS
-                # Șterge labels-urile vechi
-                for widget in self.attachments_inner_frame.winfo_children():
-                    widget.destroy()
-                
-                if email.get('attachments'):
-                    for i, att in enumerate(email['attachments']):
-                        # Creează un label pentru fiecare atașament
-                        att_label = tk.Label(
-                            self.attachments_inner_frame,
-                            text=f"📎 {att}",
-                            bg="white",
-                            fg="black",
-                            font=("MS Sans Serif", 8, "underline"),
-                            cursor="hand2",
-                            padx=5
-                        )
-                        att_label.pack(side="left", padx=2)
-                        
-                        # Double-click pentru a vizualiza
-                        att_label.bind("<Double-Button-1>", lambda e, idx=i: self.view_attachment_by_index(idx))
-                        
-                        # Right-click pentru meniu contextual
-                        att_label.bind("<Button-3>", lambda e, idx=i: self.show_attachment_context_menu_by_index(e, idx))
-                        
-                        # Hover effect - schimbă culoarea de fundal
-                        #att_label.bind("<Enter>", lambda e, lbl=att_label: lbl.config(bg="#e0e0e0"))
-                        #att_label.bind("<Leave>", lambda e, lbl=att_label: lbl.config(bg="white"))
-                
-                # Update scroll region
-                self.attachments_inner_frame.update_idletasks()
-                self.attachments_canvas.configure(scrollregion=self.attachments_canvas.bbox("all"))
-                ###
-                
-                self.email_body.config(state="normal")
-                self.email_body.delete(1.0, tk.END)
-                self.email_body.insert(1.0, email['body'])
-                self.email_body.config(state="disabled")
+                # Right-click pentru meniu contextual
+                att_label.bind("<Button-3>", lambda e, idx=i: self.show_attachment_context_menu_by_index(e, idx))
+            
+            # Update scroll region
+            self.attachments_inner_frame.update_idletasks()
+            self.attachments_canvas.configure(scrollregion=self.attachments_canvas.bbox("all"))
+        else:
+            self.attachments_frame.pack_forget()  # Ascunde frame-ul dacă nu sunt atașamente
+        
+        ###
+        
+        self.email_body.config(state="normal")
+        self.email_body.delete(1.0, tk.END)
+        self.email_body.insert(1.0, email['body'])
+        self.email_body.config(state="disabled")
 
 ############################################################
 ADAUGA:
