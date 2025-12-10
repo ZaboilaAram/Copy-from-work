@@ -217,7 +217,7 @@ def view_attachment_by_index(self, index):
                 # Afișare normală pentru alte tipuri de fișiere
                 self.email_body.config(state="normal")
                 self.email_body.delete(1.0, tk.END)
-                self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+                #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
                 self.email_body.config(state="disabled")
             
             # Afișează butonul "Back to Email"
@@ -235,7 +235,7 @@ def view_attachment_by_index(self, index):
                 self.email_body.delete(1.0, tk.END)
                 
                 # Header
-                self.email_body.insert(1.0, f"=== Viewing Document: {file_name} ===\n\n")
+                #self.email_body.insert(1.0, f"=== Viewing Document: {file_name} ===\n\n")
                 
                 # Extrage conținutul
                 content_elem = root.find('content')
@@ -346,7 +346,7 @@ def view_attachment_by_index(self, index):
                 # Dacă XML-ul e invalid, afișează ca text simplu
                 self.email_body.config(state="normal")
                 self.email_body.delete(1.0, tk.END)
-                self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n")
+                #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n")
                 self.email_body.insert(tk.END, "[Error parsing .mo95 file - showing raw content]\n\n")
                 self.email_body.insert(tk.END, xml_content)
                 self.email_body.config(state="disabled")
@@ -397,7 +397,7 @@ ADAUGA:
             # Afișează în panoul de body
             self.email_body.config(state="normal")
             self.email_body.delete(1.0, tk.END)
-            self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+            #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
             self.email_body.config(state="disabled")
             
             # Afișează butonul "Back to Email"
@@ -1043,7 +1043,7 @@ class RetroEmailClient:
             # Afișează în panoul de body
             self.email_body.config(state="normal")
             self.email_body.delete(1.0, tk.END)
-            self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+            #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
             self.email_body.config(state="disabled")
             
             # Afișează butonul "Back to Email"
@@ -1757,7 +1757,7 @@ class RetroEmailClient:
             # Afișează în panoul de body
             self.email_body.config(state="normal")
             self.email_body.delete(1.0, tk.END)
-            self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+            #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
             self.email_body.config(state="disabled")
             
             # Afișează butonul "Back to Email"
