@@ -54,25 +54,36 @@ self.attachments_frame = tk.Frame(right_panel, bg="#f0f0f0", relief="raised", bd
 self.attachments_frame.pack(fill="x", padx=2, pady=(0, 2))
 
 tk.Label(self.attachments_frame, text="Attachments: ", bg="#f0f0f0", 
-         font=("MS Sans Serif", 8)).pack(side="left", padx=5)
+         font=("MS Sans Serif", 8)).pack(side="left", padx=5, pady=2)
 
-# Container pentru listbox + scrollbar
-attachments_container = tk.Frame(self.attachments_frame, bg="white")
-attachments_container.pack(side="left", fill="both", expand=True, padx=5, pady=2)
+# Container pentru canvas + scrollbar
+attachments_container = tk.Frame(self.attachments_frame, bg="white", height=25)
+attachments_container.pack(side="left", fill="x", expand=True, padx=5, pady=2)
 
-# Scrollbar vertical
-attachments_scrollbar = tk.Scrollbar(attachments_container, bg="#c0c0c0")
-attachments_scrollbar.pack(side="right", fill="y")
+# Canvas pentru scroll orizontal
+self.attachments_canvas = tk.Canvas(attachments_container, bg="white", height=20, 
+                                     highlightthickness=0)
+self.attachments_canvas.pack(side="top", fill="x", expand=True)
 
-# Listbox cu scrollbar
-self.attachments_listbox = tk.Listbox(attachments_container, bg="white", 
-                                       font=("MS Sans Serif", 8), height=2,
-                                       yscrollcommand=attachments_scrollbar.set)
-self.attachments_listbox.pack(side="left", fill="both", expand=True)
-attachments_scrollbar.config(command=self.attachments_listbox.yview)
+# Scrollbar orizontal
+attachments_scrollbar = tk.Scrollbar(attachments_container, orient="horizontal", 
+                                      bg="#c0c0c0")
+attachments_scrollbar.pack(side="bottom", fill="x")
 
-self.attachments_listbox.bind("<Double-Button-1>", self.view_attachment)
-self.attachments_listbox.bind("<Button-3>", self.show_attachment_context_menu)
+# Frame interior pentru labels
+self.attachments_inner_frame = tk.Frame(self.attachments_canvas, bg="white")
+self.attachments_canvas_window = self.attachments_canvas.create_window(
+    (0, 0), window=self.attachments_inner_frame, anchor="nw"
+)
+
+# Conectează scrollbar-ul
+self.attachments_canvas.config(xscrollcommand=attachments_scrollbar.set)
+attachments_scrollbar.config(command=self.attachments_canvas.xview)
+
+# Update scroll region când se schimbă dimensiunea
+self.attachments_inner_frame.bind("<Configure>", 
+    lambda e: self.attachments_canvas.configure(scrollregion=self.attachments_canvas.bbox("all"))
+)
 
 # Apoi continuă cu body_container...
 
@@ -124,11 +135,39 @@ def show_email_preview(self, index):
                 self.subject_label.config(text=f"Subject: {email['subject']}")
                 self.date_label.config(text=f"Date: {email['date']}")
                 
-                # ACTUALIZEAZĂ LISTA DE ATAȘAMENTE
-                self.attachments_listbox.delete(0, tk.END)
+                # ACTUALIZEAZĂ LISTA DE ATAȘAMENTE - ORIZONTAL CA LABELS
+                # Șterge labels-urile vechi
+                for widget in self.attachments_inner_frame.winfo_children():
+                    widget.destroy()
+                
                 if email.get('attachments'):
-                    for att in email['attachments']:
-                        self.attachments_listbox.insert(tk.END, f"📎 {att}")
+                    for i, att in enumerate(email['attachments']):
+                        # Creează un label pentru fiecare atașament
+                        att_label = tk.Label(
+                            self.attachments_inner_frame,
+                            text=f"📎 {att}",
+                            bg="white",
+                            fg="black",
+                            font=("MS Sans Serif", 8, "underline"),
+                            cursor="hand2",
+                            padx=5
+                        )
+                        att_label.pack(side="left", padx=2)
+                        
+                        # Double-click pentru a vizualiza
+                        att_label.bind("<Double-Button-1>", lambda e, idx=i: self.view_attachment_by_index(idx))
+                        
+                        # Right-click pentru meniu contextual
+                        att_label.bind("<Button-3>", lambda e, idx=i: self.show_attachment_context_menu_by_index(e, idx))
+                        
+                        # Hover effect - schimbă culoarea de fundal
+                        #att_label.bind("<Enter>", lambda e, lbl=att_label: lbl.config(bg="#e0e0e0"))
+                        #att_label.bind("<Leave>", lambda e, lbl=att_label: lbl.config(bg="white"))
+                
+                # Update scroll region
+                self.attachments_inner_frame.update_idletasks()
+                self.attachments_canvas.configure(scrollregion=self.attachments_canvas.bbox("all"))
+                ###
                 
                 self.email_body.config(state="normal")
                 self.email_body.delete(1.0, tk.END)
@@ -136,9 +175,58 @@ def show_email_preview(self, index):
                 self.email_body.config(state="disabled")
 
 ############################################################
+ADAUGA:
+def view_attachment_by_index(self, index):
+    """Vizualizează atașamentul după index"""
+    if not self.current_email or not self.current_email.get('attachments'):
+        return
+    
+    if index >= len(self.current_email['attachments']):
+        return
+    
+    file_name = self.current_email['attachments'][index]
+    
+    # Încarcă conținutul din baza de date
+    conn = sqlite3.connect(self.db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT file_content FROM attachments WHERE email_id=? AND file_name=?", 
+                   (self.current_email['id'], file_name))
+    result = cursor.fetchone()
+    conn.close()
+    
+    if not result:
+        messagebox.showerror("Error", "Attachment not found!")
+        return
+    
+    file_content = result[0]
+    
+    # Afișează în panoul de body
+    self.email_body.config(state="normal")
+    self.email_body.delete(1.0, tk.END)
+    self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+    self.email_body.config(state="disabled")
+    
+    # Afișează butonul "Back to Email"
+    self.back_to_email_btn.pack(side="left", padx=2)
 
+def show_attachment_context_menu_by_index(self, event, index):
+    """Meniu contextual pentru atașamente (varianta cu butoane)"""
+    if not self.current_email or not self.current_email.get('attachments'):
+        return
+    
+    if index >= len(self.current_email['attachments']):
+        return
+    
+    file_name = self.current_email['attachments'][index]
+    
+    menu = tk.Menu(self.rootmailoutlook, tearoff=0, bg="#c0c0c0")
+    menu.add_command(label="View", command=lambda: self.view_attachment_by_index(index))
+    menu.add_command(label="Save As...", command=lambda: self.save_attachment(file_name))
+    menu.post(event.x_root, event.y_root)
+
+######################################################
 Class RetroMailClient
-
+ADAUGA:
   def view_attachment(self, event=None):
             """Afișează atașamentul în panoul de preview"""
             selection = self.attachments_listbox.curselection()
