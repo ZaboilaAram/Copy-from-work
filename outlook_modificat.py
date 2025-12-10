@@ -629,6 +629,7 @@ def attach_file(self, compose_window):
                 title="Select File to Attach",
                 filetypes=[
                     ("Text Files", "*.txt"),
+                    ("Multiapp 95 Office", "*.mo95"),
                     ("Log Files", "*.log"),
                     ("Configuration Files", "*.ini *.cfg *.conf"),
                     ("CSV Files", "*.csv"),
