@@ -340,7 +340,7 @@ def save_attachment_from_viewer(self, file_name, file_content):
 def open_compose_window(self, reply_to=None, forward=None):
             compose_window = tk.Toplevel(self.rootmailoutlook)
             compose_window.title("New Message")
-            compose_window.geometry("600x450") #ADAUGAT
+            compose_window.geometry("600x450")
             compose_window.configure(bg="#c0c0c0")
             compose_window.resizable(True, True)
             
@@ -350,7 +350,7 @@ def open_compose_window(self, reply_to=None, forward=None):
             btn_style = {"bg": "#c0c0c0", "relief": "raised", "bd": 2, "font": ("MS Sans Serif", 8)}
             tk.Button(toolbar, text="Send", command=lambda: self.send_message(compose_window), **btn_style).pack(side="left", padx=2)
             tk.Button(toolbar, text="Save Draft", command=lambda: self.save_draft(compose_window), **btn_style).pack(side="left", padx=2)
-            tk.Button(toolbar, text="Attach File", command=lambda: self.attach_file(compose_window), **btn_style).pack(side="left", padx=2) #ADAUGAT
+            tk.Button(toolbar, text="Attach File", command=lambda: self.attach_file(compose_window), **btn_style).pack(side="left", padx=2)
             
             headers_frame = tk.Frame(compose_window, bg="#c0c0c0")
             headers_frame.pack(fill="x", padx=5, pady=5)
@@ -365,18 +365,42 @@ def open_compose_window(self, reply_to=None, forward=None):
             
             headers_frame.columnconfigure(1, weight=1)
             
-            # FRAME PENTRU ATAȘAMENTE
-            attachments_frame = tk.Frame(compose_window, bg="#f0f0f0", relief="sunken", bd=1)
-            attachments_frame.pack(fill="x", padx=5, pady=(0, 5))
+            # FRAME PENTRU ATAȘAMENTE - ORIZONTAL
+            attachments_outer_frame = tk.Frame(compose_window, bg="#f0f0f0", relief="sunken", bd=1)
+            attachments_outer_frame.pack(fill="x", padx=5, pady=(0, 5))
             
-            tk.Label(attachments_frame, text="Attachments:", bg="#f0f0f0", 
-                     font=("MS Sans Serif", 8)).pack(side="left", padx=5)
+            tk.Label(attachments_outer_frame, text="Attachments:", bg="#f0f0f0", 
+                     font=("MS Sans Serif", 8)).pack(side="left", padx=5, pady=2)
             
-            attachments_listbox = tk.Listbox(attachments_frame, bg="white", 
-                                              font=("MS Sans Serif", 8), height=2)
-            attachments_listbox.pack(side="left", fill="both", expand=True, padx=5, pady=2)
-            attachments_listbox.bind("<Button-3>", lambda e: self.show_compose_attachment_menu(e, compose_window))
-            ####
+            # Container pentru canvas + scrollbar
+            attachments_container = tk.Frame(attachments_outer_frame, bg="white", height=25)
+            attachments_container.pack(side="left", fill="x", expand=True, padx=5, pady=2)
+            
+            # Canvas pentru scroll orizontal
+            attachments_canvas = tk.Canvas(attachments_container, bg="white", height=20, 
+                                            highlightthickness=0)
+            attachments_canvas.pack(side="top", fill="x", expand=True)
+            
+            # Scrollbar orizontal
+            attachments_scrollbar = tk.Scrollbar(attachments_container, orient="horizontal", 
+                                                  bg="#c0c0c0")
+            attachments_scrollbar.pack(side="bottom", fill="x")
+            
+            # Frame interior pentru labels
+            attachments_inner_frame = tk.Frame(attachments_canvas, bg="white")
+            attachments_canvas_window = attachments_canvas.create_window(
+                (0, 0), window=attachments_inner_frame, anchor="nw"
+            )
+            
+            # Conectează scrollbar-ul
+            attachments_canvas.config(xscrollcommand=attachments_scrollbar.set)
+            attachments_scrollbar.config(command=attachments_canvas.xview)
+            
+            # Update scroll region când se schimbă dimensiunea
+            attachments_inner_frame.bind("<Configure>", 
+                lambda e: attachments_canvas.configure(scrollregion=attachments_canvas.bbox("all"))
+            )
+            
             body_frame = tk.Frame(compose_window, bg="#c0c0c0")
             body_frame.pack(fill="both", expand=True, padx=5, pady=5)
             
@@ -405,68 +429,122 @@ def open_compose_window(self, reply_to=None, forward=None):
                         conn.close()
                         
                         if result:
-                            attachments_listbox.insert(tk.END, f"📎 {att_name}")
                             if not hasattr(compose_window, 'attachments'):
                                 compose_window.attachments = []
                             compose_window.attachments.append({
                                 'name': att_name,
                                 'content': result[0]
                             })
+                            
+                            # Adaugă label-ul
+                            self.add_attachment_label(compose_window, att_name, attachments_inner_frame, attachments_canvas)
             
             compose_window.to_entry = to_entry
             compose_window.subject_entry = subject_entry
             compose_window.body_text = body_text
-            compose_window.attachments_listbox = attachments_listbox #ADAUGAT
+            compose_window.attachments_inner_frame = attachments_inner_frame #ADAUGAT
+            compose_window.attachments_canvas = attachments_canvas #ADAUGAT
             compose_window.draft_id = None
             
             if not hasattr(compose_window, 'attachments'):
                 compose_window.attachments = []
 
+ADAUGA:
+def add_attachment_label(self, compose_window, att_name, inner_frame, canvas):
+    """Adaugă un label pentru atașament în fereastra de compose"""
+    att_label = tk.Label(
+        inner_frame,
+        text=f"📎 {att_name}",
+        bg="white",
+        fg="black",
+        font=("MS Sans Serif", 8),
+        cursor="hand2",
+        padx=5
+    )
+    att_label.pack(side="left", padx=2)
+    
+    # Right-click pentru a șterge
+    att_label.bind("<Button-3>", lambda e: self.show_compose_attachment_menu_for_label(e, compose_window, att_name, att_label))
+    
+    # Hover effect
+    #att_label.bind("<Enter>", lambda e: att_label.config(bg="#e0e0e0"))
+    #att_label.bind("<Leave>", lambda e: att_label.config(bg="white"))
+    
+    # Update scroll region
+    inner_frame.update_idletasks()
+    canvas.configure(scrollregion=canvas.bbox("all"))
 ############################################################
 
 dupa functia de mai sus:
 
 def attach_file(self, compose_window):
-    """Atașează un fișier la email"""
-    from tkinter import filedialog
-    
-    file_path = filedialog.askopenfilename(
-        title="Select File to Attach",
-        filetypes=[
-            ("Text Files", "*.txt"),
-            ("Log Files", "*.log"),
-            ("Configuration Files", "*.ini *.cfg *.conf"),
-            ("CSV Files", "*.csv"),
-            ("XML Files", "*.xml"),
-            ("JSON Files", "*.json"),
-            ("Python Files", "*.py"),
-            ("All Files", "*.*")
-        ]
-    )
-    
-    if file_path:
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                file_content = f.read()
+            """Atașează un fișier la email"""
+            from tkinter import filedialog
             
-            file_name = os.path.basename(file_path)
+            file_path = filedialog.askopenfilename(
+                title="Select File to Attach",
+                filetypes=[
+                    ("Text Files", "*.txt"),
+                    ("Log Files", "*.log"),
+                    ("Configuration Files", "*.ini *.cfg *.conf"),
+                    ("CSV Files", "*.csv"),
+                    ("XML Files", "*.xml"),
+                    ("JSON Files", "*.json"),
+                    ("Python Files", "*.py"),
+                    ("All Files", "*.*")
+                ]
+            )
             
-            # Verifică dacă fișierul e deja atașat
-            for att in compose_window.attachments:
-                if att['name'] == file_name:
-                    messagebox.showwarning("Duplicate", "This file is already attached!")
-                    return
-            
-            compose_window.attachments.append({
-                'name': file_name,
-                'content': file_content
-            })
-            
-            compose_window.attachments_listbox.insert(tk.END, f"📎 {file_name}")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to attach file: {str(e)}\n\nMake sure the file is a text file that can be opened without special tools.")
+            if file_path:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        file_content = f.read()
+                    
+                    file_name = os.path.basename(file_path)
+                    
+                    # Verifică dacă fișierul e deja atașat
+                    for att in compose_window.attachments:
+                        if att['name'] == file_name:
+                            messagebox.showwarning("Duplicate", "This file is already attached!")
+                            return
+                    
+                    compose_window.attachments.append({
+                        'name': file_name,
+                        'content': file_content
+                    })
+                    
+                    # Adaugă label-ul
+                    self.add_attachment_label(compose_window, file_name, 
+                                             compose_window.attachments_inner_frame, 
+                                             compose_window.attachments_canvas)
+                    
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to attach file: {str(e)}\n\nMake sure the file is a text file that can be opened without special tools.")
 
+ADAUGA:
+def show_compose_attachment_menu_for_label(self, event, compose_window, att_name, att_label):
+    """Meniu contextual pentru atașamente în fereastra de compose (varianta cu labels)"""
+    menu = tk.Menu(self.rootmailoutlook, tearoff=0, bg="#c0c0c0")
+    menu.add_command(label="Remove Attachment", 
+                     command=lambda: self.remove_attachment_by_name(compose_window, att_name, att_label))
+    menu.post(event.x_root, event.y_root)
+
+ADAUGA:
+def remove_attachment_by_name(self, compose_window, att_name, att_label):
+    """Elimină un atașament din lista de compose după nume"""
+    # Găsește și elimină din lista de attachments
+    for i, att in enumerate(compose_window.attachments):
+        if att['name'] == att_name:
+            compose_window.attachments.pop(i)
+            break
+    
+    # Elimină label-ul
+    att_label.destroy()
+    
+    # Update scroll region
+    compose_window.attachments_inner_frame.update_idletasks()
+    compose_window.attachments_canvas.configure(scrollregion=compose_window.attachments_canvas.bbox("all"))
+    
 def show_compose_attachment_menu(self, event, compose_window):
     """Meniu contextual pentru atașamente în fereastra de compose"""
     selection = compose_window.attachments_listbox.curselection()
@@ -621,17 +699,41 @@ def open_draft(self):
             headers_frame = tk.Frame(compose_window, bg="#c0c0c0")
             headers_frame.pack(fill="x", padx=5, pady=5)
             
-            # FRAME PENTRU ATAȘAMENTE
-            attachments_frame = tk.Frame(compose_window, bg="#f0f0f0", relief="sunken", bd=1)
-            attachments_frame.pack(fill="x", padx=5, pady=(0, 5))
+            # FRAME PENTRU ATAȘAMENTE - ORIZONTAL
+            attachments_outer_frame = tk.Frame(compose_window, bg="#f0f0f0", relief="sunken", bd=1)
+            attachments_outer_frame.pack(fill="x", padx=5, pady=(0, 5))
             
-            tk.Label(attachments_frame, text="Attachments:", bg="#f0f0f0", 
-                     font=("MS Sans Serif", 8)).pack(side="left", padx=5)
+            tk.Label(attachments_outer_frame, text="Attachments:", bg="#f0f0f0", 
+                     font=("MS Sans Serif", 8)).pack(side="left", padx=5, pady=2)
             
-            attachments_listbox = tk.Listbox(attachments_frame, bg="white", 
-                                              font=("MS Sans Serif", 8), height=2)
-            attachments_listbox.pack(side="left", fill="both", expand=True, padx=5, pady=2)
-            attachments_listbox.bind("<Button-3>", lambda e: self.show_compose_attachment_menu(e, compose_window))
+            # Container pentru canvas + scrollbar
+            attachments_container = tk.Frame(attachments_outer_frame, bg="white", height=25)
+            attachments_container.pack(side="left", fill="x", expand=True, padx=5, pady=2)
+            
+            # Canvas pentru scroll orizontal
+            attachments_canvas = tk.Canvas(attachments_container, bg="white", height=20, 
+                                            highlightthickness=0)
+            attachments_canvas.pack(side="top", fill="x", expand=True)
+            
+            # Scrollbar orizontal
+            attachments_scrollbar = tk.Scrollbar(attachments_container, orient="horizontal", 
+                                                  bg="#c0c0c0")
+            attachments_scrollbar.pack(side="bottom", fill="x")
+            
+            # Frame interior pentru labels
+            attachments_inner_frame = tk.Frame(attachments_canvas, bg="white")
+            attachments_canvas_window = attachments_canvas.create_window(
+                (0, 0), window=attachments_inner_frame, anchor="nw"
+            )
+            
+            # Conectează scrollbar-ul
+            attachments_canvas.config(xscrollcommand=attachments_scrollbar.set)
+            attachments_scrollbar.config(command=attachments_canvas.xview)
+            
+            # Update scroll region când se schimbă dimensiunea
+            attachments_inner_frame.bind("<Configure>", 
+                lambda e: attachments_canvas.configure(scrollregion=attachments_canvas.bbox("all"))
+            )
             
             tk.Label(headers_frame, text="To:", bg="#c0c0c0", font=("MS Sans Serif", 8)).grid(row=0, column=0, sticky="w", padx=(0, 5))
             to_entry = tk.Entry(headers_frame, font=("MS Sans Serif", 9))
@@ -659,7 +761,8 @@ def open_draft(self):
             compose_window.to_entry = to_entry
             compose_window.subject_entry = subject_entry
             compose_window.body_text = body_text
-            compose_window.attachments_listbox = attachments_listbox
+            compose_window.attachments_inner_frame = attachments_inner_frame #ADAUGAT
+            compose_window.attachments_canvas = attachments_canvas #ADAUGAT
             compose_window.draft_id = draft['id']
             compose_window.attachments = []
     
@@ -676,5 +779,8 @@ def open_draft(self):
                             'name': att_name,
                             'content': result[0]
                         })
-                        attachments_listbox.insert(tk.END, f"📎 {att_name}")
+                        # Add label for the attachment
+                        self.add_attachment_label(compose_window, att_name, 
+                                                 attachments_inner_frame, 
+                                                 attachments_canvas)
                 conn.close()
