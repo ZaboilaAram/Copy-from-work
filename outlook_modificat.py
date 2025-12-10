@@ -51,7 +51,7 @@ self.back_to_email_btn = tk.Button(toolbar, text="Back to Email",
 # În setup_ui(), după self.date_label.pack():
 # FRAME PENTRU ATAȘAMENTE
 self.attachments_frame = tk.Frame(right_panel, bg="#f0f0f0", relief="raised", bd=1)
-self.attachments_frame.pack(fill="x", padx=2, pady=(0, 2))
+self.attachments_frame.pack(fill="x", padx=2, pady=0)
 
 tk.Label(self.attachments_frame, text="Attachments: ", bg="#f0f0f0", 
          font=("MS Sans Serif", 8)).pack(side="left", padx=5, pady=2)
