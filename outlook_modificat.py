@@ -366,10 +366,10 @@ def open_compose_window(self, reply_to=None, forward=None):
             headers_frame.columnconfigure(1, weight=1)
             
             # FRAME PENTRU ATAȘAMENTE - ORIZONTAL
-            attachments_outer_frame = tk.Frame(compose_window, bg="#f0f0f0", relief="sunken", bd=1)
+            attachments_outer_frame = tk.Frame(compose_window, bg="#c0c0c0", relief="sunken", bd=0)
             attachments_outer_frame.pack(fill="x", padx=5, pady=(0, 5))
             
-            tk.Label(attachments_outer_frame, text="Attachments:", bg="#f0f0f0", 
+            tk.Label(attachments_outer_frame, text="Attachments:", bg="#c0c0c0", 
                      font=("MS Sans Serif", 8)).pack(side="left", padx=5, pady=2)
             
             # Container pentru canvas + scrollbar
@@ -685,7 +685,7 @@ def open_draft(self):
             
             compose_window = tk.Toplevel(self.rootmailoutlook)
             compose_window.title("Edit Draft")
-            compose_window.geometry("600x400")
+            compose_window.geometry("600x450")
             compose_window.configure(bg="#c0c0c0")
             compose_window.resizable(True, True)
             
@@ -700,10 +700,10 @@ def open_draft(self):
             headers_frame.pack(fill="x", padx=5, pady=5)
             
             # FRAME PENTRU ATAȘAMENTE - ORIZONTAL
-            attachments_outer_frame = tk.Frame(compose_window, bg="#f0f0f0", relief="sunken", bd=1)
+            attachments_outer_frame = tk.Frame(compose_window, bg="#c0c0c0", relief="sunken", bd=0)
             attachments_outer_frame.pack(fill="x", padx=5, pady=(0, 5))
             
-            tk.Label(attachments_outer_frame, text="Attachments:", bg="#f0f0f0", 
+            tk.Label(attachments_outer_frame, text="Attachments:", bg="#c0c0c0", 
                      font=("MS Sans Serif", 8)).pack(side="left", padx=5, pady=2)
             
             # Container pentru canvas + scrollbar
