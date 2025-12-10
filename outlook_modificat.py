@@ -1731,7 +1731,7 @@ class RetroEmailClient:
                 self.email_body.config(state="disabled")
         
         def view_attachment_by_index(self, index):
-            """Vizualizează atașamentul după index"""
+            """Vizualizează atașamentul după index - cu renderizare .mo95"""
             if not self.current_email or not self.current_email.get('attachments'):
                 return
             
@@ -1754,14 +1754,148 @@ class RetroEmailClient:
             
             file_content = result[0]
             
-            # Afișează în panoul de body
-            self.email_body.config(state="normal")
-            self.email_body.delete(1.0, tk.END)
-            #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
-            self.email_body.config(state="disabled")
+            # Verifică dacă e fișier .mo95
+            if file_name.lower().endswith('.mo95'):
+                self.render_mo95_file(file_name, file_content)
+            else:
+                # Afișare normală pentru alte tipuri de fișiere
+                self.email_body.config(state="normal")
+                self.email_body.delete(1.0, tk.END)
+                #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n{file_content}")
+                self.email_body.config(state="disabled")
             
             # Afișează butonul "Back to Email"
             self.back_to_email_btn.pack(side="left", padx=2)
+
+        # Adaugă această metodă nouă în clasa RetroEmailClient:
+        def render_mo95_file(self, file_name, xml_content):
+            """Renderizează un fișier .mo95 cu formatare vizuală completă"""
+            try:
+                # Parsează XML-ul
+                root = ET.fromstring(xml_content)
+                
+                # Resetează body-ul
+                self.email_body.config(state="normal")
+                self.email_body.delete(1.0, tk.END)
+                
+                # Header
+                #self.email_body.insert(1.0, f"=== Viewing Document: {file_name} ===\n\n")
+                
+                # Extrage conținutul
+                content_elem = root.find('content')
+                if content_elem is not None and content_elem.text:
+                    content_start = self.email_body.index(tk.END)
+                    self.email_body.insert(tk.END, content_elem.text)
+                    
+                    # Configurează tag-urile pentru formatare
+                    self.email_body.tag_configure("bold", font=("MS Sans Serif", 9, "bold"))
+                    self.email_body.tag_configure("italic", font=("MS Sans Serif", 9, "italic"))
+                    self.email_body.tag_configure("underline", underline=True)
+                    self.email_body.tag_configure("bold_italic", font=("MS Sans Serif", 9, "bold italic"))
+                    
+                    self.email_body.tag_configure("left", justify=tk.LEFT)
+                    self.email_body.tag_configure("center", justify=tk.CENTER)
+                    self.email_body.tag_configure("right", justify=tk.RIGHT)
+                    self.email_body.tag_configure("justify", justify=tk.LEFT)
+                    
+                    # Aplică formatările
+                    formatting_elem = root.find('formatting')
+                    if formatting_elem is not None:
+                        for fmt in formatting_elem.findall('format'):
+                            start_idx = fmt.get('start')
+                            end_idx = fmt.get('end')
+                            tags_str = fmt.get('tags', '')
+                            
+                            if tags_str:
+                                tags = tags_str.split(',')
+                                for tag in tags:
+                                    tag = tag.strip()
+                                    
+                                    # Culori text
+                                    if tag.startswith("color_"):
+                                        color = tag.replace("color_", "")
+                                        self.email_body.tag_configure(tag, foreground=color)
+                                    # Culori fundal
+                                    elif tag.startswith("bg_"):
+                                        color = tag.replace("bg_", "")
+                                        self.email_body.tag_configure(tag, background=color)
+                                    
+                                    # Aplică tag-ul
+                                    try:
+                                        self.email_body.tag_add(tag, start_idx, end_idx)
+                                    except:
+                                        pass
+                    
+                    # Renderizează tabelele
+                    tables_elem = root.find('tables')
+                    if tables_elem is not None:
+                        for table in tables_elem.findall('table'):
+                            try:
+                                position = table.get('position')
+                                rows = int(table.get('rows'))
+                                cols = int(table.get('cols'))
+                                
+                                # Creează frame-ul tabelului
+                                table_frame = tk.Frame(self.email_body, bg="black", 
+                                                      relief=tk.SOLID, bd=1)
+                                
+                                for r in range(rows):
+                                    row_frame = tk.Frame(table_frame, bg="white")
+                                    row_frame.grid(row=r, column=0, sticky="ew")
+                                    
+                                    for c in range(cols):
+                                        cell_text = tk.Text(row_frame, width=15, height=1,
+                                                           relief=tk.SOLID, bd=1, wrap=tk.WORD,
+                                                           font=("MS Sans Serif", 9),
+                                                           state="disabled")  # Read-only
+                                        cell_text.grid(row=0, column=c, padx=0, pady=0)
+                                        
+                                        # Găsește și inserează conținutul celulei
+                                        for cell in table.findall('cell'):
+                                            if int(cell.get('row')) == r and int(cell.get('col')) == c:
+                                                if cell.text:
+                                                    cell_text.config(state="normal")
+                                                    cell_text.insert("1.0", cell.text)
+                                                    cell_text.config(state="disabled")
+                                                break
+                                
+                                # Inserează tabelul în body
+                                try:
+                                    self.email_body.window_create(position, window=table_frame)
+                                except:
+                                    # Dacă poziția nu e validă, inserează la sfârșit
+                                    self.email_body.window_create(tk.END, window=table_frame)
+                                    self.email_body.insert(tk.END, "\n")
+                            except Exception as e:
+                                print(f"Error rendering table: {e}")
+                    
+                    # Informații despre document la final
+                    self.email_body.insert(tk.END, "\n\n" + "─" * 50 + "\n")
+                    
+                    font_elem = root.find('font_settings')
+                    if font_elem is not None:
+                        font_family = font_elem.get('family', 'N/A')
+                        font_size = font_elem.get('size', 'N/A')
+                        self.email_body.insert(tk.END, f"Font: {font_family}, Size: {font_size}\n")
+                    
+                    page_setup = root.find('page_setup')
+                    if page_setup is not None:
+                        left = page_setup.get('left_margin', 'N/A')
+                        right = page_setup.get('right_margin', 'N/A')
+                        self.email_body.insert(tk.END, f"Margins: L={left}\" R={right}\"\n")
+                
+                self.email_body.config(state="disabled")
+                
+            except ET.ParseError as e:
+                # Dacă XML-ul e invalid, afișează ca text simplu
+                self.email_body.config(state="normal")
+                self.email_body.delete(1.0, tk.END)
+                #self.email_body.insert(1.0, f"=== Viewing Attachment: {file_name} ===\n\n")
+                self.email_body.insert(tk.END, "[Error parsing .mo95 file - showing raw content]\n\n")
+                self.email_body.insert(tk.END, xml_content)
+                self.email_body.config(state="disabled")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to render .mo95 file:\n{str(e)}")
 
         def show_attachment_context_menu_by_index(self, event, index):
             """Meniu contextual pentru atașamente (varianta cu butoane)"""
@@ -1959,6 +2093,7 @@ class RetroEmailClient:
                 title="Select File to Attach",
                 filetypes=[
                     ("Text Files", "*.txt"),
+                    ("Multiapp 95 Office", "*.mo95"),
                     ("Log Files", "*.log"),
                     ("Configuration Files", "*.ini *.cfg *.conf"),
                     ("CSV Files", "*.csv"),
