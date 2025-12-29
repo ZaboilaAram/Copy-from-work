@@ -1,0 +1,290 @@
+# generator_maker.py - Soluția 8: Frequency Mapping Compression
+
+from collections import Counter
+
+def creeaza_generator_freq(sir_original, nume_fisier="generator_sir.py"):
+    """
+    Analizează un șir și generează un script Python care îl regenerează
+    folosind frequency mapping compression
+    
+    Args:
+        sir_original: șirul de caractere (poate fi foarte lung)
+        nume_fisier: numele scriptului generat (default: generator_sir.py)
+    """
+    
+    print("="*70)
+    print("🔍 ANALIZEZ ȘIRUL...")
+    print("="*70 + "\n")
+    
+    # PASUL 1: Creează alfabetul (caractere unice sortate)
+    caractere_unice = ''.join(sorted(set(sir_original)))
+    indici = [caractere_unice.index(c) for c in sir_original]
+    
+    print(f"📊 Informații de bază:")
+    print(f"   Lungime șir: {len(sir_original):,} caractere")
+    print(f"   Caractere unice: {len(caractere_unice)}")
+    print(f"   Alfabet: {caractere_unice[:50]}{'...' if len(caractere_unice) > 50 else ''}")
+    print()
+    
+    # PASUL 2: Analizează frecvența indicilor
+    freq = Counter(indici)
+    print(f"📈 Top 15 indici cei mai frecvenți:")
+    for idx, count in freq.most_common(15):
+        procent = count / len(indici) * 100
+        print(f"   Index {idx:3d} ('{caractere_unice[idx]}'): {count:5,} apariții ({procent:5.2f}%)")
+    print()
+    
+    # PASUL 3: Creează maparea pentru cei mai frecvenți indici
+    # Folosim a-z (26) + A-Z (26) = 52 simboluri pentru cei mai frecvenți
+    top_freq = [idx for idx, _ in freq.most_common(52)]
+    
+    simboluri = []
+    simboluri.extend([chr(97 + i) for i in range(26)])  # a-z
+    simboluri.extend([chr(65 + i) for i in range(26)])  # A-Z
+    
+    mapping = {idx: simboluri[i] for i, idx in enumerate(top_freq)}
+    reverse_map = {v: k for k, v in mapping.items()}
+    
+    # Calculează acoperirea
+    count_top52 = sum(count for idx, count in freq.items() if idx in mapping)
+    acoperire = count_top52 / len(indici) * 100
+    
+    print(f"🗺️  Mapare creată:")
+    print(f"   Indici mapați: {len(mapping)} (cei mai frecvenți)")
+    print(f"   Acoperire: {acoperire:.1f}% din toate datele")
+    print(f"   Simboluri folosite: a-z, A-Z")
+    print()
+    
+    # PASUL 4: Comprimă datele
+    compressed_parts = []
+    for idx in indici:
+        if idx in mapping:
+            # Index frecvent -> literă simplă (1 char)
+            compressed_parts.append(mapping[idx])
+        else:
+            # Index rar -> format _număr_
+            compressed_parts.append(f"_{idx}_")
+    
+    compressed_str = ''.join(compressed_parts)
+    
+    # PASUL 5: Calculează statistici
+    original_size = len(str(indici))  # lungimea ca listă Python
+    compressed_size = len(compressed_str)
+    economie = (1 - compressed_size / original_size) * 100
+    
+    print(f"💾 REZULTATE COMPRESIE:")
+    print(f"   Lungime originală (listă Python): {original_size:,} caractere")
+    print(f"   Lungime comprimată (string): {compressed_size:,} caractere")
+    print(f"   Economie: {economie:.1f}%")
+    print()
+    
+    if economie > 55:
+        print(f"   ✅ EXCELENT! Compresie foarte eficientă")
+    elif economie > 35:
+        print(f"   👍 BUN! Compresie decentă")
+    else:
+        print(f"   ⚠️  Compresie slabă - șirul e foarte uniform")
+    print()
+    
+    # PASUL 6: Generează scriptul Python
+    cod_generat = f'''"""
+Generator de șir cu Frequency Mapping Compression
+Generat automat de generator_maker.py
+
+Statistici:
+- Lungime șir original: {len(sir_original):,} caractere
+- Caractere unice: {len(caractere_unice)}
+- Economie: {economie:.1f}%
+- Acoperire top-52: {acoperire:.1f}%
+"""
+
+def genereaza_sir():
+    """
+    Regenerează șirul original din date comprimate
+    
+    Returns:
+        str: Șirul original complet
+    """
+    
+    # Alfabetul (caracterele unice sortate)
+    alfabet = "{caractere_unice}"
+    
+    # Mapare inversă: literă simplă -> index în alfabet
+    # a-z, A-Z mapează cei mai frecvenți 52 indici
+    freq_map = {reverse_map}
+    
+    # Date comprimate
+    # - Litere simple (a-z, A-Z) = indici frecvenți
+    # - Format _N_ = indici rari
+    data = """{compressed_str}"""
+    
+    # Decodare: convertește string comprimate înapoi la indici
+    indici = []
+    i = 0
+    while i < len(data):
+        if data[i] == '_':
+            # Format _număr_ pentru indici rari
+            j = i + 1
+            while j < len(data) and data[j] != '_':
+                j += 1
+            
+            num_str = data[i+1:j]
+            if num_str:  # verifică că nu e gol
+                indici.append(int(num_str))
+            
+            i = j + 1  # sari peste al doilea underscore
+        else:
+            # Literă simplă = index frecvent
+            if data[i] in freq_map:
+                indici.append(freq_map[data[i]])
+            i += 1
+    
+    # Reconstruiește șirul din alfabet + indici
+    return ''.join(alfabet[idx] for idx in indici)
+
+
+def verifica_sir(sir_asteptat=None):
+    """
+    Verifică dacă șirul generat este corect
+    
+    Args:
+        sir_asteptat: șirul original pentru comparație (opțional)
+    
+    Returns:
+        bool sau str: True/False dacă sir_asteptat e dat, altfel șirul generat
+    """
+    sir_generat = genereaza_sir()
+    
+    print(f"Lungime șir generat: {{len(sir_generat):,}}")
+    print(f"Primele 100 caractere: {{sir_generat[:100]}}")
+    
+    if sir_asteptat:
+        match = sir_generat == sir_asteptat
+        print(f"Match cu originalul: {{match}}")
+        if not match:
+            # Găsește prima diferență
+            for i, (a, b) in enumerate(zip(sir_generat, sir_asteptat)):
+                if a != b:
+                    print(f"Prima diferență la poziția {{i}}: '{{a}}' vs '{{b}}'")
+                    break
+        return match
+    
+    return sir_generat
+
+
+def info():
+    """Afișează informații despre compresie"""
+    print("="*60)
+    print("📊 INFORMAȚII COMPRESIE")
+    print("="*60)
+    print(f"Lungime șir original: {len(sir_original):,} caractere")
+    print(f"Caractere unice în alfabet: {len(caractere_unice)}")
+    print(f"Indici mapați (top frecvenți): {{len(freq_map)}}")
+    print(f"Acoperire top-52: {acoperire:.1f}%")
+    print(f"Dimensiune date comprimate: {len(compressed_str):,} caractere")
+    print(f"Economie vs listă Python: {economie:.1f}%")
+    print("="*60)
+
+
+if __name__ == "__main__":
+    print("="*60)
+    print("🚀 GENERATOR DE ȘIR")
+    print("="*60)
+    print()
+    
+    sir = genereaza_sir()
+    print(f"✅ Șir generat cu succes!")
+    print(f"   Lungime: {{len(sir):,}} caractere")
+    print(f"   Primele 100 caractere: {{sir[:100]}}")
+    print()
+    
+    info()
+'''
+    
+    # PASUL 7: Salvează scriptul generat
+    with open(nume_fisier, 'w', encoding='utf-8') as f:
+        f.write(cod_generat)
+    
+    print("="*70)
+    print(f"✅ SCRIPT GENERAT: {nume_fisier}")
+    print("="*70)
+    print(f"\n📝 Următorii pași:")
+    print(f"   1. Rulează direct: python {nume_fisier}")
+    print(f"   2. Sau importă: from {nume_fisier[:-3]} import genereaza_sir")
+    print(f"   3. Folosește: sir = genereaza_sir()")
+    print()
+
+
+def estimeaza_compresie(sir_original):
+    """
+    Estimează economia fără a genera scriptul (analiză rapidă)
+    
+    Args:
+        sir_original: șirul de analizat
+    
+    Returns:
+        float: procentul de economie estimat
+    """
+    caractere_unice = ''.join(sorted(set(sir_original)))
+    indici = [caractere_unice.index(c) for c in sir_original]
+    
+    freq = Counter(indici)
+    top_52 = [idx for idx, _ in freq.most_common(52)]
+    
+    # Calculează acoperire
+    count_top52 = sum(count for idx, count in freq.items() if idx in top_52)
+    acoperire = count_top52 / len(indici) * 100
+    
+    # Estimează dimensiuni
+    lungime_lista = len(str(indici))
+    
+    chars_frecventi = int(len(indici) * (acoperire/100) * 1)
+    chars_rari = int(len(indici) * ((100-acoperire)/100) * 4)
+    total_comprimate = chars_frecventi + chars_rari
+    
+    economie = (1 - total_comprimate / lungime_lista) * 100
+    
+    print(f"📊 ESTIMARE RAPIDĂ:")
+    print(f"   Lungime șir: {len(sir_original):,}")
+    print(f"   Caractere unice: {len(caractere_unice)}")
+    print(f"   Top 52 acoperă: {acoperire:.1f}% din date")
+    print(f"   Listă Python: {lungime_lista:,} caractere")
+    print(f"   Estimat comprimate: {total_comprimate:,} caractere")
+    print(f"   Economie estimată: {economie:.1f}%")
+    
+    return economie
+
+
+# ============================================
+# EXEMPLU DE UTILIZARE
+# ============================================
+
+if __name__ == "__main__":
+    print("\n")
+    print("="*70)
+    print("🎯 GENERATOR DE GENERATOARE - Frequency Mapping Compression")
+    print("="*70)
+    print("\n")
+    
+    # Exemplu cu șir scurt
+    sir_exemplu = "12xaebcad92bdas0hdlopm2963bgdjkewpmadgrizndunsohvsjibsjxoj"
+    
+    print(f"Exemplu cu șir scurt ({len(sir_exemplu)} caractere):\n")
+    creeaza_generator_freq(sir_exemplu, "generator_sir.py")
+    
+    print("\n" + "="*70)
+    print("💡 PENTRU ȘIRUL TĂU DE 30,000 CARACTERE:")
+    print("="*70)
+    print("""
+# Variantă 1: Șir direct în cod
+sir_meu = "șirul_tău_complet_de_30000_caractere..."
+creeaza_generator_freq(sir_meu, "generator_final.py")
+
+# Variantă 2: Citire din fișier
+with open('sir_30000.txt', 'r', encoding='utf-8') as f:
+    sir_lung = f.read()
+creeaza_generator_freq(sir_lung, "generator_final.py")
+
+# Variantă 3: Doar estimare (fără generare)
+estimeaza_compresie(sir_lung)
+    """)
