@@ -105,13 +105,46 @@ class PixelEditor:
             self.canvas_frame.destroy()
         
         self.canvas_frame = tk.Frame(self.canvas_container, bg='#c0c0c0', relief=tk.SUNKEN, bd=2)
-        self.canvas_frame.pack(expand=True)
+        self.canvas_frame.pack(expand=False)
         
+        # Calculate canvas display size (max 600x600, but adjust to content)
+        display_width = min(self.canvas_width * self.pixel_size, 600)
+        display_height = min(self.canvas_height * self.pixel_size, 600)
+        
+        # Create scrollbars
+        h_scrollbar = tk.Scrollbar(self.canvas_frame, orient=tk.HORIZONTAL)
+        v_scrollbar = tk.Scrollbar(self.canvas_frame, orient=tk.VERTICAL)
+        
+        # Create canvas
         self.canvas = tk.Canvas(self.canvas_frame, 
-                               width=self.canvas_width * self.pixel_size,
-                               height=self.canvas_height * self.pixel_size,
-                               bg='white', highlightthickness=0)
-        self.canvas.pack()
+                               width=display_width,
+                               height=display_height,
+                               bg='white', highlightthickness=0,
+                               xscrollcommand=h_scrollbar.set,
+                               yscrollcommand=v_scrollbar.set)
+        
+        # Pack scrollbars and canvas
+        self.canvas.grid(row=0, column=0, sticky='nsew')
+        v_scrollbar.grid(row=0, column=1, sticky='ns')
+        h_scrollbar.grid(row=1, column=0, sticky='ew')
+        
+        # Configure grid weights
+        self.canvas_frame.grid_rowconfigure(0, weight=1)
+        self.canvas_frame.grid_columnconfigure(0, weight=1)
+        
+        # Configure scrollbars
+        h_scrollbar.config(command=self.canvas.xview)
+        v_scrollbar.config(command=self.canvas.yview)
+        
+        # Set scroll region
+        self.canvas.config(scrollregion=(0, 0, 
+                                         self.canvas_width * self.pixel_size,
+                                         self.canvas_height * self.pixel_size))
+        
+        # Bind mouse wheel for vertical scrolling
+        self.canvas.bind('<MouseWheel>', self._on_mousewheel)
+        self.canvas.bind('<Button-4>', self._on_mousewheel)
+        self.canvas.bind('<Button-5>', self._on_mousewheel)
         
         # Draw grid
         self.draw_grid()
@@ -120,6 +153,12 @@ class PixelEditor:
         self.canvas.bind('<Button-1>', self.on_mouse_down)
         self.canvas.bind('<B1-Motion>', self.on_mouse_drag)
         self.canvas.bind('<ButtonRelease-1>', self.on_mouse_up)
+        
+    def _on_mousewheel(self, event):
+        if event.num == 5 or event.delta < 0:
+            self.canvas.yview_scroll(1, "units")
+        elif event.num == 4 or event.delta > 0:
+            self.canvas.yview_scroll(-1, "units")
         
     def draw_grid(self):
         for i in range(self.canvas_width + 1):
@@ -170,7 +209,7 @@ class PixelEditor:
         dialog = tk.Toplevel(self.rootpx95)
         dialog.title("Resize Canvas")
         dialog.configure(bg='#c0c0c0')
-        dialog.geometry("300x150")
+        dialog.geometry("300x200")
         dialog.resizable(False, False)
         
         # Center the dialog
@@ -224,6 +263,11 @@ class PixelEditor:
                 # Update size label
                 self.size_label.config(text=f"Size: {self.canvas_width}x{self.canvas_height}")
                 
+                # ADAUGĂ ACEASTĂ LINIE - actualizează scroll region
+                self.canvas.config(scrollregion=(0, 0, 
+                                                 self.canvas_width * self.pixel_size,
+                                                 self.canvas_height * self.pixel_size))
+                
                 dialog.destroy()
                 
             except ValueError:
@@ -250,8 +294,13 @@ class PixelEditor:
             self.set_color(color)
     
     def get_pixel_coords(self, event):
-        x = event.x // self.pixel_size
-        y = event.y // self.pixel_size
+        # Ajustează coordonatele pentru scroll
+        canvas_x = self.canvas.canvasx(event.x)
+        canvas_y = self.canvas.canvasy(event.y)
+        
+        x = int(canvas_x) // self.pixel_size
+        y = int(canvas_y) // self.pixel_size
+        
         if 0 <= x < self.canvas_width and 0 <= y < self.canvas_height:
             return (x, y)
         return None
