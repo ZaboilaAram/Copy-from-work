@@ -1406,18 +1406,16 @@ Ctrl+Wheel - Zoom In/Out
     
     def show_about(self):
         messagebox.showinfo("About", 
-                           "ProEdit 95 - Professional Image Editor\n"
-                           "Windows 95 Style\n\n"
+                           "Image Editor\n"
                            "Features:\n"
-                           "• Advanced image editing tools\n"
-                           "• Multiple effects and filters\n"
-                           "• Drawing tools (pen, shapes, text)\n"
-                           "• Sticker library with 12+ stickers\n"
-                           "• Zoom and pan controls\n"
-                           "• Undo/Redo support\n"
-                           "• Auto-enhance and adjustments\n"
-                           "• Export canvas functionality\n\n"
-                           "Created with Python & Tkinter")
+                           "- Advanced image editing tools\n"
+                           "- Multiple effects and filters\n"
+                           "- Drawing tools (pen, shapes, text)\n"
+                           "- Sticker library with 12+ stickers\n"
+                           "- Zoom and pan controls\n"
+                           "- Undo/Redo support\n"
+                           "- Auto-enhance and adjustments\n"
+                           "- Export canvas functionality\n\n")
 
 if __name__ == "__main__":
     rootimged = tk.Tk()
