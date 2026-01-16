@@ -33,6 +33,7 @@ class Win95ImageEditor:
         self.selection_handles = []
         self.resize_handle = None
         self.original_image_data = {}
+        self.transparency_var = tk.IntVar(value=100)
         
         # Create menu bar
         self.create_menu()
@@ -243,6 +244,12 @@ class Win95ImageEditor:
         
         tk.Frame(props_frame, height=2, bg="#808080", relief=tk.SUNKEN).pack(fill=tk.X, pady=5)
         
+        # Frame pentru controale dinamice (transparență, etc.)
+        self.dynamic_controls_frame = tk.Frame(props_frame, bg="#c0c0c0")
+        self.dynamic_controls_frame.pack(fill=tk.X, padx=5)
+        
+        tk.Frame(props_frame, height=2, bg="#808080", relief=tk.SUNKEN).pack(fill=tk.X, pady=5)
+        
         tk.Label(props_frame, text="Quick Effects", bg="#c0c0c0", 
                 font=("MS Sans Serif", 8, "bold")).pack(pady=5)
         
@@ -254,6 +261,33 @@ class Win95ImageEditor:
         tk.Button(props_frame, text="Blur", command=lambda: self.apply_effect("blur"), **effect_btn_style).pack(pady=2)
         tk.Button(props_frame, text="Grayscale", command=self.convert_grayscale, **effect_btn_style).pack(pady=2)
         tk.Button(props_frame, text="Sepia", command=self.apply_sepia, **effect_btn_style).pack(pady=2)
+        
+    def show_transparency_controls(self):
+        """Show transparency slider in properties panel"""
+        # Șterge orice controale existente
+        for widget in self.dynamic_controls_frame.winfo_children():
+            widget.destroy()
+        
+        # Adaugă slider-ul de transparență
+        tk.Label(self.dynamic_controls_frame, text="Transparency:", bg="#c0c0c0", 
+                font=("MS Sans Serif", 8, "bold")).pack(pady=(5,2))
+        
+        transparency_slider = tk.Scale(self.dynamic_controls_frame, from_=0, to=100, 
+                                      orient=tk.HORIZONTAL,
+                                      variable=self.transparency_var,
+                                      command=self.update_sticker_transparency,
+                                      bg="#c0c0c0", relief=tk.FLAT,
+                                      font=("MS Sans Serif", 7))
+        transparency_slider.pack(fill=tk.X, padx=5, pady=2)
+        
+        tk.Label(self.dynamic_controls_frame, text="(0=transparent, 100=opaque)", bg="#c0c0c0", 
+                font=("MS Sans Serif", 7)).pack(pady=(0,5))
+
+    def hide_transparency_controls(self):
+        """Hide transparency slider from properties panel"""
+        # Șterge toate controalele din frame-ul dinamic
+        for widget in self.dynamic_controls_frame.winfo_children():
+            widget.destroy()
         
     def create_status_bar(self):
         status_frame = tk.Frame(self.rootimged, bg="#c0c0c0", relief=tk.SUNKEN, bd=1)
@@ -383,8 +417,8 @@ class Win95ImageEditor:
             self.canvas.update()
             
             # Obține zona completă a canvas-ului
-            x = self.canvas.winfo_rootimgedx()
-            y = self.canvas.winfo_rootimgedy()
+            x = self.canvas.winfo_rootx()
+            y = self.canvas.winfo_rooty()
             width = self.canvas.winfo_width()
             height = self.canvas.winfo_height()
             
@@ -414,8 +448,8 @@ class Win95ImageEditor:
         )
         if filename:
             try:
-                x = self.canvas.winfo_rootimgedx()
-                y = self.canvas.winfo_rootimgedy()
+                x = self.canvas.winfo_rootx()
+                y = self.canvas.winfo_rooty()
                 w = self.canvas.winfo_width()
                 h = self.canvas.winfo_height()
                 
@@ -885,6 +919,11 @@ class Win95ImageEditor:
         if filename:
             try:
                 sticker_img = Image.open(filename)
+                
+                # Convertește la RGBA pentru a suporta transparență
+                if sticker_img.mode != 'RGBA':
+                    sticker_img = sticker_img.convert('RGBA')
+                
                 sticker_img.thumbnail((150, 150), Image.Resampling.LANCZOS)
                 sticker_photo = ImageTk.PhotoImage(sticker_img)
                 
@@ -905,13 +944,201 @@ class Win95ImageEditor:
                 self.stickers.append(sticker_data)
                 self.original_image_data[sticker_id] = sticker_data
                 
-                self.status.config(text="Image sticker added - drag to move, use handles to resize")
+                self.status.config(text="Image sticker added - drag to move, resize, adjust transparency")
                 
                 # Schimbă automat la Select tool
                 self.set_tool("select")
+                self.selected_item = sticker_id
+                self.show_selection_handles(sticker_id)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to add sticker:\n{str(e)}")
     
+    def update_sticker_transparency(self, value=None):
+        """Update transparency of selected sticker"""
+        if not self.selected_item:
+            return
+        
+        transparency = self.transparency_var.get() / 100.0  # 0.0 to 1.0
+        
+        # Verifică dacă itemul selectat este un sticker de tip imagine
+        sticker_data = None
+        for sticker in self.stickers:
+            if sticker.get("type") == "image" and sticker.get("id") == self.selected_item:
+                sticker_data = sticker
+                break
+        
+        if sticker_data:
+            # Pentru imagini, modificăm canalul alpha
+            original_img = sticker_data["original_image"]
+            
+            # Convertește la RGBA dacă nu e deja
+            if original_img.mode != 'RGBA':
+                img_with_alpha = original_img.convert('RGBA')
+            else:
+                img_with_alpha = original_img.copy()
+            
+            # Aplică transparența
+            alpha = img_with_alpha.split()[3]  # Canal alpha
+            alpha = alpha.point(lambda p: int(p * transparency))
+            img_with_alpha.putalpha(alpha)
+            
+            # Redimensionează la dimensiunea curentă
+            current_size = sticker_data.get("current_size", (original_img.width, original_img.height))
+            img_with_alpha = img_with_alpha.resize(current_size, Image.Resampling.LANCZOS)
+            
+            # Actualizează pe canvas
+            new_photo = ImageTk.PhotoImage(img_with_alpha)
+            self.canvas.itemconfig(self.selected_item, image=new_photo)
+            sticker_data["photo"] = new_photo
+            
+            self.status.config(text=f"Transparency: {int(transparency * 100)}%")
+        else:
+            # Pentru stickere canvas native (smiley, heart, etc.)
+            sticker_group = None
+            for sticker in self.stickers:
+                if sticker.get("type") == "canvas":
+                    # Verifică dacă vreunul din items este selectat
+                    if self.selected_item in sticker.get("items", []):
+                        sticker_group = sticker
+                        break
+            
+            if sticker_group:
+                # Pentru stickere canvas, convertim în imagine PNG cu transparență
+                items = sticker_group.get("items", [])
+                if not items:
+                    return
+                
+                # Obține bbox-ul grupului
+                all_coords = []
+                for item in items:
+                    bbox = self.canvas.bbox(item)
+                    if bbox:
+                        all_coords.extend([bbox[0], bbox[1], bbox[2], bbox[3]])
+                
+                if not all_coords:
+                    return
+                
+                min_x = min(all_coords[0::4] + all_coords[2::4])
+                min_y = min(all_coords[1::4] + all_coords[3::4])
+                max_x = max(all_coords[0::4] + all_coords[2::4])
+                max_y = max(all_coords[1::4] + all_coords[3::4])
+                
+                width = int(max_x - min_x) + 10
+                height = int(max_y - min_y) + 10
+                
+                # Creează o imagine transparentă
+                img = Image.new('RGBA', (width, height), (255, 255, 255, 0))
+                draw = ImageDraw.Draw(img)
+                
+                # Desenează fiecare element cu transparență
+                for item in items:
+                    item_type = self.canvas.type(item)
+                    coords = self.canvas.coords(item)
+                    
+                    # Ajustează coordonatele relative la imagine
+                    adjusted_coords = [(c - min_x + 5) if i % 2 == 0 else (c - min_y + 5) 
+                                     for i, c in enumerate(coords)]
+                    
+                    if item_type == "oval":
+                        fill_color = self.canvas.itemcget(item, "fill")
+                        outline_color = self.canvas.itemcget(item, "outline")
+                        width_val = int(self.canvas.itemcget(item, "width") or 1)
+                        
+                        if fill_color:
+                            rgba = self.hex_to_rgba(fill_color, transparency)
+                            draw.ellipse(adjusted_coords, fill=rgba, outline=None)
+                        if outline_color and outline_color != '':
+                            rgba_outline = self.hex_to_rgba(outline_color, transparency)
+                            draw.ellipse(adjusted_coords, outline=rgba_outline, width=width_val)
+                    
+                    elif item_type == "polygon":
+                        fill_color = self.canvas.itemcget(item, "fill")
+                        outline_color = self.canvas.itemcget(item, "outline")
+                        width_val = int(self.canvas.itemcget(item, "width") or 1)
+                        
+                        coords_tuples = [(adjusted_coords[i], adjusted_coords[i+1]) 
+                                       for i in range(0, len(adjusted_coords), 2)]
+                        
+                        if fill_color:
+                            rgba = self.hex_to_rgba(fill_color, transparency)
+                            draw.polygon(coords_tuples, fill=rgba, outline=None)
+                        if outline_color and outline_color != '':
+                            rgba_outline = self.hex_to_rgba(outline_color, transparency)
+                            draw.polygon(coords_tuples, outline=rgba_outline, width=width_val)
+                    
+                    elif item_type == "line":
+                        fill_color = self.canvas.itemcget(item, "fill")
+                        width_val = int(self.canvas.itemcget(item, "width") or 1)
+                        
+                        if fill_color:
+                            rgba = self.hex_to_rgba(fill_color, transparency)
+                            coords_tuples = [(adjusted_coords[i], adjusted_coords[i+1]) 
+                                           for i in range(0, len(adjusted_coords), 2)]
+                            if len(coords_tuples) >= 2:
+                                for i in range(len(coords_tuples) - 1):
+                                    draw.line([coords_tuples[i], coords_tuples[i+1]], 
+                                            fill=rgba, width=width_val)
+                    
+                    elif item_type == "rectangle":
+                        fill_color = self.canvas.itemcget(item, "fill")
+                        outline_color = self.canvas.itemcget(item, "outline")
+                        width_val = int(self.canvas.itemcget(item, "width") or 1)
+                        
+                        if fill_color:
+                            rgba = self.hex_to_rgba(fill_color, transparency)
+                            draw.rectangle(adjusted_coords, fill=rgba, outline=None)
+                        if outline_color and outline_color != '':
+                            rgba_outline = self.hex_to_rgba(outline_color, transparency)
+                            draw.rectangle(adjusted_coords, outline=rgba_outline, width=width_val)
+                
+                # Șterge vechile elemente canvas
+                for item in items:
+                    self.canvas.delete(item)
+                
+                # Creează imaginea nouă pe canvas
+                photo = ImageTk.PhotoImage(img)
+                center_x = (min_x + max_x) / 2
+                center_y = (min_y + max_y) / 2
+                new_sticker_id = self.canvas.create_image(center_x, center_y, image=photo, tags="sticker")
+                
+                # Actualizează datele sticker-ului
+                new_data = {
+                    "id": new_sticker_id,
+                    "photo": photo,
+                    "type": "image",
+                    "original_image": img.copy(),
+                    "current_size": (width, height)
+                }
+                
+                # Înlocuiește vechiul sticker cu noul
+                self.stickers.remove(sticker_group)
+                self.stickers.append(new_data)
+                self.original_image_data[new_sticker_id] = new_data
+                
+                # Actualizează selecția
+                self.selected_item = new_sticker_id
+                self.show_selection_handles(new_sticker_id)
+                
+                self.status.config(text=f"Canvas sticker transparency: {int(transparency * 100)}%")
+
+    def hex_to_rgba(self, hex_color, alpha):
+        """Convert hex color to RGBA tuple with alpha"""
+        if not hex_color or hex_color == '':
+            return (0, 0, 0, 0)
+        
+        # Remove # if present
+        hex_color = hex_color.lstrip('#')
+        
+        # Convert to RGB
+        if len(hex_color) == 6:
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        elif len(hex_color) == 3:
+            r, g, b = tuple(int(c*2, 16) for c in hex_color)
+        else:
+            return (0, 0, 0, int(255 * alpha))
+        
+        return (r, g, b, int(255 * alpha))
+            
     def show_selection_handles(self, item):
         """Show selection handles around selected item"""
         self.clear_selection_handles()
@@ -954,14 +1181,28 @@ class Win95ImageEditor:
                                 lambda e, it=item: self.do_resize(e, it))
             self.canvas.tag_bind(handle, "<ButtonRelease-1>", 
                                 lambda e, it=item: self.finish_resize(e, it))
+        
+        # Verifică dacă e un sticker de tip imagine și arată controalele de transparență
+        is_image_sticker = False
+        for sticker in self.stickers:
+            if sticker.get("type") == "image" and sticker.get("id") == item:
+                is_image_sticker = True
+                break
+        
+        if is_image_sticker:
+            self.show_transparency_controls()
+        else:
+            self.hide_transparency_controls()
 
     def clear_selection_handles(self):
-        """Remove all selection handles"""
+        """Clear selection handles"""
         for handle in self.selection_handles:
             self.canvas.delete(handle)
         self.selection_handles = []
         self.selected_item = None
-        self.resize_handle = None
+        
+        # Ascunde controalele de transparență când nu e nimic selectat
+        self.hide_transparency_controls()
 
     def start_resize(self, event, handle, item):
         """Start resizing operation"""
@@ -1080,6 +1321,14 @@ class Win95ImageEditor:
         # ACUM redimensionează imaginea efectiv
         resized_img = original_img.copy()
         resized_img = resized_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # Aplică transparența curentă dacă slider-ul nu e la 100%
+        transparency = self.transparency_var.get() / 100.0
+        if transparency < 1.0 and resized_img.mode == 'RGBA':
+            alpha = resized_img.split()[3]
+            alpha = alpha.point(lambda p: int(p * transparency))
+            resized_img.putalpha(alpha)
+
         new_photo = ImageTk.PhotoImage(resized_img)
         
         self.canvas.itemconfig(item, image=new_photo)
