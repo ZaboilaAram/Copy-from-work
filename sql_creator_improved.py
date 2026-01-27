@@ -207,7 +207,7 @@ class SQLCreator:
         tk.Button(left_panel, text="Add Table", command=self.add_table,
                  relief=tk.RAISED, bd=2, bg="#c0c0c0").pack(pady=5)
         
-        tk.Label(left_panel, text="Tables (double-click to select):", bg="#c0c0c0").pack(pady=5)
+        tk.Label(left_panel, text="Tables (double-click to select, Del to remove):", bg="#c0c0c0", font=("Arial", 8)).pack(pady=5)
         
         # Tables listbox with scrollbar
         tables_frame = tk.Frame(left_panel, bg="#c0c0c0")
@@ -223,9 +223,12 @@ class SQLCreator:
         
         self.tables_listbox.bind('<<ListboxSelect>>', self.on_table_select)
         self.tables_listbox.bind('<Double-Button-1>', self.on_table_double_click)
+        self.tables_listbox.bind('<Delete>', lambda e: self.remove_table())
         
         tk.Button(left_panel, text="Remove Table", command=self.remove_table,
                  relief=tk.RAISED, bd=2, bg="#c0c0c0").pack(pady=5)
+        tk.Button(left_panel, text="Clear All Tables", command=self.clear_all_tables,
+                 relief=tk.RAISED, bd=2, bg="#ffcccc").pack(pady=2)
         
         # Center panel - Column Manager
         center_panel = tk.LabelFrame(middle_frame, text="Column Manager", 
@@ -254,8 +257,7 @@ class SQLCreator:
         tk.Button(center_panel, text="Add Column to Selected Table", 
                  command=self.add_column, relief=tk.RAISED, bd=2, bg="#c0c0c0").pack(pady=5)
         
-        tk.Label(center_panel, text="Columns (double-click to add to SELECT):", 
-                bg="#c0c0c0").pack(pady=5)
+        tk.Label(center_panel, text="Columns (double-click to SELECT, Del to remove):", bg="#c0c0c0", font=("Arial", 8)).pack(pady=5)
         
         # Columns listbox with scrollbar
         columns_frame = tk.Frame(center_panel, bg="#c0c0c0")
@@ -270,9 +272,12 @@ class SQLCreator:
         columns_scrollbar.config(command=self.columns_listbox.yview)
         
         self.columns_listbox.bind('<Double-Button-1>', self.on_column_double_click)
+        self.columns_listbox.bind('<Delete>', lambda e: self.remove_column())
         
         tk.Button(center_panel, text="Remove Column", command=self.remove_column,
                  relief=tk.RAISED, bd=2, bg="#c0c0c0").pack(pady=5)
+        tk.Button(center_panel, text="Clear All Columns", command=self.clear_all_columns,
+                 relief=tk.RAISED, bd=2, bg="#ffcccc").pack(pady=2)
         
         # Right panel - Query Builder
         right_panel = tk.LabelFrame(middle_frame, text="Query Builder", 
@@ -878,7 +883,49 @@ class SQLCreator:
         elif self.current_query_type == "CREATE TABLE":
             self.create_builder.pack(fill=tk.BOTH, expand=True)
             self.set_status("CREATE TABLE mode - Add table and columns from left panels")
+    
+    def clear_all_tables(self):
+        """Clear all tables with confirmation"""
+        if not self.tables:
+            self.set_status("No tables to clear")
+            return
         
+        count = len(self.tables)
+        result = messagebox.askyesno("Confirm Clear All", 
+                                     f"Are you sure you want to delete all {count} table(s)?\n"
+                                     "This action cannot be undone.",
+                                     icon='warning')
+        if result:
+            self.tables.clear()
+            self.tables_listbox.delete(0, tk.END)
+            self.columns_listbox.delete(0, tk.END)
+            self.selected_table = None
+            self.set_status(f"All {count} table(s) cleared successfully")
+        else:
+            self.set_status("Clear all tables cancelled")
+    
+    def clear_all_columns(self):
+        """Clear all columns from selected table with confirmation"""
+        if not self.selected_table:
+            self.set_status("No table selected")
+            return
+        
+        if not self.tables[self.selected_table]:
+            self.set_status("No columns to clear")
+            return
+        
+        count = len(self.tables[self.selected_table])
+        result = messagebox.askyesno("Confirm Clear All", 
+                                     f"Are you sure you want to delete all {count} column(s) from '{self.selected_table}'?\n"
+                                     "This action cannot be undone.",
+                                     icon='warning')
+        if result:
+            self.tables[self.selected_table].clear()
+            self.update_columns_list()
+            self.set_status(f"All {count} column(s) cleared from '{self.selected_table}'")
+        else:
+            self.set_status("Clear all columns cancelled")
+    
     def generate_sql(self):
         query_type = self.query_type_var.get()
         sql = ""
@@ -1031,9 +1078,8 @@ class SQLCreator:
         self.set_status("Query cleared - ready for new query")
         
     def show_about(self):
-        messagebox.showinfo("About SQL Creator 95", 
-                          "SQL Creator 95 - Enhanced Edition\n\n"
-                          "A retro-style SQL query builder with improved security\n\n"
+        messagebox.showinfo("About SQL Creator", 
+                          "A simple SQL query builder with improved security\n\n"
                           "Quick Tips:\n"
                           "- Double-click columns to add to SELECT\n"
                           "- Double-click items to remove them\n"
@@ -1041,12 +1087,12 @@ class SQLCreator:
                           "- Use F5 to generate, F6 to copy, F7 to clear\n"
                           "- Check 'Numeric' for number comparisons\n\n"
                           "Features:\n"
-                          "✓ SQL injection protection\n"
-                          "✓ Multiple ORDER BY support\n"
-                          "✓ GROUP BY clause\n"
-                          "✓ Smart quote handling\n"
-                          "✓ Input validation\n"
-                          "✓ Support for all major SQL operations")
+                          "- SQL injection protection\n"
+                          "- Multiple ORDER BY support\n"
+                          "- GROUP BY clause\n"
+                          "- Smart quote handling\n"
+                          "- Input validation\n"
+                          "- Support for all major SQL operations")
 
 def main():
     rootsqlquerycr = tk.Tk()
