@@ -504,6 +504,7 @@ import random
 import psutil
 import threading
 import time
+import sys
 
 class BitpackManagerSetup:
     def __init__(self, rootRFSsetup):
@@ -923,6 +924,7 @@ class BitpackManagerSetup:
     def on_close(self):
         self.monitoring = False
         self.rootRFSsetup.destroy()
+        sys.exit()
 
 if __name__ == "__main__":
     rootRFSsetup = tk.Tk()
