@@ -18022,10 +18022,15 @@ def lm():
             if new_password != confirm_password:
                 messagebox.showerror("Error", "Passwords do not match!")
                 return
-            
-            if len(new_password) < 4:
-                messagebox.showerror("Error", "Password must be at least 4 characters!")
+
+            is_valid, error_msg = validate_password_strength(new_password)
+            if not is_valid:
+                messagebox.showerror("Error", error_msg)
                 return
+            
+            # if len(new_password) < 4:
+                # messagebox.showerror("Error", "Password must be at least 4 characters!")
+                # return
             
             # If password exists, verify current password
             if self.password_exists:
@@ -72286,6 +72291,25 @@ if w95var == 1998 or w95var1 == 1997:
                     except:
                         return False  # Nu există text selectat
                 
+                def paste_and_execute():
+                    """Lipește text din clipboard și execută automat comanda (Paste & Execute)"""
+                    try:
+                        clipboard_text = terminal_window.clipboard_get()
+                        
+                        cursor_pos = terminal_text.index("insert")
+                        if terminal_text.compare(cursor_pos, "<", "input_mark"):
+                            terminal_text.mark_set("insert", "end")
+                        
+                        terminal_text.insert("insert", clipboard_text)
+                        terminal_text.see("end")
+                        
+                        command = get_command()
+                        if command.strip():
+                            execute_command(command.strip())
+                        return True
+                    except:
+                        return False
+                
                 def paste_from_clipboard():
                     """Lipește text din clipboard doar după prompt (input_mark)"""
                     try:
@@ -72313,6 +72337,7 @@ if w95var == 1998 or w95var1 == 1997:
                 context_menu = tk.Menu(terminal_text, tearoff=0)
                 context_menu.add_command(label="Copy", command=copy_selected_text)
                 context_menu.add_command(label="Paste", command=paste_from_clipboard)
+                context_menu.add_command(label="Paste & Execute", command=paste_and_execute)
 
                 def show_context_menu(event):
                     try:
