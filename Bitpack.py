@@ -71853,6 +71853,103 @@ if w95var == 1998 or w95var1 == 1997:
                         # terminal_text.mark_set("input_mark", input_pos)
                         # terminal_text.see("end")
                         # return
+                    if command.strip() == "exec dbo_bitpack --export":
+                        try:
+                            config_folder = "Config"
+                            if not os.path.exists(config_folder):
+                                os.makedirs(config_folder)
+
+                            db_path = os.path.join(config_folder, "dbo_bitpack.db")
+                            bpk_path = os.path.join(config_folder, "init.bpk95")
+
+                            if not os.path.exists(db_path):
+                                terminal_text.insert("end", "Error: Config/dbo_bitpack.db not found.\n\n")
+                            else:
+                                conn = sqlite3.connect(db_path)
+                                cursor = conn.cursor()
+                                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                                table_count = cursor.fetchone()[0]
+
+                                statements = 0
+                                with open(bpk_path, "w", encoding="utf-8") as f:
+                                    f.write("-- Bitpack database export (init.bpk95)\n")
+                                    f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                                    f.write("-- Source: Config/dbo_bitpack.db\n")
+                                    f.write("-- Restore with: exec dbo_bitpack --import\n\n")
+                                    f.write("PRAGMA foreign_keys = OFF;\n")
+                                    for line in conn.iterdump():
+                                        f.write(f"{line}\n")
+                                        statements += 1
+                                conn.close()
+
+                                size_kb = os.path.getsize(bpk_path) / 1024
+                                terminal_text.insert("end", f"Exported {table_count} table(s), {statements} statement(s).\n")
+                                terminal_text.insert("end", f"File: {bpk_path} ({size_kb:.1f} KB)\n")
+                                terminal_text.insert("end", "Export completed successfully.\n\n")
+                        except Exception as e:
+                            terminal_text.insert("end", f"Error: {str(e)}\n\n")
+
+                        terminal_text.insert("end", prompt)
+                        input_pos = terminal_text.index("end-1c")
+                        terminal_text.mark_set("input_mark", input_pos)
+                        terminal_text.see("end")
+                        return
+                    if command.strip() == "exec dbo_bitpack --import":
+                        try:
+                            config_folder = "Config"
+                            if not os.path.exists(config_folder):
+                                os.makedirs(config_folder)
+
+                            db_path = os.path.join(config_folder, "dbo_bitpack.db")
+                            bpk_path = os.path.join(config_folder, "init.bpk95")
+
+                            if not os.path.exists(bpk_path):
+                                terminal_text.insert("end", "Error: Config/init.bpk95 not found.\n")
+                                terminal_text.insert("end", "Run 'exec dbo_bitpack --export' first.\n\n")
+                            else:
+                                with open(bpk_path, "r", encoding="utf-8") as f:
+                                    script = f.read()
+
+                                conn = sqlite3.connect(db_path)
+                                cursor = conn.cursor()
+                                cursor.execute("PRAGMA foreign_keys = OFF")
+
+                                # Golim complet baza existenta (overwrite)
+                                dropped = 0
+                                for obj_type in ("trigger", "view", "index", "table"):
+                                    cursor.execute(
+                                        "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'",
+                                        (obj_type,)
+                                    )
+                                    for (obj_name,) in cursor.fetchall():
+                                        cursor.execute(f'DROP {obj_type.upper()} IF EXISTS "{obj_name}"')
+                                        dropped += 1
+                                conn.commit()
+
+                                # Rulam scriptul din init.bpk95
+                                conn.executescript(script)
+                                conn.commit()
+
+                                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                                table_count = cursor.fetchone()[0]
+
+                                # Recuperam spatiul ramas dupa DROP
+                                conn.isolation_level = None
+                                conn.execute("VACUUM")
+                                conn.close()
+
+                                terminal_text.insert("end", f"Dropped {dropped} existing object(s).\n")
+                                terminal_text.insert("end", f"Database overwritten from init.bpk95 ({table_count} table(s)).\n")
+                                terminal_text.insert("end", "Import completed successfully.\n")
+                                terminal_text.insert("end", "Restart Bitpack to reload the new database.\n\n")
+                        except Exception as e:
+                            terminal_text.insert("end", f"Error: {str(e)}\n\n")
+
+                        terminal_text.insert("end", prompt)
+                        input_pos = terminal_text.index("end-1c")
+                        terminal_text.mark_set("input_mark", input_pos)
+                        terminal_text.see("end")
+                        return
                     if command.strip() == "exec class mail_client:95":
                         try:
                             config_folder = "Config"
@@ -72159,6 +72256,8 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", "  exec dbo_bitpack --admin - Create admin database for Bitpack\n")
                             terminal_text.insert("end", "  exec dbo_bitpack --purge - Delete all content from Bitpack database (without PRAGMA foreign_keys = OFF)\n")
                             terminal_text.insert("end", "  exec dbo_bitpack --flush - Delete all content from Bitpack database (with PRAGMA foreign_keys = OFF)\n")
+                        terminal_text.insert("end", "  exec dbo_bitpack --export - Export database as SQL script to Config/init.bpk95\n")
+                        terminal_text.insert("end", "  exec dbo_bitpack --import - Rebuild database from Config/init.bpk95\n")
                         terminal_text.insert("end", "  exec recreate_data_pxed - Create data_pxed folder for pixel art account\n")
                         terminal_text.insert("end", "  exec bitpack_assets - Create Bitpack assets folder\n")
                         terminal_text.insert("end", "  exec sql_management_studio_variable - Create SQL Management Studio enviroment variable\n")
@@ -84103,34 +84202,38 @@ if proc_varr == 67766776:
             return None
         
         def get_gpu_info_wmi(self):
-            """Get GPU info using WMI (Windows only)"""
             try:
                 import wmi
-                c = wmi.WMI()
-                
-                # Get GPU info
-                for gpu in c.Win32_VideoController():
-                    if gpu.Name and 'nvidia' in gpu.Name.lower():
-                        # Note: WMI doesn't provide real-time utilization, so we'll simulate
-                        return {
-                            'name': gpu.Name,
-                            'load': np.random.uniform(10, 30),  # Simulated load
-                            'memory_used': 1024,  # Simulated
-                            'memory_total': 8192  # Simulated
-                        }
-            except Exception as e:
-                print(f"Error getting GPU info via WMI: {e}")
+                for gpu in wmi.WMI().Win32_VideoController():
+                    if gpu.Name:
+                        return {'name': gpu.Name, 'load': None,
+                                'memory_used': None, 'memory_total': None}
+            except Exception:
+                pass
             return None
+        # def get_gpu_info_wmi(self):
+            # """Get GPU info using WMI (Windows only)"""
+            # try:
+                # import wmi
+                # c = wmi.WMI()
+                
+                # # Get GPU info
+                # for gpu in c.Win32_VideoController():
+                    # if gpu.Name and 'nvidia' in gpu.Name.lower():
+                        # # Note: WMI doesn't provide real-time utilization, so we'll simulate
+                        # return {
+                            # 'name': gpu.Name,
+                            # 'load': np.random.uniform(10, 30),  # Simulated load
+                            # 'memory_used': 1024,  # Simulated
+                            # 'memory_total': 8192  # Simulated
+                        # }
+            # except Exception as e:
+                # print(f"Error getting GPU info via WMI: {e}")
+            # return None
         
         def get_gpu_info_basic(self):
             """Basic GPU detection fallback"""
-            # This is a fallback that provides simulated data
-            return {
-                'name': 'GPU (Basic Detection)',
-                'load': np.random.uniform(5, 25),  # Simulated load
-                'memory_used': 512,  # Simulated
-                'memory_total': 4096  # Simulated
-            }
+            return None
             
         def setup_ui(self):
             # Frame principal
