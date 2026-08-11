@@ -13334,9 +13334,88 @@ class Windows95Installer:
        logo_label.pack()
        
        self.create_buttons([
-           {'text': 'Exit', 'command': self.EXITO, 'side': 'right'},
-           {'text': 'Next >', 'command': self.show_license_agreement, 'side': 'right'}
-       ])
+            {'text': 'Exit', 'command': self.EXITO, 'side': 'right'},
+            {'text': 'Next >', 'command': self.show_license_agreement, 'side': 'right'},
+            {'text': 'Import config', 'command': self.import_configuration, 'side': 'left'}
+        ])
+    
+    def import_configuration(self):
+        """Reconstruieste dbo_bitpack.db din Config/init.bpk95 la prima rulare."""
+        import sqlite3, os
+        from tkinter import filedialog, messagebox
+
+        config_folder = "Config"
+        bpk_path = os.path.join(config_folder, "init.bpk95")
+
+        if not os.path.exists(bpk_path):
+            path = filedialog.askopenfilename(
+                title="Select Bitpack configuration file",
+                filetypes=[("Bitpack config", "*.bpk95"), ("All files", "*.*")])
+            if not path:
+                return
+            bpk_path = path
+
+        try:
+            with open(bpk_path, "r", encoding="utf-8") as f:
+                script = f.read()
+        except Exception as e:
+            messagebox.showerror("Import failed", f"Cannot read file:\n{e}")
+            return
+
+        stamp = ""
+        for line in script.split("\n")[:6]:
+            if line.startswith("-- Generated:"):
+                stamp = line.replace("-- Generated:", "").strip()
+                break
+
+        db_path = os.path.join(config_folder, "dbo_bitpack.db")
+        warn = ""
+        if os.path.exists(db_path):
+            warn = ("\n\nWARNING: an existing database was found and will be\n"
+                    "COMPLETELY OVERWRITTEN. All current data will be lost.")
+
+        if not messagebox.askyesno(
+                "Import configuration",
+                f"Import configuration from:\n{bpk_path}\n"
+                f"{('Generated: ' + stamp) if stamp else ''}{warn}\n\nContinue?"):
+            return
+
+        try:
+            if not os.path.exists(config_folder):
+                os.makedirs(config_folder)
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA foreign_keys = OFF")
+
+            for obj_type in ("trigger", "view", "index", "table"):
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'",
+                    (obj_type,))
+                for (obj_name,) in cursor.fetchall():
+                    cursor.execute(f'DROP {obj_type.upper()} IF EXISTS "{obj_name}"')
+            conn.commit()
+
+            conn.executescript(script)
+            conn.commit()
+
+            cursor.execute("SELECT COUNT(*) FROM sqlite_master "
+                           "WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            table_count = cursor.fetchone()[0]
+
+            conn.isolation_level = None
+            conn.execute("VACUUM")
+            conn.close()
+        except Exception as e:
+            messagebox.showerror("Import failed", f"{type(e).__name__}: {e}")
+            return
+
+        messagebox.showinfo(
+            "Import complete",
+            f"Configuration imported successfully.\n"
+            f"{table_count} table(s) restored.\n\n"
+            f"Bitpack will now close. Start it again to use the imported setup.")
+        self.EXITO()
     
     def show_license_agreement(self):
         self.clear_frame()
@@ -13363,7 +13442,7 @@ class Windows95Installer:
 BITPACK SOFTWARE LICENSE TERMS
 
 Version: 0.95.0
-Date: 17.07.2026
+Date: 11.08.2026
 
 IMPORTANT — READ CAREFULLY
 
@@ -13433,7 +13512,7 @@ All rights reserved.
 
 # Version: 0.95.0
 
-# Date: 17.07.2026
+# Date: 11.08.2026
 
 # 1. Introduction
     # • This license sets forth the terms and conditions for the use of Bitpack (hereinafter referred to as "the Software"), which is developed for exclusive personal use within the IT department of any company (hereinafter referred to as "the Company"). The software will not be distributed or used outside of this department or by anyone other than the buyer.
@@ -13474,7 +13553,7 @@ All rights reserved.
 # By using the Software, the Licensee agrees to the terms and conditions of this license.
 
 # Tudor Marmureanu
-# 17.07.2026
+# 11.08.2026
         # """
         license_text.insert('1.0', license_content)
         license_text.config(state='disabled')
@@ -84147,7 +84226,8 @@ if proc_varr == 67766776:
             # Inițializare date
             for i in range(self.max_points):
                 self.cpu_data.append(0)
-                self.gpu_data.append(0)
+                #self.gpu_data.append(0)
+                self.gpu_data.append(float('nan'))
                 self.time_data.append(i)
                 self.timestamps.append(datetime.now())
                 for core_data in self.cpu_cores_data:
@@ -84155,6 +84235,21 @@ if proc_varr == 67766776:
             
             self.setup_ui()
             self.start_monitoring()
+        
+        def fmt(self, value, spec='.1f', dash='n/a'):
+            if value is None:
+                return dash
+            try:
+                if isinstance(value, float) and math.isnan(value):
+                    return dash
+                return format(value, spec)
+            except (TypeError, ValueError):
+                return dash
+
+        def safe_max(self, *vals):
+            real = [v for v in vals
+                    if v is not None and not (isinstance(v, float) and math.isnan(v))]
+            return max(real) if real else 0
         
         def detect_gpu_method(self):
             """Detect the best method to get GPU information"""
@@ -84308,7 +84403,7 @@ if proc_varr == 67766776:
                                             bg=self.frame_bg, fg=self.text_color)
             self.gpu_memory_label.pack()
             
-            self.gpu_max_label = tk.Label(gpu_frame, text="Max: 0%", 
+            self.gpu_max_label = tk.Label(gpu_frame, text="Max: n/a", 
                                          font=("Arial", 10, "bold"),
                                          bg=self.frame_bg, fg=self.neon_yellow)
             self.gpu_max_label.pack()
@@ -84431,7 +84526,12 @@ if proc_varr == 67766776:
             
             # Animație
             self.ani = animation.FuncAnimation(self.fig, self.update_graph, 
-                                             interval=1000, blit=False)
+                                             interval=1000, blit=False,
+                                             cache_frame_data=False)
+
+            if self.gpu_method != 'nvidia-smi':
+                layer_frame.pack_forget()
+                separator2.pack_forget()
             
         def on_hover(self, event):
             if event.inaxes == self.ax:
@@ -84452,8 +84552,12 @@ if proc_varr == 67766776:
                         time_val = self.timestamps[idx].strftime("%H:%M:%S")
                         
                         # Actualizează annotation
-                        self.annotation.xy = (x_data[idx], max(cpu_val, gpu_val))
-                        text = f"Time: {time_val}\nCPU: {cpu_val:.1f}%\nGPU: {gpu_val:.1f}%"
+                        # self.annotation.xy = (x_data[idx], max(cpu_val, gpu_val))
+                        # text = f"Time: {time_val}\nCPU: {cpu_val:.1f}%\nGPU: {gpu_val:.1f}%"
+                        self.annotation.xy = (x_data[idx], self.safe_max(cpu_val, gpu_val))
+                        text = (f"Time: {time_val}\n"
+                                f"CPU: {self.fmt(cpu_val)}%\n"
+                                f"GPU: {self.fmt(gpu_val)}%")
                         self.annotation.set_text(text)
                         self.annotation.set_visible(True)
                     else:
@@ -84467,6 +84571,8 @@ if proc_varr == 67766776:
             
         def get_gpu_info(self):
             """Get GPU info using the detected method"""
+            # if self.gpu_method != 'nvidia-smi':
+                # layer_frame.pack_forget()
             if self.gpu_method == 'nvidia-smi':
                 return self.get_gpu_info_nvidia_smi()
             elif self.gpu_method == 'wmi':
@@ -84474,15 +84580,13 @@ if proc_varr == 67766776:
             else:
                 return self.get_gpu_info_basic()
         
-        def get_layer_info(self):
-            # Simulare - în realitate ar trebui să interoghezi framework-ul ML folosit
-            # Pentru demonstrație, calculăm pe baza utilizării memoriei
-            gpu_info = self.get_gpu_info()
-            if gpu_info and gpu_info['memory_used'] > 0:
-                # Estimare layers pe GPU bazat pe memoria folosită
-                self.gpu_layers = int(gpu_info['memory_used'] / 100)  # 100MB per layer (exemplu)
-                # Restul pe CPU
-                self.cpu_layers = max(0, 32 - self.gpu_layers)  # Presupunem 32 layers total
+        def get_layer_info(self, gpu_info=None):
+            if gpu_info is None:
+                gpu_info = self.get_gpu_info()
+            mem = gpu_info.get('memory_used') if gpu_info else None
+            if mem:
+                self.gpu_layers = int(mem / 100)
+                self.cpu_layers = max(0, 32 - self.gpu_layers)
             else:
                 self.gpu_layers = 0
                 self.cpu_layers = 0
@@ -84532,49 +84636,103 @@ if proc_varr == 67766776:
                     
                     # GPU Info
                     gpu_info = self.get_gpu_info()
-                    if gpu_info:
-                        gpu_percent = gpu_info['load']
-                        self.gpu_percent_label.config(text=f"{gpu_percent:.1f}%")
-                        self.gpu_name_label.config(text=f"GPU: {gpu_info['name'][:30]}")
-                        self.gpu_memory_label.config(
-                            text=f"Memorie: {gpu_info['memory_used']:.0f}/{gpu_info['memory_total']:.0f} MB"
-                        )
-                        
-                        # Update maxim GPU
-                        if gpu_percent > self.gpu_max:
-                            self.gpu_max = gpu_percent
-                            self.gpu_max_time = current_time.strftime("%H:%M:%S")
-                            self.gpu_max_label.config(text=f"Max: {self.gpu_max:.1f}%")
-                            self.gpu_max_time_label.config(text=f"at {self.gpu_max_time}")
-                    else:
-                        gpu_percent = 0
-                        self.gpu_percent_label.config(text="N/A")
+                    gpu_percent = None          # None = nemasurat, NU 0
+
+                    if gpu_info is None:
+                        self.gpu_percent_label.config(text="N/A", fg=self.text_color)
                         self.gpu_name_label.config(text="GPU: Not detected")
-                    
-                    # Update layer info
-                    self.get_layer_info()
+                        self.gpu_memory_label.config(text="Memory: n/a")
+                    else:
+                        self.gpu_name_label.config(text=f"GPU: {gpu_info['name'][:30]}")
+                        gpu_percent = gpu_info.get('load')
+
+                        if gpu_percent is None:
+                            # placa exista, dar metoda curenta nu da telemetrie
+                            self.gpu_percent_label.config(text="n/a", fg=self.text_color)
+                            self.gpu_memory_label.config(text="Memory: no telemetry")
+                        else:
+                            self.gpu_percent_label.config(text=f"{self.fmt(gpu_percent)}%")
+                            self.gpu_memory_label.config(
+                                text=f"Memory: {self.fmt(gpu_info.get('memory_used'), '.0f')}/"
+                                     f"{self.fmt(gpu_info.get('memory_total'), '.0f')} MB")
+
+                            if gpu_percent > self.gpu_max:
+                                self.gpu_max = gpu_percent
+                                self.gpu_max_time = current_time.strftime("%H:%M:%S")
+                                self.gpu_max_label.config(text=f"Max: {self.fmt(self.gpu_max)}%")
+                                self.gpu_max_time_label.config(text=f"at {self.gpu_max_time}")
+
+                    # Update layer info - refoloseste gpu_info, nu mai interoga a doua oara
+                    self.get_layer_info(gpu_info)
                     self.gpu_layers_label.config(text=f"GPU Layers: {self.gpu_layers}")
                     self.cpu_layers_label.config(text=f"CPU Layers: {self.cpu_layers}")
-                    
-                    # Adaugă date pentru grafice
+
+                    # Adauga date pentru grafice
                     self.cpu_data.append(cpu_percent)
-                    self.gpu_data.append(gpu_percent)
+                    self.gpu_data.append(gpu_percent if gpu_percent is not None else float('nan'))
                     self.timestamps.append(current_time)
-                    
+
                     # Efecte vizuale pentru valori mari
-                    if cpu_percent > 80:
-                        self.cpu_percent_label.config(fg=self.neon_yellow)
-                    elif cpu_percent > 90:
+                    if cpu_percent > 90:
                         self.cpu_percent_label.config(fg=self.neon_red)
+                    elif cpu_percent > 80:
+                        self.cpu_percent_label.config(fg=self.neon_yellow)
                     else:
                         self.cpu_percent_label.config(fg=self.neon_pink)
+
+                    if gpu_percent is not None:
+                        if gpu_percent > 90:
+                            self.gpu_percent_label.config(fg=self.neon_red)
+                        elif gpu_percent > 80:
+                            self.gpu_percent_label.config(fg=self.neon_yellow)
+                        else:
+                            self.gpu_percent_label.config(fg=self.neon_green)
+                    # # GPU Info
+                    # gpu_info = self.get_gpu_info()
+                    # gpu_percent = None 
+                    # if gpu_info:
+                        # gpu_percent = gpu_info['load']
+                        # self.gpu_percent_label.config(text=f"{gpu_percent:.1f}%")
+                        # self.gpu_name_label.config(text=f"GPU: {gpu_info['name'][:30]}")
+                        # self.gpu_memory_label.config(
+                            # text=f"Memory: {gpu_info['memory_used']:.0f}/{gpu_info['memory_total']:.0f} MB"
+                        # )
                         
-                    if gpu_percent > 80:
-                        self.gpu_percent_label.config(fg=self.neon_yellow)
-                    elif gpu_percent > 90:
-                        self.gpu_percent_label.config(fg=self.neon_red)
-                    else:
-                        self.gpu_percent_label.config(fg=self.neon_green)
+                        # # Update maxim GPU
+                        # if gpu_percent > self.gpu_max:
+                            # self.gpu_max = gpu_percent
+                            # self.gpu_max_time = current_time.strftime("%H:%M:%S")
+                            # self.gpu_max_label.config(text=f"Max: {self.gpu_max:.1f}%")
+                            # self.gpu_max_time_label.config(text=f"at {self.gpu_max_time}")
+                    # else:
+                        # gpu_percent = 0
+                        # self.gpu_percent_label.config(text="N/A")
+                        # self.gpu_name_label.config(text="GPU: Not detected")
+                    
+                    # # Update layer info
+                    # self.get_layer_info()
+                    # self.gpu_layers_label.config(text=f"GPU Layers: {self.gpu_layers}")
+                    # self.cpu_layers_label.config(text=f"CPU Layers: {self.cpu_layers}")
+                    
+                    # # Adaugă date pentru grafice
+                    # self.cpu_data.append(cpu_percent)
+                    # self.gpu_data.append(gpu_percent)
+                    # self.timestamps.append(current_time)
+                    
+                    # # Efecte vizuale pentru valori mari
+                    # if cpu_percent > 80:
+                        # self.cpu_percent_label.config(fg=self.neon_yellow)
+                    # elif cpu_percent > 90:
+                        # self.cpu_percent_label.config(fg=self.neon_red)
+                    # else:
+                        # self.cpu_percent_label.config(fg=self.neon_pink)
+                        
+                    # if gpu_percent > 80:
+                        # self.gpu_percent_label.config(fg=self.neon_yellow)
+                    # elif gpu_percent > 90:
+                        # self.gpu_percent_label.config(fg=self.neon_red)
+                    # else:
+                        # self.gpu_percent_label.config(fg=self.neon_green)
                     
                 except Exception as e:
                     print(f"Error updating data: {e}")
