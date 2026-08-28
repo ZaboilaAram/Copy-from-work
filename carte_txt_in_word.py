@@ -352,13 +352,20 @@ def construiește(text, titlu_pagina, subtitlu):
             continue
 
         indentat = all(RE_INDENTAT.match(r) for r in bloc_curent)
-        unic = len(randuri_autor(bloc_curent)) == 1
-        e_subtitlu = (posibil_subtitlu and unic
-                      and not FINAL_FRAZA.search(bloc_curent[0].strip())
-                      and len(bloc_curent[0].strip()) < 62)
+        randuri = randuri_autor(bloc_curent)
+
+        # Un subtitlu real ocupă exact un rând în .txt și nu se termină cu
+        # semn de final de frază. Condiția pe len(bloc_curent) este esențială:
+        # fără ea, o frază înfășurată pe două rânduri al cărei prim rând este
+        # scurt ar fi luată drept titlu, iar al doilea rând s-ar pierde.
+        e_subtitlu = (posibil_subtitlu
+                      and len(bloc_curent) == 1
+                      and len(randuri) == 1
+                      and not FINAL_FRAZA.search(randuri[0])
+                      and len(randuri[0]) < 62)
 
         if e_subtitlu:
-            b.titlu(bloc_curent[0].strip(), 3, mărime=11,
+            b.titlu(randuri[0], 3, mărime=11,
                     inainte=Pt(2), dupa=Pt(10), italic=True)
         elif indentat:
             b.bloc(bloc_curent, italic=True, retras=Mm(12), inainte=Pt(13))
@@ -369,6 +376,51 @@ def construiește(text, titlu_pagina, subtitlu):
         i = j
 
     return doc
+
+
+# ─────────────────────────── verificare ───────────────────────────
+
+def randuri_asteptate(text):
+    """Reconstruiește toate rândurile de autor din corpul cărții."""
+    corp = re.split(r"\n\s+CUPRINS\s*\n", text)[0]
+    rez, bloc = [], []
+
+    def varsa():
+        acc = []
+        for r in bloc:
+            if not acc or FINAL_FRAZA.search(acc[-1]):
+                acc.append(r)
+            else:
+                acc[-1] += " " + r
+        rez.extend(acc)
+
+    for l in corp.split("\n"):
+        t = l.strip()
+        if not t or t == SEPARATOR or set(t) <= set("=-"):
+            if bloc:
+                varsa()
+                bloc.clear()
+            continue
+        bloc.append(t)
+    if bloc:
+        varsa()
+    return rez
+
+
+def verifica(text, doc):
+    """Caută fiecare rând din .txt în documentul Word. Întoarce ce lipsește."""
+    normalizeaza = lambda s: re.sub(r"\s+", " ", s).strip()
+    in_word = normalizeaza(" \n ".join(p.text for p in doc.paragraphs))
+
+    # apar altfel prin construcție, nu sunt pierderi:
+    #   banda de titlu de la începutul fișierului (pagina de titlu e separată)
+    #   etichetele ---- PRAG ---- (în Word apar fără liniuțe, încadrate)
+    de_ignorat = re.compile(r"^-+\s*PRAG|^CUVINTE DESPRE VIA|^O carte care merge")
+
+    asteptate = randuri_asteptate(text)
+    lipsa = [r for r in asteptate
+             if not de_ignorat.match(r) and normalizeaza(r) not in in_word]
+    return len(asteptate), lipsa
 
 
 def gaseste_sursa():
@@ -394,6 +446,8 @@ def main():
     ap.add_argument("--subtitlu",
                     default="Un drum de la existență până la o zi obișnuită")
     ap.add_argument("--fara-subtitlu", action="store_true")
+    ap.add_argument("--fara-verificare", action="store_true",
+                    help="sare peste controlul că nu s-a pierdut niciun rând")
     a = ap.parse_args()
 
     fara_argumente = a.sursa is None
@@ -448,7 +502,26 @@ def main():
     print(f"gata: {ieșire.name}")
     print(f"      {cuvinte} cuvinte, {len(doc.paragraphs)} paragrafe, "
           f"{text.count('De aici ajungem')} punti")
-    termina(None, fara_argumente, cod=0)
+
+    if a.fara_verificare:
+        termina(None, fara_argumente, cod=0)
+
+    total, lipsa = verifica(text, doc)
+    if not lipsa:
+        print(f"      verificare: toate cele {total} randuri din .txt "
+              f"sunt in Word")
+        termina(None, fara_argumente, cod=0)
+
+    print(f"\n  ATENTIE: {len(lipsa)} randuri din .txt nu au ajuns in Word.")
+    print("  Documentul a fost salvat, dar este INCOMPLET.\n")
+    for r in lipsa[:15]:
+        print(f"    - {r[:72]}")
+    if len(lipsa) > 15:
+        print(f"    ... si alte {len(lipsa) - 15}")
+    raport = ieșire.with_name(ieșire.stem + "_randuri_lipsa.txt")
+    raport.write_text("\n".join(lipsa), encoding="utf-8")
+    print(f"\n  Lista completa: {raport.name}")
+    termina(None, fara_argumente, cod=2)
 
 
 def termina(mesaj, aspecta_tasta, cod=0):
