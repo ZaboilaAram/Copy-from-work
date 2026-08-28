@@ -8370,7 +8370,7 @@ Nu poate fi bifat.
 
 Nu poți termina de crescut un copil.
 Nu poți termina de învățat.
-Nu poți termina de fost un om pe care ceilalți se pot baza.
+Nu poți termina de câștigat încrederea cuiva.
 
 Astea nu se ating.
 Se practică.
