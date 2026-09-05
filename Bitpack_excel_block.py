@@ -1498,17 +1498,39 @@ if excelvar == 1992:
                 dt = xl_serial_to_dt(xl_to_num(value))
             except _xl_Stop:
                 return xl_to_text(value)
-            out, i = "", 0
+            parts, i = [], 0
             while i < len(low):
                 for tok in _xl_DATE_TOKENS:
                     if low.startswith(tok, i):
-                        out += _xl_fmt_token(tok, dt)
+                        parts.append(("tok", tok))
                         i += len(tok)
                         break
                 else:
-                    out += p[i]
+                    parts.append(("lit", p[i]))
                     i += 1
-            return out
+            out = []
+            for k, (kind, val) in enumerate(parts):
+                if kind == "lit":
+                    out.append(val)
+                    continue
+                if val in ("m", "mm"):
+                    # ca in Excel: m/mm inseamna minute langa ore sau secunde
+                    prev = None
+                    for t, v in reversed(parts[:k]):
+                        if t == "tok":
+                            prev = v
+                            break
+                    nxt = None
+                    for t, v in parts[k + 1:]:
+                        if t == "tok":
+                            nxt = v
+                            break
+                    if prev in ("h", "hh") or nxt in ("s", "ss"):
+                        out.append("%02d" % dt.minute if val == "mm"
+                                   else str(dt.minute))
+                        continue
+                out.append(_xl_fmt_token(val, dt))
+            return "".join(out)
         if "%" in p:
             digits = len(p.split(".")[1].replace("%", "")) if "." in p else 0
             return ("{:,.%df}%%" % digits).format(xl_to_num(value) * 100)
@@ -1883,12 +1905,55 @@ if excelvar == 1992:
     _xl_PERCENT_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*%$")
 
 
-    def xl_percent_format(number_format):
-        """Excel number format -> intern percent format, sau None."""
-        if not number_format or "%" not in str(number_format):
+    _xl_SIMPLE_NUM_RE = re.compile(r"^[#,0.]+$")
+    _xl_SIMPLE_DATE_RE = re.compile(r"^[dmyhs:./\- ]+$", re.I)
+    _xl_TYPED_DATE_RE = re.compile(
+        r"^(\d{1,2})([./-])(\d{1,2})\2(\d{4})$|^(\d{4})-(\d{1,2})-(\d{1,2})$")
+
+
+    def xl_cell_format(number_format):
+        """Excel number format -> format intern suportat, sau None.
+
+        Se accepta doar tipare simple: procente, date si numere. Orice altceva
+        (General, formate contabile complicate) e ignorat.
+        """
+        if not number_format:
             return None
-        m = re.search(r"\.(0+)", str(number_format))
-        return "0." + "0" * len(m.group(1)) + "%" if m else "0%"
+        fmt = str(number_format).strip()
+        if fmt in ("General", "@", ""):
+            return None
+        if fmt.endswith("%") and _xl_SIMPLE_NUM_RE.match(fmt[:-1] or "0"):
+            m = re.search(r"\.(0+)", fmt)
+            return "0." + "0" * len(m.group(1)) + "%" if m else "0%"
+        low = fmt.lower()
+        if _xl_SIMPLE_DATE_RE.match(low) and re.search(r"[dyh]", low):
+            return low
+        if _xl_SIMPLE_NUM_RE.match(fmt):
+            return fmt
+        return None
+
+
+    def xl_from_excel_cell(cell):
+        """Valoarea si formatul unei celule citite cu openpyxl.
+
+        Datele si orele devin numere seriale, ca in Excel, ca sa poata intra in
+        calcule; formatul se pastreaza doar pentru afisare.
+        """
+        value = cell.value
+        fmt = xl_cell_format(cell.number_format)
+        if isinstance(value, datetime.datetime) or isinstance(value, datetime.date):
+            value = xl_dt_to_serial(value)
+            if not fmt:
+                fmt = "dd.mm.yyyy"
+        elif isinstance(value, datetime.time):
+            value = (value.hour * 3600 + value.minute * 60 + value.second) / 86400.0
+            if not fmt:
+                fmt = "hh:mm:ss"
+        elif isinstance(value, datetime.timedelta):
+            value = value.total_seconds() / 86400.0
+            if not fmt:
+                fmt = "hh:mm:ss"
+        return value, fmt
 
 
     def xl_parse_input(text):
@@ -1903,6 +1968,22 @@ if excelvar == 1992:
                 dec = len(digits.split(".")[1]) if "." in digits else 0
                 fmt = ("0." + "0" * dec + "%") if dec else "0%"
                 return float(digits) / 100.0, fmt
+            m = _xl_TYPED_DATE_RE.match(text.strip())
+            if m:
+                if m.group(1):
+                    day, month, year = m.group(1), m.group(3), m.group(4)
+                    sep = m.group(2)
+                else:
+                    year, month, day = m.group(5), m.group(6), m.group(7)
+                    sep = "-"
+                try:
+                    serial = xl_dt_to_serial(datetime.datetime(int(year), int(month),
+                                                            int(day)))
+                except ValueError:
+                    return xl_coerce_input(text), None
+                fmt = ("yyyy-mm-dd" if sep == "-" and len(year) == 4
+                       and m.group(5) else "dd%smm%syyyy" % (sep, sep))
+                return int(serial), fmt
         return xl_coerce_input(text), None
 
 
@@ -3237,17 +3318,22 @@ if excelvar == 1992:
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
                 # Formulas are kept as text so the engine can evaluate them
-                data = [[cell.value for cell in row] for row in sheet.iter_rows()]
-                view = self.add_sheet(sheet_name, data)
-                # percent cells are stored as 0.2 but must still show 20%
-                model = xl_source_model(view)
+                # Dates become serial numbers and percent cells keep showing
+                # 20% instead of 0.2, exactly like in Excel
+                data, formats = [], {}
                 for row in sheet.iter_rows():
+                    line = []
                     for cell in row:
-                        cell_format = xl_percent_format(cell.number_format)
-                        if cell_format and cell.row <= model.rowCount() \
-                                and cell.column <= model.columnCount():
-                            model.set_format(cell.row - 1, cell.column - 1,
-                                             cell_format)
+                        value, cell_format = xl_from_excel_cell(cell)
+                        line.append(value)
+                        if cell_format:
+                            formats[(cell.row - 1, cell.column - 1)] = cell_format
+                    data.append(line)
+                view = self.add_sheet(sheet_name, data)
+                model = xl_source_model(view)
+                for (r, c), cell_format in formats.items():
+                    if r < model.rowCount() and c < model.columnCount():
+                        model.set_format(r, c, cell_format)
             if self.tabs.count() == 0:
                 self.add_sheet('Sheet1', None)
 
