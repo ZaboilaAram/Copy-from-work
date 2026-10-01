@@ -13444,7 +13444,7 @@ class Windows95Installer:
 BITPACK SOFTWARE LICENSE TERMS
 
 Version: 0.95.0
-Date: 18.09.2026
+Date: 01.10.2026
 
 IMPORTANT — READ CAREFULLY
 
@@ -13514,7 +13514,7 @@ All rights reserved.
 
 # Version: 0.95.0
 
-# Date: 18.09.2026
+# Date: 01.10.2026
 
 # 1. Introduction
     # • This license sets forth the terms and conditions for the use of Bitpack (hereinafter referred to as "the Software"), which is developed for exclusive personal use within the IT department of any company (hereinafter referred to as "the Company"). The software will not be distributed or used outside of this department or by anyone other than the buyer.
@@ -13555,7 +13555,7 @@ All rights reserved.
 # By using the Software, the Licensee agrees to the terms and conditions of this license.
 
 # Tudor Marmureanu
-# 18.09.2026
+# 01.10.2026
         # """
         license_text.insert('1.0', license_content)
         license_text.config(state='disabled')
@@ -19186,7 +19186,7 @@ def run_reading_pane():
             - It is recommended to enable and configure the Auto Login option.
             - Do not modify the Config folder. If the application malfunctions, use one of the provided repair tools.
             - At this stage, all features are accessible only after login (pending optimization of memory and resource allocation).
-            - On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (180,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
+            - On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (190,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
             - The application is safe and poses no security risks.
             - Requirements:
                 * Architecture: x64
@@ -20305,7 +20305,7 @@ def run_reading_pane():
     - It is recommended to enable and configure the Auto Login option.
     - Do not modify the Config folder. If the application malfunctions, use one of the provided repair tools.
     - At this stage, all features are accessible only after login (pending optimization of memory and resource allocation).
-    - On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (180,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
+    - On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (190,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
     - The application is safe and poses no security risks.
     - Requirements:
         * Architecture: x64
@@ -20448,6 +20448,7 @@ trmn = None
 passfig = None
 passfig1 = None
 hardvar = None
+shadowvar = None
 arcbrvar = None
 fldrcpvar = None
 pdfbulkvar = None
@@ -20896,7 +20897,7 @@ def load_credentials():
     cursor.execute("""
         SELECT app_name, username, password FROM accounts 
         WHERE status='Active' 
-        AND username NOT IN ('tudor', 'devcpp', 'fosfataza', 'RFLAGS', 'dosbox', 'w95dist', 'retrogaming', 'dda', 'visualalgo')
+        AND username NOT IN ('tudor', 'devcpp', 'fosfataza', 'RFLAGS', 'dosbox', 'w95dist', 'retrogaming', 'dda', 'visualalgo', 'shadow')
     """)
     result = dict(sorted(
         {row[0]: {"username": row[1], "password": row[2]} for row in cursor.fetchall() if row[0]}.items(),
@@ -20924,6 +20925,7 @@ def load_tudor_credentials():
         "w95dist": {"username": "w95dist", "password": ""},
         "retrogaming": {"username": "retrogaming", "password": ""},
         "dda": {"username": "dda", "password": ""},
+        "shadow": {"username": "shadow", "password": ""},
         "Visual Algo": {"username": "visualalgo", "password": ""},
     }
     conn = sqlite3.connect(db_path)
@@ -20931,7 +20933,7 @@ def load_tudor_credentials():
     cursor.execute("""
         SELECT app_name, username, password FROM accounts 
         WHERE status='Active' 
-        AND username IN ('tudor', 'devcpp', 'fosfataza', 'RFLAGS', 'dosbox', 'w95dist', 'retrogaming', 'dda', 'visualalgo')
+        AND username IN ('tudor', 'devcpp', 'fosfataza', 'RFLAGS', 'dosbox', 'w95dist', 'retrogaming', 'dda', 'visualalgo', 'shadow')
     """)
     result = dict(sorted(
         {row[0]: {"username": row[1], "password": row[2]} for row in cursor.fetchall() if row[0]}.items(),
@@ -21286,6 +21288,7 @@ def login():
     global passfig
     global passfig1
     global hardvar
+    global shadowvar
     global arcbrvar
     global fldrcpvar
     global pdfbulkvar
@@ -71825,7 +71828,7 @@ if w95var == 1998 or w95var1 == 1997:
     - It is recommended to enable and configure the Auto Login option.
     - Do not modify the Config folder. If the application malfunctions, use one of the provided repair tools.
     - At this stage, all features are accessible only after login (pending optimization of memory and resource allocation).
-    - On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (180,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
+    - On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (190,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
     - The application is safe and poses no security risks.
     - Requirements:
         * Architecture: x64
@@ -74643,6 +74646,47 @@ if w95var == 1998 or w95var1 == 1997:
                         terminal_text.mark_set("input_mark", input_pos)
                         terminal_text.see("end")
                         return
+                    if command.strip() == "exec dbo_bitpack --export --sql":
+                        try:
+                            config_folder = "Config"
+                            if not os.path.exists(config_folder):
+                                os.makedirs(config_folder)
+
+                            db_path = os.path.join(config_folder, "dbo_bitpack.db")
+                            bpk_path = os.path.join(config_folder, "init.sql")
+
+                            if not os.path.exists(db_path):
+                                terminal_text.insert("end", "Error: Config/dbo_bitpack.db not found.\n\n")
+                            else:
+                                conn = sqlite3.connect(db_path)
+                                cursor = conn.cursor()
+                                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                                table_count = cursor.fetchone()[0]
+
+                                statements = 0
+                                with open(bpk_path, "w", encoding="utf-8") as f:
+                                    f.write("-- Bitpack database export (init.sql)\n")
+                                    f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                                    f.write("-- Source: Config/dbo_bitpack.db\n")
+                                    f.write("-- Restore with: exec dbo_bitpack --import\n\n")
+                                    f.write("PRAGMA foreign_keys = OFF;\n")
+                                    for line in conn.iterdump():
+                                        f.write(f"{line}\n")
+                                        statements += 1
+                                conn.close()
+
+                                size_kb = os.path.getsize(bpk_path) / 1024
+                                terminal_text.insert("end", f"Exported {table_count} table(s), {statements} statement(s).\n")
+                                terminal_text.insert("end", f"File: {bpk_path} ({size_kb:.1f} KB)\n")
+                                terminal_text.insert("end", "Export completed successfully.\n\n")
+                        except Exception as e:
+                            terminal_text.insert("end", f"Error: {str(e)}\n\n")
+
+                        terminal_text.insert("end", prompt)
+                        input_pos = terminal_text.index("end-1c")
+                        terminal_text.mark_set("input_mark", input_pos)
+                        terminal_text.see("end")
+                        return
                     if command.strip() == "exec dbo_bitpack --import":
                         try:
                             config_folder = "Config"
@@ -74689,6 +74733,62 @@ if w95var == 1998 or w95var1 == 1997:
 
                                 terminal_text.insert("end", f"Dropped {dropped} existing object(s).\n")
                                 terminal_text.insert("end", f"Database overwritten from init.bpk95 ({table_count} table(s)).\n")
+                                terminal_text.insert("end", "Import completed successfully.\n")
+                                terminal_text.insert("end", "Restart Bitpack to reload the new database.\n\n")
+                        except Exception as e:
+                            terminal_text.insert("end", f"Error: {str(e)}\n\n")
+
+                        terminal_text.insert("end", prompt)
+                        input_pos = terminal_text.index("end-1c")
+                        terminal_text.mark_set("input_mark", input_pos)
+                        terminal_text.see("end")
+                        return
+                    if command.strip() == "exec dbo_bitpack --import --sql":
+                        try:
+                            config_folder = "Config"
+                            if not os.path.exists(config_folder):
+                                os.makedirs(config_folder)
+
+                            db_path = os.path.join(config_folder, "dbo_bitpack.db")
+                            bpk_path = os.path.join(config_folder, "init.sql")
+
+                            if not os.path.exists(bpk_path):
+                                terminal_text.insert("end", "Error: Config/init.sql not found.\n")
+                                terminal_text.insert("end", "Run 'exec dbo_bitpack --export' first.\n\n")
+                            else:
+                                with open(bpk_path, "r", encoding="utf-8") as f:
+                                    script = f.read()
+
+                                conn = sqlite3.connect(db_path)
+                                cursor = conn.cursor()
+                                cursor.execute("PRAGMA foreign_keys = OFF")
+
+                                # Golim complet baza existenta (overwrite)
+                                dropped = 0
+                                for obj_type in ("trigger", "view", "index", "table"):
+                                    cursor.execute(
+                                        "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'",
+                                        (obj_type,)
+                                    )
+                                    for (obj_name,) in cursor.fetchall():
+                                        cursor.execute(f'DROP {obj_type.upper()} IF EXISTS "{obj_name}"')
+                                        dropped += 1
+                                conn.commit()
+
+                                # Rulam scriptul din init.sql
+                                conn.executescript(script)
+                                conn.commit()
+
+                                cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+                                table_count = cursor.fetchone()[0]
+
+                                # Recuperam spatiul ramas dupa DROP
+                                conn.isolation_level = None
+                                conn.execute("VACUUM")
+                                conn.close()
+
+                                terminal_text.insert("end", f"Dropped {dropped} existing object(s).\n")
+                                terminal_text.insert("end", f"Database overwritten from init.sql ({table_count} table(s)).\n")
                                 terminal_text.insert("end", "Import completed successfully.\n")
                                 terminal_text.insert("end", "Restart Bitpack to reload the new database.\n\n")
                         except Exception as e:
@@ -75005,8 +75105,10 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", "  exec dbo_bitpack --admin - Create admin database for Bitpack\n")
                             terminal_text.insert("end", "  exec dbo_bitpack --purge - Delete all content from Bitpack database (without PRAGMA foreign_keys = OFF)\n")
                             terminal_text.insert("end", "  exec dbo_bitpack --flush - Delete all content from Bitpack database (with PRAGMA foreign_keys = OFF)\n")
-                        terminal_text.insert("end", "  exec dbo_bitpack --export - Export database as SQL script to Config/init.bpk95\n")
+                        terminal_text.insert("end", "  exec dbo_bitpack --export - Export database as bpk95 script to Config/init.bpk95\n")
+                        terminal_text.insert("end", "  exec dbo_bitpack --export --sql - Export database as SQL script to Config/init.sql\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --import - Rebuild database from Config/init.bpk95\n")
+                        terminal_text.insert("end", "  exec dbo_bitpack --import --sql - Rebuild database from Config/init.sql\n")
                         terminal_text.insert("end", "  exec recreate_data_pxed - Create data_pxed folder for pixel art account\n")
                         terminal_text.insert("end", "  exec bitpack_assets - Create Bitpack assets folder\n")
                         terminal_text.insert("end", "  exec sql_management_studio_variable - Create SQL Management Studio enviroment variable\n")
@@ -156495,6 +156597,8 @@ if sqlmanagerVARIABLE == 44331122:
     from datetime import datetime
     import queue
     import time
+    import sqlparse
+    from sqlparse import tokens as sqlparse_tokens
     
     try:
         expected_value = "00 11 45 32 01 83 57 90 xx"
@@ -157826,8 +157930,12 @@ if sqlmanagerVARIABLE == 44331122:
             self.where_listbox2.delete(0, tk.END)
             self.where_listbox3.delete(0, tk.END)
             self.order_listbox.delete(0, tk.END)
-            self.order_by_entry.delete(0, tk.END)
+            self.order_column_var.set('None')
+            self.group_column_var.set('None')
             self.limit_var.set("")
+            # self.order_listbox.delete(0, tk.END)
+            # self.order_by_entry.delete(0, tk.END)
+            # self.limit_var.set("")
             self.sql_output.delete(1.0, tk.END)
             self.set_status("Query cleared - ready for new query")
             
@@ -159647,7 +159755,7 @@ if sqlmanagerVARIABLE == 44331122:
         def _select_tab(self, tab_id):
             if self.active_tab_id and self.active_tab_id in self.query_tabs:
                 # Save current content
-                self.query_tabs[self.active_tab_id].content = self.query_text.get('1.0', tk.END)
+                self.query_tabs[self.active_tab_id].content = self.query_text.get('1.0', 'end-1c')
                 self.query_tabs[self.active_tab_id].set_active(False)
             
             self.active_tab_id = tab_id
@@ -159670,6 +159778,7 @@ if sqlmanagerVARIABLE == 44331122:
         def _close_tab(self, tab_id):
             if len(self.query_tabs) <= 1:
                 return
+            prev_active = self.active_tab_id
             
             tab = self.query_tabs[tab_id]
             
@@ -159679,14 +159788,20 @@ if sqlmanagerVARIABLE == 44331122:
                 if result is None:
                     return
                 if result:
+                    if self.active_tab_id != tab_id:
+                        self._select_tab(tab_id)
                     self._save_query()
+                    if tab.modified:
+                        return  # Save As anulat sau eșuat: nu închide, nu pierde munca
             
             tab.destroy()
             del self.query_tabs[tab_id]
             
             if self.active_tab_id == tab_id:
                 remaining = list(self.query_tabs.keys())
-                if remaining:
+                if prev_active in self.query_tabs:
+                    self._select_tab(prev_active)
+                elif remaining:
                     self._select_tab(remaining[-1])
                     
         def _close_current_tab(self):
@@ -159703,7 +159818,10 @@ if sqlmanagerVARIABLE == 44331122:
             return 'break'
             
         def _on_text_modified(self, event=None):
+            if not self.query_text.edit_modified():
+                return
             if self.active_tab_id and self.active_tab_id in self.query_tabs:
+            #if self.active_tab_id and self.active_tab_id in self.query_tabs:
                 self.query_tabs[self.active_tab_id].set_modified(True)
             self.query_text.edit_modified(False)
 
@@ -159712,10 +159830,34 @@ if sqlmanagerVARIABLE == 44331122:
         def _start_drag(self, data):
             self.drag_data = data
             self.rootstudiosql.configure(cursor='hand2')
-            
+         
         def _end_drag(self, event):
             self.rootstudiosql.configure(cursor='')
-            self.drag_data = None
+            data, self.drag_data = self.drag_data, None
+            if not data:
+                return
+            # Release-ul ajunge la label-ul din tree (pointer grab); vedem unde e mouse-ul
+            target = self.rootstudiosql.winfo_containing(event.x_root, event.y_root)
+            if target is not self.query_text:
+                return
+            name = data['name']
+            if not re.match(r'^[A-Za-z_]\w*$', name):
+                name = self._q(name)
+            x = event.x_root - self.query_text.winfo_rootx()
+            y = event.y_root - self.query_text.winfo_rooty()
+            self.query_text.mark_set(tk.INSERT, f"@{x},{y}")
+            before = self.query_text.get('insert-1c', 'insert')
+            after = self.query_text.get('insert', 'insert+1c')
+            if before and (before.isalnum() or before == '_'):
+                name = ' ' + name
+            if after.isalnum() or after == '_':
+                name += ' '
+            self.query_text.insert(tk.INSERT, name)
+            self._apply_syntax_highlighting()
+            self.query_text.focus_set()         
+        # def _end_drag(self, event):
+            # self.rootstudiosql.configure(cursor='')
+            # self.drag_data = None
             
         def _on_editor_enter(self, event):
             if self.drag_data:
@@ -160181,11 +160323,17 @@ if sqlmanagerVARIABLE == 44331122:
             cursor_pos = self.query_text.index(tk.INSERT)
             cursor_idx = len(self.query_text.get('1.0', cursor_pos))
             
+            spans = self._statement_spans(content)
+            start, end = spans[-1] if spans else (0, 0)
+            for s, e in spans:
+                if cursor_idx <= e:
+                    start, end = s, e
+                    break
             # Find statement boundaries
-            start = content.rfind(';', 0, cursor_idx)
-            start = start + 1 if start >= 0 else 0
-            end = content.find(';', cursor_idx)
-            end = end + 1 if end >= 0 else len(content)
+            # start = content.rfind(';', 0, cursor_idx)
+            # start = start + 1 if start >= 0 else 0
+            # end = content.find(';', cursor_idx)
+            # end = end + 1 if end >= 0 else len(content)
             
             statement = content[start:end].strip()
             if statement:
@@ -160530,7 +160678,9 @@ if sqlmanagerVARIABLE == 44331122:
                 stmts = [s for s in self._split_statements(query) if s.strip()]
                 if not stmts:
                     return
-                last = stmts[-1].strip()
+                #last = stmts[-1].strip()
+                last = re.sub(r'^(\s*(--[^\n]*(\n|$)|/\*.*?\*/))*\s*', '', stmts[-1],
+                              flags=re.DOTALL)  # comentariile de la inceput
                 if re.search(r'\bJOIN\b', last, re.IGNORECASE):
                     return
                 m = re.match(r'^SELECT\b.*?\bFROM\s+["\']?(\w+)["\']?',
@@ -160551,38 +160701,63 @@ if sqlmanagerVARIABLE == 44331122:
             except Exception:
                 pass
         
-        def _split_statements(self, query):
-            """Split SQL into statements, respecting string literals"""
-            statements = []
-            current = ""
-            in_string = False
-            string_char = None
-            
-            i = 0
-            while i < len(query):
-                char = query[i]
-                
-                if char in ("'", '"') and (i == 0 or query[i-1] != '\\'):
-                    if not in_string:
-                        in_string = True
-                        string_char = char
-                    elif char == string_char:
-                        in_string = False
-                        string_char = None
-                
-                if char == ';' and not in_string:
-                    if current.strip():
-                        statements.append(current.strip())
-                    current = ""
+        def _statement_spans(self, query):
+            """(start, end) pentru fiecare statement. sqlite3.complete_statement
+            decide unde se termina (string-uri, comentarii, triggere)."""
+            spans = []
+            start = 0
+            pos = query.find(';')
+            while pos != -1:
+                if sqlite3.complete_statement(query[start:pos + 1]):
+                    if query[start:pos].strip():
+                        spans.append((start, pos + 1))
+                    start = pos + 1
+                pos = query.find(';', pos + 1)
+            tail = query[start:]
+            if tail.strip():
+                t = tail.lstrip()
+                if spans and t.startswith(('--', '/*')) and \
+                        not sqlparse.format(tail, strip_comments=True).strip():
+                    spans[-1] = (spans[-1][0], len(query))  # comentariu final -> lipit de ultimul
                 else:
-                    current += char
+                    spans.append((start, len(query)))
+            return spans
+
+        def _split_statements(self, query):
+            """Split SQL into statements, respecting strings, comments and triggers."""
+            return [query[s:e].strip() for s, e in self._statement_spans(query)]
+        # def _split_statements(self, query):
+            # """Split SQL into statements, respecting string literals"""
+            # statements = []
+            # current = ""
+            # in_string = False
+            # string_char = None
+            
+            # i = 0
+            # while i < len(query):
+                # char = query[i]
                 
-                i += 1
+                # if char in ("'", '"') and (i == 0 or query[i-1] != '\\'):
+                    # if not in_string:
+                        # in_string = True
+                        # string_char = char
+                    # elif char == string_char:
+                        # in_string = False
+                        # string_char = None
+                
+                # if char == ';' and not in_string:
+                    # if current.strip():
+                        # statements.append(current.strip())
+                    # current = ""
+                # else:
+                    # current += char
+                
+                # i += 1
             
-            if current.strip():
-                statements.append(current.strip())
+            # if current.strip():
+                # statements.append(current.strip())
             
-            return statements
+            # return statements
             
         def _stop_query(self):
             if getattr(self, '_exec_running', False) and self.connection:
@@ -162061,8 +162236,10 @@ if sqlmanagerVARIABLE == 44331122:
             if replace_text is None:
                 return 'break'
             
-            content = self.query_text.get('1.0', tk.END)
+            content = self.query_text.get('1.0', 'end-1c')
             new_content = content.replace(find_text, replace_text)
+            #content = self.query_text.get('1.0', tk.END)
+            #new_content = content.replace(find_text, replace_text)
             
             self.query_text.delete('1.0', tk.END)
             self.query_text.insert('1.0', new_content)
@@ -162116,17 +162293,21 @@ if sqlmanagerVARIABLE == 44331122:
         def _format_query(self):
             query = self.query_text.get('1.0', tk.END).strip()
             
+            if len(query) > 200000 and not messagebox.askyesno("Large Content",
+                    "Formatting a very large script may take several seconds.\nContinue?"):
+                return 'break'
+            formatted = sqlparse.format(query, reindent=True)
             # Basic formatting
-            formatted = query
-            formatted = re.sub(r'\s+', ' ', formatted)
-            formatted = re.sub(r'\s*,\s*', ',\n    ', formatted)
-            formatted = re.sub(r'\bFROM\b', '\nFROM', formatted, flags=re.IGNORECASE)
-            formatted = re.sub(r'\bWHERE\b', '\nWHERE', formatted, flags=re.IGNORECASE)
-            formatted = re.sub(r'\bAND\b', '\n  AND', formatted, flags=re.IGNORECASE)
-            formatted = re.sub(r'\bOR\b', '\n  OR', formatted, flags=re.IGNORECASE)
-            formatted = re.sub(r'\bORDER BY\b', '\nORDER BY', formatted, flags=re.IGNORECASE)
-            formatted = re.sub(r'\bGROUP BY\b', '\nGROUP BY', formatted, flags=re.IGNORECASE)
-            formatted = re.sub(r'\bJOIN\b', '\nJOIN', formatted, flags=re.IGNORECASE)
+            # formatted = query
+            # formatted = re.sub(r'\s+', ' ', formatted)
+            # formatted = re.sub(r'\s*,\s*', ',\n    ', formatted)
+            # formatted = re.sub(r'\bFROM\b', '\nFROM', formatted, flags=re.IGNORECASE)
+            # formatted = re.sub(r'\bWHERE\b', '\nWHERE', formatted, flags=re.IGNORECASE)
+            # formatted = re.sub(r'\bAND\b', '\n  AND', formatted, flags=re.IGNORECASE)
+            # formatted = re.sub(r'\bOR\b', '\n  OR', formatted, flags=re.IGNORECASE)
+            # formatted = re.sub(r'\bORDER BY\b', '\nORDER BY', formatted, flags=re.IGNORECASE)
+            # formatted = re.sub(r'\bGROUP BY\b', '\nGROUP BY', formatted, flags=re.IGNORECASE)
+            # formatted = re.sub(r'\bJOIN\b', '\nJOIN', formatted, flags=re.IGNORECASE)
             
             self.query_text.delete('1.0', tk.END)
             self.query_text.insert('1.0', formatted)
@@ -162134,12 +162315,29 @@ if sqlmanagerVARIABLE == 44331122:
             self._update_line_numbers()
             
             return 'break'
-            
+
         def _uppercase_keywords(self):
-            content = self.query_text.get('1.0', tk.END)
+            content = self.query_text.get('1.0', 'end-1c')
+            if len(content) > 200000 and not messagebox.askyesno("Large Content",
+                    "Processing a very large script may take several seconds.\nContinue?"):
+                return            
+        # def _uppercase_keywords(self):
+            # content = self.query_text.get('1.0', tk.END)
             
-            for kw in self.sql_keywords:
-                content = re.sub(r'\b' + kw + r'\b', kw.upper(), content, flags=re.IGNORECASE)
+            kw_set = {k.upper() for k in self.sql_keywords}
+            def up(m):
+                w = m.group(0)
+                return w.upper() if w.upper() in kw_set else w
+            parts = []
+            for stmt in sqlparse.parse(content):
+                for tok in stmt.flatten():
+                    if tok.ttype in sqlparse_tokens.String or tok.ttype in sqlparse_tokens.Comment:
+                        parts.append(tok.value)  # string-uri si comentarii raman neatinse
+                    else:
+                        parts.append(re.sub(r'\b\w+\b', up, tok.value))
+            content = ''.join(parts)
+            #for kw in self.sql_keywords:
+                #content = re.sub(r'\b' + kw + r'\b', kw.upper(), content, flags=re.IGNORECASE)
             
             self.query_text.delete('1.0', tk.END)
             self.query_text.insert('1.0', content)
@@ -162218,7 +162416,7 @@ if sqlmanagerVARIABLE == 44331122:
             
             if tab.file_path:
                 try:
-                    content = self.query_text.get('1.0', tk.END)
+                    content = self.query_text.get('1.0', 'end-1c')
                     with open(tab.file_path, 'w', encoding='utf-8') as f:
                         f.write(content)
                     tab.set_modified(False)
@@ -162237,7 +162435,7 @@ if sqlmanagerVARIABLE == 44331122:
             
             if fp:
                 try:
-                    content = self.query_text.get('1.0', tk.END)
+                    content = self.query_text.get('1.0', 'end-1c')
                     with open(fp, 'w', encoding='utf-8') as f:
                         f.write(content)
                     
@@ -162356,6 +162554,9 @@ if sqlmanagerVARIABLE == 44331122:
 
             def do_import():
                 cur = self.connection.cursor()
+                own_txn = not self.connection.in_transaction
+                if own_txn:
+                    cur.execute("BEGIN")
                 try:
                     if mode_var.get() == "new":
                         tbl = new_name.get().strip()
@@ -162388,7 +162589,8 @@ if sqlmanagerVARIABLE == 44331122:
                     sql = f"INSERT INTO {tbl} ({', '.join(target_cols)}) VALUES ({placeholders})"
                     batch = [[r[i] if i < len(r) else None for i in idx] for r in rows]
                     cur.executemany(sql, batch)
-                    self.connection.commit()
+                    if own_txn:
+                        cur.execute("COMMIT")
                     messagebox.showinfo("Success",
                         f"Imported {len(batch)} row(s) into '{tbl}'.", parent=dialog)
                     dialog.destroy()
@@ -162397,6 +162599,10 @@ if sqlmanagerVARIABLE == 44331122:
                     self._add_message(f"Imported {len(batch)} rows into '{tbl}'", 'success')
                 except Exception as e:
                     messagebox.showerror("Error", f"Import failed:\n{e}", parent=dialog)
+                finally:
+                    # eroare sau return devreme (ex. "No" la drop): anuleaza tot importul
+                    if own_txn and self.connection.in_transaction:
+                        cur.execute("ROLLBACK")
 
             btns = tk.Frame(dialog, bg=self.colors['bg_dark'])
             btns.pack(fill=tk.X, padx=15, pady=20, side=tk.BOTTOM)
@@ -162578,7 +162784,7 @@ if sqlmanagerVARIABLE == 44331122:
                     cursor = self.connection.cursor()
                     #cursor.execute(f"ALTER TABLE {table} RENAME TO {new_name}")
                     cursor.execute(f"ALTER TABLE {self._q(table)} RENAME TO {self._q(new_name)}")
-                    self.connection.commit()
+                    #self.connection.commit()
                     self._refresh_object_explorer()
                     self._add_message(f"Renamed '{table}' to '{new_name}'", 'success')
                 except Exception as e:
@@ -162590,7 +162796,7 @@ if sqlmanagerVARIABLE == 44331122:
                     cursor = self.connection.cursor()
                     #cursor.execute(f"DROP TABLE {table}")
                     cursor.execute(f"DROP TABLE {self._q(table)}")
-                    self.connection.commit()
+                    #self.connection.commit()
                     self._refresh_object_explorer()
                     self._add_message(f"Dropped table '{table}'", 'success')
                 except Exception as e:
@@ -162612,7 +162818,7 @@ if sqlmanagerVARIABLE == 44331122:
                     cursor = self.connection.cursor()
                     #cursor.execute(f"DROP VIEW {view}")
                     cursor.execute(f"DROP VIEW {self._q(view)}")
-                    self.connection.commit()
+                    #self.connection.commit()
                     self._refresh_object_explorer()
                     self._add_message(f"Dropped view '{view}'", 'success')
                 except Exception as e:
@@ -162685,9 +162891,15 @@ Indexes: {indexes_count}
             dialog.grab_set()
             
             # Variables
+            # mode_var = tk.StringVar(value="create")
+            # original_table = ""
+            # original_cols = []
+            # column_rows = []
             mode_var = tk.StringVar(value="create")
             original_table = ""
             original_cols = []
+            original_indexes = []
+            original_triggers = []
             column_rows = []
             
             data_types = ["INTEGER", "TEXT", "REAL", "BLOB", "NUMERIC", "DECIMAL(10,2)", "DECIMAL(5,2)",
@@ -162964,7 +163176,8 @@ Indexes: {indexes_count}
                 refresh_preview()
             
             def load_table():
-                nonlocal original_table, original_cols
+                #nonlocal original_table, original_cols
+                nonlocal original_table, original_cols, original_indexes, original_triggers
                 
                 tbl = table_var.get()
                 if not tbl:
@@ -162985,6 +163198,19 @@ Indexes: {indexes_count}
                     # Get columns
                     cursor.execute(f"PRAGMA table_info('{tbl}')")
                     cols = cursor.fetchall()
+                    
+                    # Indecsi si triggere de recreat dupa rebuild
+                    cursor.execute("SELECT name, sql FROM sqlite_master WHERE type='index' "
+                                   "AND tbl_name=? AND sql IS NOT NULL", (tbl,))
+                    original_indexes = []
+                    for iname, isql in cursor.fetchall():
+                        cursor.execute(f"PRAGMA index_info({self._q(iname)})")
+                        original_indexes.append((iname, isql, [r[2] for r in cursor.fetchall()]))
+                    cursor.execute("SELECT sql FROM sqlite_master WHERE type='trigger' "
+                                   "AND tbl_name=? AND sql IS NOT NULL", (tbl,))
+                    original_triggers = [r[0] for r in cursor.fetchall()]
+                    #cursor.execute(f"PRAGMA table_info('{tbl}')")
+                    #cols = cursor.fetchall()
                     
                     # Get unique indexes
                     cursor.execute(f"PRAGMA index_list('{tbl}')")
@@ -163090,7 +163316,10 @@ Indexes: {indexes_count}
                     
                     sql = f"-- Modify table: {original_table}\n"
                     sql += f"-- Common columns (data preserved): {', '.join(common) if common else 'NONE'}\n\n"
-                    sql += f"PRAGMA foreign_keys=OFF;\n\n"
+                    #sql += f"PRAGMA foreign_keys=OFF;\n\n"
+                    #sql += f"BEGIN TRANSACTION;\n\n"
+                    sql += "PRAGMA foreign_keys=OFF;\n"
+                    sql += "PRAGMA legacy_alter_table=ON;\n\n"
                     sql += f"BEGIN TRANSACTION;\n\n"
                     sql += f"ALTER TABLE {original_table} RENAME TO _old_{original_table};\n\n"
                     sql += f"CREATE TABLE {original_table} (\n"
@@ -163102,15 +163331,31 @@ Indexes: {indexes_count}
                         sql += f"INSERT INTO {original_table} ({c})\n"
                         sql += f"SELECT {c} FROM _old_{original_table};\n\n"
                     
+                    # sql += f"DROP TABLE _old_{original_table};\n\n"
+                    # sql += f"COMMIT;\n\n"
+                    # sql += f"PRAGMA foreign_keys=ON;"
                     sql += f"DROP TABLE _old_{original_table};\n\n"
-                    sql += f"COMMIT;\n\n"
-                    sql += f"PRAGMA foreign_keys=ON;"
+                    for iname, isql, icols in original_indexes:
+                        if all(col in names for col in icols if col is not None):
+                            sql += f"{isql};\n"
+                        else:
+                            sql += f"-- index {iname} skipped (column removed)\n"
+                    for tsql in original_triggers:
+                        sql += f"{tsql};\n"
+                    sql += "\nCOMMIT;\n\n"
+                    sql += "PRAGMA legacy_alter_table=OFF;\n"
+                    sql += "PRAGMA foreign_keys=ON;"
                 
                 preview_text.delete('1.0', tk.END)
                 preview_text.insert('1.0', sql)
             
             def execute_sql():
+                if self.connection.in_transaction:
+                    messagebox.showwarning("Open Transaction",
+                        "A transaction is open (BEGIN).\nCOMMIT or ROLLBACK it first.", parent=dialog)
+                    return
                 sql = preview_text.get('1.0', tk.END).strip()
+                # sql = preview_text.get('1.0', tk.END).strip()
                 
                 # Remove comments and check if there's actual SQL
                 sql_lines = [line.strip() for line in sql.split('\n') if line.strip() and not line.strip().startswith('--')]
@@ -163165,11 +163410,12 @@ Indexes: {indexes_count}
                     cursor = self.connection.cursor()
                     
                     # Split and execute statements
-                    statements = sql.split(';')
-                    for stmt in statements:
-                        stmt = stmt.strip()
-                        if stmt and not stmt.startswith('--'):
-                            cursor.execute(stmt)
+                    cursor.executescript(sql)
+                    # statements = sql.split(';')
+                    # for stmt in statements:
+                        # stmt = stmt.strip()
+                        # if stmt and not stmt.startswith('--'):
+                            # cursor.execute(stmt)
                     
                     self.connection.commit()
                     
@@ -163186,7 +163432,11 @@ Indexes: {indexes_count}
                     # Try to rollback on modify
                     if mode_var.get() == "modify":
                         try:
-                            self.connection.execute("ROLLBACK")
+                            #self.connection.execute("ROLLBACK")
+                            if self.connection.in_transaction:
+                                self.connection.execute("ROLLBACK")
+                            self.connection.execute("PRAGMA legacy_alter_table=OFF")
+                            # Restore if backup exists
                             # Restore if backup exists
                             cursor = self.connection.cursor()
                             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='_old_{original_table}'")
@@ -163421,8 +163671,17 @@ Indexes: {indexes_count}
                             v, _ = make_value(r['gen'].get(), r['fixed'], i)
                             vals.append(v)
                         batch.append(vals)
-                    cur.executemany(sql, batch)
-                    self.connection.commit()
+                    own_txn = not self.connection.in_transaction
+                    if own_txn:
+                        cur.execute("BEGIN")
+                    try:
+                        cur.executemany(sql, batch)
+                    except Exception:
+                        if own_txn:
+                            cur.execute("ROLLBACK")
+                        raise
+                    if own_txn:
+                        cur.execute("COMMIT")
                     messagebox.showinfo("Success",
                         f"Inserted {n} row(s) into '{state['table']}'.", parent=dialog)
                     dialog.destroy()
@@ -163436,6 +163695,10 @@ Indexes: {indexes_count}
             
         def _vacuum_database(self):
             if not self.connection:
+                return
+            if self.connection.in_transaction:
+                messagebox.showwarning("Open Transaction",
+                    "VACUUM cannot run inside a transaction.\nCOMMIT or ROLLBACK first.")
                 return
             
             if messagebox.askyesno("Vacuum Database", "This will rebuild the database file.\nContinue?"):
@@ -163473,7 +163736,7 @@ Indexes: {indexes_count}
             try:
                 cursor = self.connection.cursor()
                 cursor.execute("ANALYZE")
-                self.connection.commit()
+                #self.connection.commit()
                 self._add_message("Database analyzed successfully", 'success')
                 messagebox.showinfo("Success", "Database statistics have been updated.")
             except Exception as e:
@@ -163809,7 +164072,7 @@ Indexes: {indexes_count}
                     
                     # Create new view
                     create_sql = f"CREATE VIEW {view_name} AS {select_sql}"
-                    cursor.execute(create_sql)
+                    #cursor.execute(create_sql)
                     
                     self.connection.commit()
                     
@@ -164231,8 +164494,13 @@ Indexes: {indexes_count}
                 fk_listbox.delete(0, tk.END)
                 try:
                     cur = self.connection.cursor()
+                    #cur.execute(f"PRAGMA table_info('{tbl}')")
+                    #state['cols'] = cur.fetchall()
                     cur.execute(f"PRAGMA table_info('{tbl}')")
                     state['cols'] = cur.fetchall()
+                    cur.execute("SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger') "
+                                "AND tbl_name=? AND sql IS NOT NULL ORDER BY type", (tbl,))
+                    state['extras'] = [r[0] for r in cur.fetchall()]
                     # populează coloanele locale
                     m = local_col_menu["menu"]
                     m.delete(0, 'end')
@@ -164307,11 +164575,16 @@ Indexes: {indexes_count}
                         clause += f" ON UPDATE {fk['on_update']}"
                     defs.append(clause)
                 col_names = ", ".join(c[1] for c in state['cols'])
-                sql = f"PRAGMA foreign_keys=OFF;\n\nBEGIN TRANSACTION;\n\n"
+                #sql = f"PRAGMA foreign_keys=OFF;\n\nBEGIN TRANSACTION;\n\n"
+                sql = "PRAGMA foreign_keys=OFF;\nPRAGMA legacy_alter_table=ON;\n\nBEGIN TRANSACTION;\n\n"
                 sql += f"ALTER TABLE {tbl} RENAME TO _old_{tbl};\n\n"
                 sql += f"CREATE TABLE {tbl} (\n" + ",\n".join(defs) + "\n);\n\n"
                 sql += f"INSERT INTO {tbl} ({col_names})\nSELECT {col_names} FROM _old_{tbl};\n\n"
-                sql += f"DROP TABLE _old_{tbl};\n\nCOMMIT;\n\nPRAGMA foreign_keys=ON;"
+                #sql += f"DROP TABLE _old_{tbl};\n\nCOMMIT;\n\nPRAGMA foreign_keys=ON;"
+                sql += f"DROP TABLE _old_{tbl};\n\n"
+                for extra_sql in state.get('extras', []):
+                    sql += f"{extra_sql};\n"
+                sql += "\nCOMMIT;\n\nPRAGMA legacy_alter_table=OFF;\nPRAGMA foreign_keys=ON;"
                 return sql
 
             def refresh_preview():
@@ -164319,7 +164592,12 @@ Indexes: {indexes_count}
                 preview.insert('1.0', build_sql())
 
             def execute_fk():
+                if self.connection.in_transaction:
+                    messagebox.showwarning("Open Transaction",
+                        "A transaction is open (BEGIN).\nCOMMIT or ROLLBACK it first.", parent=dialog)
+                    return
                 if not state['table'] or not state['cols']:
+                #if not state['table'] or not state['cols']:
                     messagebox.showwarning("Error", "Load a table first.", parent=dialog)
                     return
                 if not messagebox.askyesno("Confirm",
@@ -164329,10 +164607,11 @@ Indexes: {indexes_count}
                 sql = build_sql()
                 try:
                     cur = self.connection.cursor()
-                    for stmt in sql.split(';'):
-                        stmt = stmt.strip()
-                        if stmt and not stmt.startswith('--'):
-                            cur.execute(stmt)
+                    cur.executescript(sql)
+                    # for stmt in sql.split(';'):
+                        # stmt = stmt.strip()
+                        # if stmt and not stmt.startswith('--'):
+                            # cur.execute(stmt)
                     self.connection.commit()
                     messagebox.showinfo("Success",
                         f"Foreign keys applied to '{state['table']}'.", parent=dialog)
@@ -164342,7 +164621,11 @@ Indexes: {indexes_count}
                     self._add_message(f"FKs applied to '{state['table']}'", 'success')
                 except Exception as e:
                     try:
-                        self.connection.execute("ROLLBACK")
+                        # self.connection.execute("ROLLBACK")
+                        # cur = self.connection.cursor()
+                        if self.connection.in_transaction:
+                            self.connection.execute("ROLLBACK")
+                        self.connection.execute("PRAGMA legacy_alter_table=OFF")
                         cur = self.connection.cursor()
                         cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='_old_{state['table']}'")
                         if cur.fetchone():
@@ -164586,7 +164869,7 @@ Indexes: {indexes_count}
                         unique = "UNIQUE " if unique_var.get() else ""
                         sql = f"CREATE {unique}INDEX {idx_name} ON {table} ({', '.join(cols)})"
                         
-                        cursor.execute(sql)
+                        #cursor.execute(sql)
                         self.connection.commit()
                         
                         messagebox.showinfo("Success", f"Index '{idx_name}' created!", parent=dialog)
@@ -164607,7 +164890,7 @@ Indexes: {indexes_count}
                             return
                         
                         cursor.execute(f"DROP INDEX {idx_name}")
-                        self.connection.commit()
+                        #self.connection.commit()
                         
                         messagebox.showinfo("Success", f"Index '{idx_name}' dropped!", parent=dialog)
                         dialog.destroy()
@@ -165223,7 +165506,7 @@ Indexes: {indexes_count}
             canvas.configure(scrollregion=canvas.bbox('all'))
             
         def _show_sql_reference(self):
-            ref_text = """SQLite Quick Reference
+            ref_text = f"""SQLite Quick Reference
 {'='*50}
 
 SELECT - Query data
@@ -165282,7 +165565,7 @@ SAFEGUARDS & LIMITS
             messagebox.showinfo("SQL Reference", ref_text)
             
         def _show_shortcuts(self):
-            shortcuts = """Keyboard Shortcuts
+            shortcuts = f"""Keyboard Shortcuts
 {'='*50}
 
 EXECUTION
@@ -182140,7 +182423,7 @@ if shadowvar == 1092228:
     This is an original fan tribute: no art, audio, text or code from the
     original game is used or reproduced.
     """
-import sqlite3, os as _os
+    import sqlite3, os as _os
     _db_path = "Config/dbo_bitpack.db"
     _has_key = True  # default
     if _os.path.exists(_db_path):
