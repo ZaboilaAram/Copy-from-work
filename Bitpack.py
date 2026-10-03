@@ -13444,7 +13444,7 @@ class Windows95Installer:
 BITPACK SOFTWARE LICENSE TERMS
 
 Version: 0.95.0
-Date: 01.10.2026
+Date: 03.10.2026
 
 IMPORTANT — READ CAREFULLY
 
@@ -13514,7 +13514,7 @@ All rights reserved.
 
 # Version: 0.95.0
 
-# Date: 01.10.2026
+# Date: 03.10.2026
 
 # 1. Introduction
     # • This license sets forth the terms and conditions for the use of Bitpack (hereinafter referred to as "the Software"), which is developed for exclusive personal use within the IT department of any company (hereinafter referred to as "the Company"). The software will not be distributed or used outside of this department or by anyone other than the buyer.
@@ -13555,7 +13555,7 @@ All rights reserved.
 # By using the Software, the Licensee agrees to the terms and conditions of this license.
 
 # Tudor Marmureanu
-# 01.10.2026
+# 03.10.2026
         # """
         license_text.insert('1.0', license_content)
         license_text.config(state='disabled')
@@ -103921,8 +103921,10 @@ if vscodevar == 999955550000:
             
             # Trimite input-ul către proces (inclusiv "\n")
             try:
-                # Adăugăm \n pentru a simula apăsarea Enter și flush imediat pentru a evita buffering
-                input_to_send = user_input + '\n'
+                # stdin e binar: trimitem bytes UTF-8
+                input_to_send = (user_input + '\n').encode('utf-8')
+                # # Adăugăm \n pentru a simula apăsarea Enter și flush imediat pentru a evita buffering
+                # input_to_send = user_input + '\n'
                 self.process.stdin.write(input_to_send)
                 self.process.stdin.flush()
                 
@@ -106086,10 +106088,12 @@ if vscodevar == 999955550000:
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        universal_newlines=True,
-                        bufsize=0,  # Fără buffering
-                        encoding='utf-8',
-                        errors='replace',
+                        # universal_newlines=True,
+                        # bufsize=0,  # Fără buffering
+                        # encoding='utf-8',
+                        # errors='replace',
+                        # env=env_vars,
+                        bufsize=0,  # binar, fără buffering
                         env=env_vars,
                         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
                     )
@@ -106100,64 +106104,90 @@ if vscodevar == 999955550000:
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
-                        universal_newlines=True,
-                        bufsize=0,  # Fără buffering
-                        encoding='utf-8',
-                        errors='replace',
+                        # universal_newlines=True,
+                        # bufsize=0,  # Fără buffering
+                        # encoding='utf-8',
+                        # errors='replace',
+                        # env=env_vars
+                        bufsize=0,  # binar, fără buffering
                         env=env_vars
                     )
                 
-                # Thread pentru a citi stdout - versiune îmbunătățită
-                def read_stdout():
-                    buffer = ""
-                    while self.process and self.process.poll() is None and not self.stop_threads.is_set():
-                        try:
-                            # Citim în bucăți mai mari pentru eficiență
-                            chunk = self.process.stdout.read(256)
-                            if chunk:
-                                # Actualizăm terminalul imediat
-                                self.rootVSCODE.after_idle(lambda text=chunk: self.update_terminal_text(text, "normal"))
+                # Citire non-blocantă: FileIO.read(n) întoarce imediat ce are date
+                import codecs, io
+                def make_reader(stream, tag):
+                    def reader():
+                        decoder = io.IncrementalNewlineDecoder(
+                            codecs.getincrementaldecoder('utf-8')(errors='replace'),
+                            translate=True)
+                        while True:
+                            try:
+                                data = stream.read(4096)
+                            except (OSError, ValueError):
+                                break
+                            if not data:  # EOF
+                                break
+                            text = decoder.decode(data)
+                            if text:
+                                self.rootVSCODE.after_idle(lambda t=text: self.update_terminal_text(t, tag))
+                        tail = decoder.decode(b'', final=True)
+                        if tail:
+                            self.rootVSCODE.after_idle(lambda t=tail: self.update_terminal_text(t, tag))
+                    return reader
+
+                read_stdout = make_reader(self.process.stdout, "normal")
+                read_stderr = make_reader(self.process.stderr, "error")
+                # # Thread pentru a citi stdout - versiune îmbunătățită
+                # def read_stdout():
+                    # buffer = ""
+                    # while self.process and self.process.poll() is None and not self.stop_threads.is_set():
+                        # try:
+                            # # Citim în bucăți mai mari pentru eficiență
+                            # chunk = self.process.stdout.read(256)
+                            # if chunk:
+                                # # Actualizăm terminalul imediat
+                                # self.rootVSCODE.after_idle(lambda text=chunk: self.update_terminal_text(text, "normal"))
                                 
-                                # Verificăm pentru prompt-uri de input
-                                buffer += chunk
-                                # Păstrăm doar ultimele 200 de caractere în buffer
-                                if len(buffer) > 200:
-                                    buffer = buffer[-200:]
+                                # # Verificăm pentru prompt-uri de input
+                                # buffer += chunk
+                                # # Păstrăm doar ultimele 200 de caractere în buffer
+                                # if len(buffer) > 200:
+                                    # buffer = buffer[-200:]
                                 
-                                # Detectează prompt-uri de input mai eficient
-                                lines = buffer.split('\n')
-                                last_line = lines[-1].strip() if lines else ""
+                                # # Detectează prompt-uri de input mai eficient
+                                # lines = buffer.split('\n')
+                                # last_line = lines[-1].strip() if lines else ""
                                 
-                                # Verifică pentru indicatori comuni de input
-                                input_indicators = [':', '?', '>>>', 'Enter', 'input', 'Input', 'Press']
-                                if any(indicator in last_line for indicator in input_indicators):
-                                    self.rootVSCODE.after_idle(self.enable_input)
-                            else:
-                                # Mică pauză dacă nu avem date
-                                time.sleep(0.01)
-                        except (IOError, OSError, ValueError):
-                            break
-                        except Exception as e:
-                            print(f"Stdout error: {e}")
-                            break
+                                # # Verifică pentru indicatori comuni de input
+                                # input_indicators = [':', '?', '>>>', 'Enter', 'input', 'Input', 'Press']
+                                # if any(indicator in last_line for indicator in input_indicators):
+                                    # self.rootVSCODE.after_idle(self.enable_input)
+                            # else:
+                                # # Mică pauză dacă nu avem date
+                                # time.sleep(0.01)
+                        # except (IOError, OSError, ValueError):
+                            # break
+                        # except Exception as e:
+                            # print(f"Stdout error: {e}")
+                            # break
                 
-                # Thread pentru a citi stderr - versiune îmbunătățită
-                def read_stderr():
-                    while self.process and self.process.poll() is None and not self.stop_threads.is_set():
-                        try:
-                            # Citim în bucăți mai mari pentru eficiență
-                            chunk = self.process.stderr.read(256)
-                            if chunk:
-                                # Actualizăm terminalul imediat cu tag de eroare
-                                self.rootVSCODE.after_idle(lambda text=chunk: self.update_terminal_text(text, "error"))
-                            else:
-                                # Mică pauză dacă nu avem date
-                                time.sleep(0.01)
-                        except (IOError, OSError, ValueError):
-                            break
-                        except Exception as e:
-                            print(f"Stderr error: {e}")
-                            break
+                # # Thread pentru a citi stderr - versiune îmbunătățită
+                # def read_stderr():
+                    # while self.process and self.process.poll() is None and not self.stop_threads.is_set():
+                        # try:
+                            # # Citim în bucăți mai mari pentru eficiență
+                            # chunk = self.process.stderr.read(256)
+                            # if chunk:
+                                # # Actualizăm terminalul imediat cu tag de eroare
+                                # self.rootVSCODE.after_idle(lambda text=chunk: self.update_terminal_text(text, "error"))
+                            # else:
+                                # # Mică pauză dacă nu avem date
+                                # time.sleep(0.01)
+                        # except (IOError, OSError, ValueError):
+                            # break
+                        # except Exception as e:
+                            # print(f"Stderr error: {e}")
+                            # break
                 
                 # Thread pentru a monitoriza terminarea procesului
                 def monitor_process():
@@ -106171,20 +106201,26 @@ if vscodevar == 999955550000:
                         # Așteaptă puțin pentru a se asigura că tot output-ul a fost procesat
                         time.sleep(0.1)
                         
-                        # Citește orice output rămas
-                        try:
-                            remaining_stdout, remaining_stderr = self.process.communicate(timeout=0.5)
-                            if remaining_stdout:
-                                self.rootVSCODE.after_idle(lambda text=remaining_stdout: self.update_terminal_text(text, "normal"))
-                            if remaining_stderr:
-                                self.rootVSCODE.after_idle(lambda text=remaining_stderr: self.update_terminal_text(text, "error"))
-                        except:
-                            pass
+                        # Așteaptă ca readerele să golească pipe-urile până la EOF
+                        stdout_thread.join(timeout=2.0)
+                        stderr_thread.join(timeout=2.0)
+                        # # Citește orice output rămas
+                        # try:
+                            # remaining_stdout, remaining_stderr = self.process.communicate(timeout=0.5)
+                            # if remaining_stdout:
+                                # self.rootVSCODE.after_idle(lambda text=remaining_stdout: self.update_terminal_text(text, "normal"))
+                            # if remaining_stderr:
+                                # self.rootVSCODE.after_idle(lambda text=remaining_stderr: self.update_terminal_text(text, "error"))
+                        # except:
+                            # pass
                         
                         # Afișează mesajul de finalizare folosind after_idle
                         def show_completion():
                             self.terminal_output.config(state=tk.NORMAL)
-                            self.terminal_output.insert(tk.END, f"\n\n{'='*50}\n")
+                            if self.terminal_output.get("end-2c") != "\n":
+                                self.terminal_output.insert(tk.END, "\n")
+                            self.terminal_output.insert(tk.END, f"{'='*50}\n")
+                            #self.terminal_output.insert(tk.END, f"\n\n{'='*50}\n")
                             self.terminal_output.insert(tk.END, f"[Process completed with exit code {return_code}]")
                             if return_code == 0:
                                 self.terminal_output.insert(tk.END, "\n[Program finished successfully]")
