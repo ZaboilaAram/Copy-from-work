@@ -415,7 +415,8 @@ def verifica(text, doc):
     # apar altfel prin construcție, nu sunt pierderi:
     #   banda de titlu de la începutul fișierului (pagina de titlu e separată)
     #   etichetele ---- PRAG ---- (în Word apar fără liniuțe, încadrate)
-    de_ignorat = re.compile(r"^-+\s*PRAG|^CUVINTE DESPRE VIA|^O carte care merge")
+    #de_ignorat = re.compile(r"^-+\s*PRAG|^CUVINTE DESPRE VIA|^O carte care merge")
+    de_ignorat = re.compile(r"^-+\s*PRAG|^CUVINTE DESPRE |^O carte care merge")
 
     asteptate = randuri_asteptate(text)
     lipsa = [r for r in asteptate
