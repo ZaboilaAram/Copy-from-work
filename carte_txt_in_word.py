@@ -8,6 +8,9 @@ carte_txt_in_word.py — transformă manuscrisul .txt în document Word paginat.
     python carte_txt_in_word.py sursa.txt -o "Cuvinte despre viata.docx"
     python carte_txt_in_word.py sursa.txt --titlu "CUVINTE|DESPRE TOT" --fara-subtitlu
 
+Titlul și subtitlul paginii de titlu se iau din banda ====...==== de la
+începutul .txt-ului; --titlu și --subtitlu le suprascriu.
+
 Pe Windows se poate și cu dublu-clic: dacă în folder există un singur
 fișier .txt, scriptul îl ia pe acela și așteaptă o tastă la final.
 
@@ -15,6 +18,7 @@ Cere o singură bibliotecă, python-docx, pe care o ai deja instalată.
 Testat pe python-docx 1.1.2.  Dacă lipsește:  pip install python-docx
 
 CE RECUNOAȘTE DIN .TXT
+  ====  /  TITLU  /  motto  /  [subtitlu]  /  ====      → pagina de titlu
   ====...====  /  PARTEA A N-A — X  /  ====...====   → titlu de parte, pagină nouă
   ====...====  /  CUPRINS           /  ====...====   → cuprins (font monospațiat)
   „N. TITLU"                                         → titlu de capitol
@@ -415,13 +419,28 @@ def verifica(text, doc):
     # apar altfel prin construcție, nu sunt pierderi:
     #   banda de titlu de la începutul fișierului (pagina de titlu e separată)
     #   etichetele ---- PRAG ---- (în Word apar fără liniuțe, încadrate)
-    #de_ignorat = re.compile(r"^-+\s*PRAG|^CUVINTE DESPRE VIA|^O carte care merge")
     de_ignorat = re.compile(r"^-+\s*PRAG|^CUVINTE DESPRE |^O carte care merge")
 
     asteptate = randuri_asteptate(text)
     lipsa = [r for r in asteptate
              if not de_ignorat.match(r) and normalizeaza(r) not in in_word]
     return len(asteptate), lipsa
+
+
+def din_banda(text):
+    """Citește banda ====...==== de la începutul fișierului.
+    Rândul 1 = titlul cărții, rândul 2 = motto (ignorat), rândul 3 = subtitlu (opțional).
+    Întoarce (titlu cu | între rânduri, subtitlu) sau (None, None)."""
+    linii = text.split("\n")[:20]
+    egal = [n for n, l in enumerate(linii) if RE_EGAL.match(l.strip())]
+    if len(egal) < 2:
+        return None, None
+    randuri = [l.strip() for l in linii[egal[0] + 1:egal[1]] if l.strip()]
+    if not randuri or RE_PARTE.match(randuri[0]) or randuri[0].startswith("CUPRINS"):
+        return None, None
+    titlu = "|".join(randuri[0].split(" ", 1))   # „CUVINTE DESPRE X” → CUVINTE | DESPRE X
+    subtitlu = randuri[2] if len(randuri) > 2 else None
+    return titlu, subtitlu
 
 
 def gaseste_sursa():
@@ -442,10 +461,11 @@ def main():
     ap.add_argument("sursa", nargs="?",
                     help="fișierul .txt al cărții (dacă lipsește, îl caută singur)")
     ap.add_argument("-o", "--ieșire", help="numele fișierului .docx rezultat")
-    ap.add_argument("--titlu", default="CUVINTE|DESPRE VIAȚĂ",
-                    help="titlul de pe prima pagină; rândurile se despart cu |")
+    ap.add_argument("--titlu",
+                    help="titlul de pe prima pagină; rândurile se despart cu | "
+                         "(implicit: din banda de la începutul .txt-ului)")
     ap.add_argument("--subtitlu",
-                    default="Un drum de la existență până la o zi obișnuită")
+                    help="implicit: al treilea rând din banda de titlu, dacă există")
     ap.add_argument("--fara-subtitlu", action="store_true")
     ap.add_argument("--fara-verificare", action="store_true",
                     help="sare peste controlul că nu s-a pierdut niciun rând")
@@ -487,10 +507,15 @@ def main():
                 "Deschide-l în Notepad, Salvare ca..., Codificare: UTF-8.",
                 fara_argumente, cod=1)
 
+    titlu_banda, subtitlu_banda = din_banda(text)
+    titlu = a.titlu or titlu_banda or "CUVINTE|DESPRE VIAȚĂ"
+    subtitlu = (a.subtitlu or subtitlu_banda
+                or "Un drum de la existență până la o zi obișnuită")
+
     doc = construiește(
         text,
-        titlu_pagina=[t.strip() for t in a.titlu.split("|") if t.strip()],
-        subtitlu=None if a.fara_subtitlu else a.subtitlu,
+        titlu_pagina=[t.strip() for t in titlu.split("|") if t.strip()],
+        subtitlu=None if a.fara_subtitlu else subtitlu,
     )
 
     try:
