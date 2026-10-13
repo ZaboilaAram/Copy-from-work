@@ -1,6 +1,7 @@
 ================================================================
                     CUVINTE DESPRE CUVINTE
                 O carte care merge dintr-una în alta
+           Un drum de la primul nume până la ultima tăcere
 ================================================================
 
 
@@ -2592,7 +2593,7 @@ recapătă greutatea.
 
 ───
 
-Și atunci, ca în cartea de dinainte, drumul se întoarce la capăt de
+Și atunci, ca în cartea dinainte, drumul se întoarce la capăt de
 unde a plecat.
 
 De aici ajungem la sfârșit.
@@ -2756,4 +2757,3 @@ tace în cel următor.
 
 
                             SFÂRȘIT
-
