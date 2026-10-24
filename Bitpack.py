@@ -21426,6 +21426,7 @@ def login():
     global passfig
     global passfig1
     global hardvar
+    global suggestion_scope
     global stprcdvar
     global repbldvar
     global stickyvar
@@ -21635,9 +21636,14 @@ def login():
             messagebox.showerror("Error", "Could not verify extension.")
             exit()
         #
+        suggestion_scope = "basic"
+        hide_suggestions()
         username_entry.delete(0, tk.END)
         if not dev_mode:  # Activează doar dacă nu e deja activ
             toggle_dev_mode("normal")
+        # username_entry.delete(0, tk.END)
+        # if not dev_mode:  # Activează doar dacă nu e deja activ
+            # toggle_dev_mode("normal")
         else:  # Dacă e deja activ, doar schimbă tipul
             combo_users['values'] = list(credentials.keys())
             #combo_users['values'] = list(credentials.keys()) + list(tudor_credentials.keys())
@@ -21707,7 +21713,11 @@ def login():
             exit()
         #
         python_packages()
+        suggestion_scope = "tudor"
+        hide_suggestions()
         username_entry.delete(0, tk.END)
+        # python_packages()
+        # username_entry.delete(0, tk.END)
         if not dev_mode:  # Activează doar dacă nu e deja activ
             toggle_dev_mode("tudor")
         else:  # Dacă e deja activ, doar schimbă tipul
@@ -23936,6 +23946,103 @@ status_label.grid(row=6, column=0, columnspan=2, pady=10)
 auto_login_checkbox.grid(row=7, column=0, columnspan=2, pady=10)
 
 framelogin.pack()
+# ===== Sugestii la tastarea username-ului =====
+suggestion_scope = "basic"      # "basic" = conturile de bază; "tudor" = și conturile Tudor (după fosfataza)
+suggestion_rows = []            # [(label, username, password), ...]
+suggestion_index = -1
+MAX_SUGGESTIONS = 6
+
+suggestion_frame = tk.Frame(windowlogin, bg="black", bd=2, relief="ridge")
+
+
+def get_suggestions(text):
+    text = text.strip().lower()
+    if not text:
+        return []
+    pool = dict(credentials)
+    if suggestion_scope == "tudor":
+        pool.update(tudor_credentials)
+    starts, contains = [], []
+    for app_name, data in pool.items():
+        user = data["username"]
+        if user.lower().startswith(text):
+            starts.append((app_name, user, data["password"]))
+        elif text in user.lower() or text in app_name.lower():
+            contains.append((app_name, user, data["password"]))
+    return (starts + contains)[:MAX_SUGGESTIONS]
+
+
+def hide_suggestions(event=None):
+    global suggestion_index
+    suggestion_frame.place_forget()
+    suggestion_index = -1
+
+
+def highlight_suggestion(index):
+    global suggestion_index
+    suggestion_index = index
+    for i, (label, _user, _password) in enumerate(suggestion_rows):
+        label.config(bg="gray40" if i == index else "black", fg="cyan" if i == index else "lime green")
+
+
+def choose_suggestion(index):
+    _label, user, password = suggestion_rows[index]
+    username_entry.delete(0, tk.END)
+    username_entry.insert(0, user)
+    if dev_mode:                                   # parola doar în Dev mode, ca la combobox
+        password_entry.delete(0, tk.END)
+        password_entry.insert(0, password)
+    hide_suggestions()
+    password_entry.focus_set()
+
+
+def show_suggestions(event=None):
+    global suggestion_rows
+    if event is not None and event.keysym in ("Up", "Down", "Return", "Escape", "Tab", "Shift_L", "Shift_R"):
+        return
+    matches = get_suggestions(username_entry.get())
+    for child in suggestion_frame.winfo_children():
+        child.destroy()
+    suggestion_rows = []
+    if not matches:
+        hide_suggestions()
+        return
+    for i, (app_name, user, password) in enumerate(matches):
+        label = tk.Label(suggestion_frame, text=f"{user}  -  {app_name}", anchor="w", bg="black", fg="lime green",
+                         font=("Fixedsys", 12), padx=6, cursor="hand2")
+        label.pack(fill="x")
+        label.bind("<Button-1>", lambda e, i=i: choose_suggestion(i))
+        label.bind("<Enter>", lambda e, i=i: highlight_suggestion(i))
+        suggestion_rows.append((label, user, password))
+    windowlogin.update_idletasks()
+    x = username_entry.winfo_rootx() - windowlogin.winfo_rootx()
+    y = username_entry.winfo_rooty() - windowlogin.winfo_rooty() + username_entry.winfo_height()
+    width = min(max(username_entry.winfo_width(), 340), windowlogin.winfo_width() - x - 5)
+    suggestion_frame.place(x=x, y=y, width=width)
+    suggestion_frame.lift()
+    highlight_suggestion(-1)
+
+
+def move_suggestion(step):
+    if suggestion_rows and suggestion_frame.winfo_ismapped():
+        highlight_suggestion((suggestion_index + step) % len(suggestion_rows))
+    return "break"
+
+
+def username_return(event):
+    if suggestion_frame.winfo_ismapped() and suggestion_index >= 0:
+        choose_suggestion(suggestion_index)
+        return "break"
+    hide_suggestions()
+    return on_enter_press(event)
+
+
+username_entry.bind("<KeyRelease>", show_suggestions)
+username_entry.bind("<Down>", lambda e: move_suggestion(1))
+username_entry.bind("<Up>", lambda e: move_suggestion(-1))
+username_entry.bind("<Escape>", hide_suggestions)
+username_entry.bind("<Return>", username_return)
+username_entry.bind("<FocusOut>", lambda e: windowlogin.after(150, hide_suggestions))
 load_auto_login_on_startup()
 
 def create_w95_popup():
