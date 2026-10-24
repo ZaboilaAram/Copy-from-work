@@ -13530,7 +13530,7 @@ class Windows95Installer:
 BITPACK SOFTWARE LICENSE TERMS
 
 Version: 0.95.0
-Date: 03.10.2026
+Date: 24.10.2026
 
 IMPORTANT — READ CAREFULLY
 
@@ -13600,7 +13600,7 @@ All rights reserved.
 
 # Version: 0.95.0
 
-# Date: 03.10.2026
+# Date: 24.10.2026
 
 # 1. Introduction
     # • This license sets forth the terms and conditions for the use of Bitpack (hereinafter referred to as "the Software"), which is developed for exclusive personal use within the IT department of any company (hereinafter referred to as "the Company"). The software will not be distributed or used outside of this department or by anyone other than the buyer.
@@ -13641,7 +13641,7 @@ All rights reserved.
 # By using the Software, the Licensee agrees to the terms and conditions of this license.
 
 # Tudor Marmureanu
-# 03.10.2026
+# 24.10.2026
         # """
         license_text.insert('1.0', license_content)
         license_text.config(state='disabled')
@@ -143033,7 +143033,6 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
             # Rularea buclei principale
             validation.mainloop()
-    
     #!/usr/bin/env python3
     # -*- coding: utf-8 -*-
     """
@@ -143061,6 +143060,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
     """
 
     import io
+    import json
     import logging
     import os
     import re
@@ -143104,7 +143104,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
     TOOLS = (
         ("select", "Select", "V"), ("hand", "Hand", "H"), ("edit", "Edit Text", "E"), ("text", "Add Text", "T"),
-        ("highlight", "Highlight", "L"), ("underline", "Underline", "U"), ("strike", "Strikeout", "K"),
+        ("table", "Table", "B"), ("highlight", "Highlight", "L"), ("underline", "Underline", "U"), ("strike", "Strikeout", "K"),
         ("note", "Note", "N"), ("rect", "Rectangle", "R"), ("ellipse", "Ellipse", "O"), ("line", "Line", "I"),
         ("arrow", "Arrow", "A"), ("pen", "Pen", "P"), ("image", "Image", "G"), ("signature", "Signature", "S"),
         ("stamp", "Stamp", "M"), ("whiteout", "Whiteout", "W"), ("redact", "Redact", "X"), ("crop", "Crop", "C"),
@@ -143114,6 +143114,8 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         "hand": "Drag to scroll the page",
         "edit": "Click a line of text to change it",
         "text": "Click where the text starts, or drag a box for it",
+        "table": "Click a cell (drag or Shift+click for more), right-click for colours and export; drag on an empty "
+                 "area to insert a table or find one without lines",
         "highlight": "Drag over the words to highlight", "underline": "Drag over the words to underline",
         "strike": "Drag over the words to strike out", "note": "Click to place a sticky note",
         "rect": "Drag a rectangle", "ellipse": "Drag an ellipse", "line": "Drag a line", "arrow": "Drag an arrow",
@@ -143376,6 +143378,322 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
 
     # ---------------------------------------------------------------------------
+    # Tables: detected ones (with lines: PyMuPDF; without lines: words in an area),
+    # created ones (one marked content snippet holding their definition, so they can be
+    # edited again), and cell colours (marked snippets behind or over the text).
+    # ---------------------------------------------------------------------------
+
+    TABLE_MARK = b"% bp95-table "
+    SHADE_MARK = b"% bp95-shade "
+
+
+    def marked_streams(doc, page, mark):
+        found = []
+        for xref in page.get_contents():
+            data = doc.xref_stream(xref) or b""
+            if data.startswith(mark):
+                line = data.split(b"\n", 1)[0]
+                try:
+                    found.append((xref, json.loads(line[len(mark):].decode("ascii"))))
+                except ValueError:
+                    continue
+        return found
+
+
+    def mark_stream(doc, xref, mark, info):
+        data = doc.xref_stream(xref) or b""
+        header = mark + json.dumps(info, ensure_ascii=True, separators=(",", ":")).encode("ascii") + b"\n"
+        doc.update_stream(xref, header + data)
+
+
+    def snippet_bbox(page, data):
+        """Area covered by one of our marked snippets (unrotated page space)."""
+        if data.startswith(IMAGE_MARK):
+            found = CM_RE.search(data)
+            if found:
+                return fitz.Rect(0, 0, 1, 1) * fitz.Matrix(*[float(v) for v in found.groups()]) * \
+                    page.transformation_matrix
+        elif data.startswith((TABLE_MARK, SHADE_MARK)):
+            try:
+                info = json.loads(data.split(b"\n", 1)[0].split(b" ", 2)[2].decode("ascii"))
+            except (ValueError, IndexError):
+                return None
+            if "pdf" in info:
+                return fitz.Rect(info["pdf"])
+            rects = [fitz.Rect(r) for r in info.get("rects", [])]
+            if rects:
+                box = rects[0]
+                for rect in rects[1:]:
+                    box |= rect
+                return box
+        return None
+
+
+    def set_contents(doc, page, xrefs):
+        doc.xref_set_key(page.xref, "Contents", "[" + " ".join(f"{x} 0 R" for x in xrefs) + "]")
+
+
+    def is_behind(data):
+        return data.startswith(SHADE_MARK) and b'"mode":"behind"' in data.split(b"\n", 1)[0]
+
+
+    def normalize_order(doc, page_number):
+        """Cell colours 'behind the text' must come before everything else on the page, whatever
+        PyMuPDF or a redaction did to the order (this also repairs files saved in the wrong order)."""
+        page = doc[page_number]
+        contents = page.get_contents()
+        behind = [x for x in contents if is_behind(doc.xref_stream(x) or b"")]
+        if behind and contents[:len(behind)] != behind:
+            set_contents(doc, page, behind + [x for x in contents if x not in behind])
+
+
+    def redact_keeping_marked(doc, page_number, area=None, **options):
+        """apply_redactions() rewrites the page content into one stream and drops our marks, which would
+        make placed pictures, created tables and cell colours un-editable. Take them out of the page,
+        redact, and put them back in the same order (colours stay behind, objects on top).
+        With `area`, snippets touching it are redacted too (the Redact tool really removes them)."""
+        page = doc[page_number]
+        contents = page.get_contents()
+        marked = []
+        for xref in contents:
+            data = doc.xref_stream(xref) or b""
+            shielded = data.startswith((IMAGE_MARK, TABLE_MARK, SHADE_MARK))
+            if shielded and area is not None:
+                box = snippet_bbox(page, data)
+                shielded = box is not None and not box.intersects(area)
+            marked.append(shielded)
+        if not any(marked):
+            page.apply_redactions(**options)
+            normalize_order(doc, page_number)
+            return
+        before = [x for i, x in enumerate(contents) if marked[i] and is_behind(doc.xref_stream(x) or b"")]
+        after = [x for i, x in enumerate(contents) if marked[i] and x not in before]
+        # redaction also drops page resources it no longer sees used: remember the pictures,
+        # transparencies and fonts our snippets need, and put back any that disappear
+        needed = {}
+        for xref in before + after:
+            data = doc.xref_stream(xref) or b""
+            for category, pattern in (("XObject", rb"/([^\s/<>\[\]()]+)\s+Do"), ("ExtGState", rb"/([^\s/<>\[\]()]+)\s+gs"),
+                                      ("Font", rb"/([^\s/<>\[\]()]+)\s+[-\d.]+\s+Tf")):
+                for name in re.findall(pattern, data):
+                    path = f"Resources/{category}/{name.decode('latin-1')}"
+                    value = doc.xref_get_key(page.xref, path)
+                    if value[0] != "null":
+                        needed[path] = value[1]
+        set_contents(doc, page, [x for i, x in enumerate(contents) if not marked[i]])
+        page = doc[page_number]
+        page.apply_redactions(**options)
+        page = doc[page_number]
+        for path, value in needed.items():
+            if doc.xref_get_key(page.xref, path)[0] == "null":
+                doc.xref_set_key(page.xref, path, value)
+        set_contents(doc, page, before + page.get_contents() + after)
+        normalize_order(doc, page_number)
+
+
+    def to_number(value):
+        """'1.234,56' / '1,234.56' / '12' -> number, anything else unchanged (for the Excel export)."""
+        if not isinstance(value, str):
+            return value
+        text = value.strip().replace("\u00a0", "").replace(" ", "")
+        if not text or not re.fullmatch(r"-?[\d.,]+", text) or not re.search(r"\d", text):
+            return value
+        if re.fullmatch(r"-?\d{1,3}(\.\d{3})+(,\d+)?", text) or re.fullmatch(r"-?\d+,\d+", text):
+            text = text.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", text):
+            text = text.replace(",", "")
+        try:
+            number = float(text)
+        except ValueError:
+            return value
+        return int(number) if number.is_integer() and "." not in text else number
+
+
+    def table_layout(definition):
+        """Cell rectangles of a created table on the page view, rows x columns."""
+        x0, y0, x1, y1 = definition["rect"]
+        cells = definition["cells"]
+        rows, cols = len(cells), len(cells[0])
+        weights = definition.get("col_widths") or [1] * cols
+        total = sum(weights) or 1
+        xs = [x0]
+        for weight in weights:
+            xs.append(xs[-1] + (x1 - x0) * weight / total)
+        height = (y1 - y0) / rows
+        return [[fitz.Rect(xs[c], y0 + r * height, xs[c + 1], y0 + (r + 1) * height) for c in range(cols)]
+                for r in range(rows)]
+
+
+    def fit_textbox(shape_or_page, rect, text, size, align, rotate, color, args):
+        """insert_textbox, shrinking the font until the text fits (PyMuPDF writes nothing otherwise)."""
+        while True:
+            rc = shape_or_page.insert_textbox(rect, text, fontsize=size, align=align, rotate=rotate, color=color, **args)
+            if rc >= 0 or size <= 4:
+                return size
+            size = max(4, size - 0.5)
+
+
+    def _text_rect(view_cell, text, size, derotation):
+        """Inner rectangle of a cell with the text block centred vertically."""
+        lines = text.count("\n") + 1
+        pad = max(1.5, (view_cell.height - lines * size * 1.25) / 2)
+        inner = fitz.Rect(view_cell.x0 + 3, view_cell.y0 + pad - 1, view_cell.x1 - 3, view_cell.y1 - 0.5)
+        if inner.height < size * 1.2:
+            inner.y0 = view_cell.y0 + 0.5
+        return inner * derotation
+
+
+    def draw_table(doc, page_number, definition):
+        """Draw a created table as one marked snippet; returns its xref."""
+        page = doc[page_number]
+        derotation = page.derotation_matrix
+        view_cells = table_layout(definition)
+        fills = definition.get("fills", {})
+        family = definition.get("font", "Arial")
+        shape = page.new_shape()
+        for r, row in enumerate(view_cells):
+            for c, cell in enumerate(row):
+                color = fills.get(f"{r},{c}") or (definition.get("header_fill") if definition.get("header") and r == 0
+                                                   else None)
+                if color:
+                    shape.draw_rect(cell * derotation)
+                    shape.finish(fill=hex_to_rgb(color), color=None, width=0)
+        width = float(definition.get("border_width", 0.6))
+        if width > 0:
+            for row in view_cells:
+                for cell in row:
+                    shape.draw_rect(cell * derotation)
+                    shape.finish(color=hex_to_rgb(definition.get("border", "#000000")), width=width)
+        aligns = definition.get("align") or []
+        for r, row in enumerate(view_cells):
+            for c, cell in enumerate(row):
+                text = str(definition["cells"][r][c] or "")
+                if not text.strip():
+                    continue
+                size = float(definition.get("size", 10))
+                bold = bool(definition.get("header")) and r == 0
+                align = {"left": 0, "center": 1, "right": 2}.get(aligns[c] if c < len(aligns) else "left", 0)
+                fit_textbox(shape, _text_rect(cell, text, size, derotation), text, size, align, page.rotation, (0, 0, 0),
+                            font_args(family, bold))
+        shape.commit(overlay=True)
+        xref = doc[page_number].get_contents()[-1]
+        mark_stream(doc, xref, TABLE_MARK, definition)
+        return xref
+
+
+    def created_tables(doc, page):
+        tables = []
+        for xref, definition in marked_streams(doc, page, TABLE_MARK):
+            same_rotation = definition.get("rotate", 0) == page.rotation
+            cells = [[cell * page.derotation_matrix for cell in row] for row in table_layout(definition)] \
+                if same_rotation else None
+            tables.append({"key": ("created", xref), "xref": xref, "def": definition, "source": "created",
+                           "bbox": fitz.Rect(definition["pdf"]), "cells": cells, "data": definition["cells"]})
+        return tables
+
+
+    def borderless_table(page, area):
+        """A table without lines inside `area`: rows are text lines, columns are the shared gaps."""
+        words = [w for w in page.get_text("words") if area.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+        if len(words) < 4:
+            return None
+        spans = sorted([w[0], w[2]] for w in words)
+        columns = [spans[0]]
+        for x0, x1 in spans[1:]:
+            if x0 <= columns[-1][1] + 6:
+                columns[-1][1] = max(columns[-1][1], x1)
+            else:
+                columns.append([x0, x1])
+        lines = []
+        for w in sorted(words, key=lambda w: (w[1] + w[3]) / 2):
+            center, height = (w[1] + w[3]) / 2, w[3] - w[1]
+            if lines and abs(center - lines[-1]["center"]) < height * 0.6:
+                lines[-1]["words"].append(w)
+                lines[-1]["top"] = min(lines[-1]["top"], w[1])
+                lines[-1]["bottom"] = max(lines[-1]["bottom"], w[3])
+            else:
+                lines.append({"center": center, "top": w[1], "bottom": w[3], "words": [w]})
+        if len(columns) < 2 or len(lines) < 2:
+            return None
+        xs = [columns[0][0] - 2] + [(a[1] + b[0]) / 2 for a, b in zip(columns, columns[1:])] + [columns[-1][1] + 2]
+        ys = [lines[0]["top"] - 2] + [(a["bottom"] + b["top"]) / 2 for a, b in zip(lines, lines[1:])] + \
+            [lines[-1]["bottom"] + 2]
+        cells, data = [], []
+        for r in range(len(lines)):
+            row_cells, row_data = [], []
+            for c in range(len(columns)):
+                cell = fitz.Rect(xs[c], ys[r], xs[c + 1], ys[r + 1])
+                inside = sorted((w for w in lines[r]["words"] if xs[c] <= (w[0] + w[2]) / 2 < xs[c + 1]),
+                                key=lambda w: w[0])
+                row_cells.append(cell)
+                row_data.append(" ".join(w[4] for w in inside))
+            cells.append(row_cells)
+            data.append(row_data)
+        return {"bbox": fitz.Rect(xs[0], ys[0], xs[-1], ys[-1]), "cells": cells, "data": data, "source": "text"}
+
+
+    def detected_tables(page, areas):
+        tables = []
+        try:
+            found = page.find_tables().tables
+        except Exception:
+            found = []
+        for table in found:
+            cells = [[fitz.Rect(c) if c else None for c in row.cells] for row in table.rows]
+            try:
+                data = table.extract()
+            except Exception:
+                data = [["" for _c in row] for row in cells]
+            tables.append({"bbox": fitz.Rect(table.bbox), "cells": cells,
+                           "data": [[(v or "").strip() for v in row] for row in data], "source": "lines"})
+        for area in areas:
+            table = borderless_table(page, area)
+            if table is not None:
+                tables.append(table)
+        return tables
+
+
+    def shade_rects(doc, page_number, rects, color, mode):
+        """Colour cells: 'behind' the text (a real cell fill) or 'over' it (transparent)."""
+        page = doc[page_number]
+        shape = page.new_shape()
+        for rect in rects:
+            shape.draw_rect(rect)
+            shape.finish(fill=hex_to_rgb(color), color=None, width=0, fill_opacity=1 if mode == "behind" else 0.35)
+        shape.commit(overlay=mode != "behind")
+        contents = doc[page_number].get_contents()
+        mark_stream(doc, contents[0] if mode == "behind" else contents[-1], SHADE_MARK,
+                    {"rects": [[round(v, 2) for v in rect] for rect in rects], "color": color, "mode": mode})
+        normalize_order(doc, page_number)
+
+
+    def clear_shading(doc, page_number, targets):
+        """Remove the cell colours whose centre lies in one of `targets`; returns how many."""
+        page = doc[page_number]
+        removed, redo = 0, []
+        for xref, info in marked_streams(doc, page, SHADE_MARK):
+            rects = [fitz.Rect(r) for r in info["rects"]]
+            keep = [r for r in rects if not any(fitz.Point((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2) in t for t in targets)]
+            if len(keep) != len(rects):
+                removed += len(rects) - len(keep)
+                doc.update_stream(xref, b" ")
+                if keep:
+                    redo.append((keep, info["color"], info["mode"]))
+        for rects, color, mode in redo:
+            shade_rects(doc, page_number, rects, color, mode)
+        normalize_order(doc, page_number)
+        return removed
+
+
+    def table_rows_to_excel(tables, path):
+        import pandas as pd
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            for number, rows in enumerate(tables, 1):
+                frame = pd.DataFrame([[to_number(v) for v in row] for row in rows])
+                frame.to_excel(writer, sheet_name=f"Table {number}", index=False, header=False)
+
+
+    # ---------------------------------------------------------------------------
     # Signature and stamp pictures
     # ---------------------------------------------------------------------------
 
@@ -143543,6 +143861,196 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             self.destroy()
 
 
+    class TableDialog(tk.Toplevel):
+        """Create / edit a table: size, header, font, borders, column widths and alignment, cell texts,
+        paste from Excel."""
+        MAX_ROWS, MAX_COLS = 60, 15
+
+        def __init__(self, master, definition=None):
+            super().__init__(master)
+            self.title("Edit Table" if definition else "Insert Table")
+            self.configure(bg=FACE)
+            self.transient(master)
+            self.result = None
+            d = definition or {"cells": [["Column 1", "Column 2", "Column 3"], ["", "", ""], ["", "", ""]],
+                               "header": True, "header_fill": "#d8e4f8", "font": "Arial", "size": 10.0,
+                               "border": "#000000", "border_width": 0.6, "align": [], "col_widths": None, "fills": {}}
+            self.base = d
+            self.values = [[str(v) for v in row] for row in d["cells"]]
+            self.aligns = list(d.get("align") or []) + ["left"] * 20
+            self.widths = list(d.get("col_widths") or [])
+            self.var_rows = tk.IntVar(value=len(self.values))
+            self.var_cols = tk.IntVar(value=len(self.values[0]))
+            self.var_header = tk.BooleanVar(value=bool(d.get("header", True)))
+            self.var_header_fill = tk.StringVar(value=d.get("header_fill") or "#d8e4f8")
+            self.var_font = tk.StringVar(value=d.get("font", "Arial"))
+            self.var_size = tk.StringVar(value=f"{float(d.get('size', 10)):g}")
+            self.var_border = tk.StringVar(value=d.get("border", "#000000"))
+            self.var_border_width = tk.StringVar(value=f"{float(d.get('border_width', 0.6)):g}")
+            self.var_auto = tk.BooleanVar(value=not d.get("col_widths"))
+
+            top = tk.Frame(self, bg=FACE)
+            top.pack(side="top", fill="x", padx=8, pady=(8, 2))
+            for label, var, high in (("Rows", self.var_rows, self.MAX_ROWS), ("Columns", self.var_cols, self.MAX_COLS)):
+                tk.Label(top, text=label, font=FONT, bg=FACE).pack(side="left")
+                tk.Spinbox(top, from_=1, to=high, textvariable=var, width=4, font=FONT, bg=WHITE, relief="sunken", bd=2,
+                           highlightthickness=0, buttonbackground=FACE, command=self.resize_grid).pack(side="left",
+                                                                                                    padx=(2, 8))
+            w95_button(top, "Paste from Excel", self.paste).pack(side="left", padx=2)
+            tk.Checkbutton(top, text="Column widths from the text", variable=self.var_auto, font=FONT, bg=FACE,
+                           activebackground=FACE, selectcolor=WHITE, highlightthickness=0).pack(side="left", padx=8)
+            style = tk.Frame(self, bg=FACE)
+            style.pack(side="top", fill="x", padx=8, pady=2)
+            tk.Checkbutton(style, text="Header row", variable=self.var_header, font=FONT, bg=FACE, activebackground=FACE,
+                           selectcolor=WHITE, highlightthickness=0).pack(side="left")
+            self._color_button(style, self.var_header_fill)
+            tk.Label(style, text="  Font", font=FONT, bg=FACE).pack(side="left")
+            menu = tk.OptionMenu(style, self.var_font, *FAMILIES)
+            menu.config(font=FONT, bg=FACE, activebackground=FACE, relief="raised", bd=2, highlightthickness=0, width=14)
+            menu["menu"].config(font=FONT, bg=FACE, activebackground=NAVY, activeforeground=WHITE)
+            menu.pack(side="left", padx=2)
+            tk.Label(style, text="Size", font=FONT, bg=FACE).pack(side="left")
+            tk.Entry(style, textvariable=self.var_size, width=4, font=FONT, relief="sunken", bd=2,
+                     highlightthickness=0).pack(side="left", padx=2)
+            tk.Label(style, text="  Borders", font=FONT, bg=FACE).pack(side="left")
+            self._color_button(style, self.var_border)
+            tk.Entry(style, textvariable=self.var_border_width, width=4, font=FONT, relief="sunken", bd=2,
+                     highlightthickness=0).pack(side="left", padx=2)
+            tk.Label(style, text="pt (0 = none)", font=FONT, bg=FACE).pack(side="left")
+
+            holder = tk.Frame(self, bd=2, relief="sunken", bg=WHITE)
+            holder.pack(side="top", fill="both", expand=True, padx=8, pady=4)
+            self.grid_canvas = tk.Canvas(holder, bg=WHITE, highlightthickness=0, width=760, height=320)
+            vbar = tk.Scrollbar(holder, orient="vertical", command=self.grid_canvas.yview)
+            hbar = tk.Scrollbar(holder, orient="horizontal", command=self.grid_canvas.xview)
+            self.grid_canvas.config(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+            vbar.pack(side="right", fill="y")
+            hbar.pack(side="bottom", fill="x")
+            self.grid_canvas.pack(side="left", fill="both", expand=True)
+            self.grid_frame = tk.Frame(self.grid_canvas, bg=WHITE)
+            self.grid_canvas.create_window(0, 0, window=self.grid_frame, anchor="nw")
+            self.grid_frame.bind("<Configure>", lambda _e: self.grid_canvas.config(
+                scrollregion=self.grid_canvas.bbox("all")))
+            buttons = tk.Frame(self, bg=FACE)
+            buttons.pack(side="bottom", fill="x", padx=8, pady=(2, 8))
+            tk.Label(buttons, text="Tip: copy cells in Excel and press Paste from Excel.", font=FONT, bg=FACE,
+                     fg=SHADOW).pack(side="left")
+            w95_button(buttons, "Cancel", self.destroy, width=9).pack(side="right")
+            w95_button(buttons, "OK", self._ok, width=9).pack(side="right", padx=4)
+            self.build_grid()
+            self.bind("<Escape>", lambda _e: self.destroy())
+            self.update_idletasks()
+            self.geometry(f"+{master.winfo_rootx() + 120}+{master.winfo_rooty() + 90}")
+            self.grab_set()
+            master.wait_window(self)
+
+        def _color_button(self, parent, var):
+            swatch = tk.Label(parent, bg=var.get(), width=3, bd=1, relief="solid", cursor="hand2")
+            swatch.pack(side="left", padx=2)
+
+            def choose(_event=None):
+                _rgb, value = colorchooser.askcolor(color=var.get(), parent=self)
+                if value:
+                    var.set(value)
+                    swatch.config(bg=value)
+
+            swatch.bind("<Button-1>", choose)
+
+        def collect(self):
+            if hasattr(self, "entries"):
+                self.values = [[var.get() for var in row] for row in self.entries]
+                self.aligns = [var.get() for var in self.align_vars] + self.aligns[len(self.align_vars):]
+                self.widths = []
+                for var in self.width_vars:
+                    try:
+                        self.widths.append(max(0.2, float(var.get().replace(",", "."))))
+                    except ValueError:
+                        self.widths.append(1.0)
+
+        def build_grid(self):
+            for child in self.grid_frame.winfo_children():
+                child.destroy()
+            rows, cols = len(self.values), len(self.values[0])
+            tk.Label(self.grid_frame, text="Align", font=FONT, bg=WHITE, fg=SHADOW).grid(row=0, column=0, sticky="w")
+            tk.Label(self.grid_frame, text="Width", font=FONT, bg=WHITE, fg=SHADOW).grid(row=1, column=0, sticky="w")
+            self.align_vars, self.width_vars, self.entries = [], [], []
+            for c in range(cols):
+                var = tk.StringVar(value=self.aligns[c] if c < len(self.aligns) else "left")
+                menu = tk.OptionMenu(self.grid_frame, var, "left", "center", "right")
+                menu.config(font=FONT, bg=FACE, activebackground=FACE, relief="raised", bd=1, highlightthickness=0,
+                            width=6, pady=0)
+                menu.grid(row=0, column=c + 1, sticky="we", padx=1)
+                self.align_vars.append(var)
+                width = tk.StringVar(value=f"{self.widths[c]:g}" if c < len(self.widths) else "1")
+                tk.Entry(self.grid_frame, textvariable=width, width=6, font=FONT, relief="sunken", bd=1,
+                         highlightthickness=0).grid(row=1, column=c + 1, sticky="w", padx=1)
+                self.width_vars.append(width)
+            for r in range(rows):
+                tk.Label(self.grid_frame, text=str(r + 1), font=FONT, bg=WHITE, fg=SHADOW).grid(row=r + 2, column=0)
+                row_vars = []
+                for c in range(cols):
+                    var = tk.StringVar(value=self.values[r][c])
+                    tk.Entry(self.grid_frame, textvariable=var, width=16, font=("Arial", 9), relief="sunken", bd=1,
+                             highlightthickness=0).grid(row=r + 2, column=c + 1, padx=1, pady=1)
+                    row_vars.append(var)
+                self.entries.append(row_vars)
+
+        def resize_grid(self):
+            self.collect()
+            try:
+                rows = max(1, min(self.MAX_ROWS, int(self.var_rows.get())))
+                cols = max(1, min(self.MAX_COLS, int(self.var_cols.get())))
+            except (tk.TclError, ValueError):
+                return
+            self.values = [(row + [""] * cols)[:cols] for row in self.values][:rows]
+            while len(self.values) < rows:
+                self.values.append([""] * cols)
+            self.build_grid()
+
+        def paste(self):
+            try:
+                text = self.clipboard_get()
+            except tk.TclError:
+                messagebox.showinfo("Paste", "The clipboard is empty.", parent=self)
+                return
+            lines = [line for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+            while lines and not lines[-1].strip():
+                lines.pop()
+            if not lines:
+                return
+            separator = "\t" if any("\t" in line for line in lines) else (";" if any(";" in l for l in lines) else "\t")
+            rows = [line.split(separator) for line in lines][:self.MAX_ROWS]
+            cols = min(self.MAX_COLS, max(len(row) for row in rows))
+            self.values = [[(row + [""] * cols)[c].strip() for c in range(cols)] for row in rows]
+            self.var_rows.set(len(self.values))
+            self.var_cols.set(cols)
+            numeric = [all(isinstance(to_number(row[c]), (int, float)) for row in self.values[1:] if row[c].strip())
+                       and any(row[c].strip() for row in self.values[1:]) for c in range(cols)]
+            self.aligns = ["right" if numeric[c] else "left" for c in range(cols)] + ["left"] * 20
+            self.var_auto.set(True)
+            self.build_grid()
+
+        def _ok(self):
+            self.collect()
+            try:
+                size = max(4.0, float(self.var_size.get().replace(",", ".")))
+                border_width = max(0.0, float(self.var_border_width.get().replace(",", ".")))
+            except ValueError:
+                messagebox.showerror("Table", "Check the font size and the border width.", parent=self)
+                return
+            cols = len(self.values[0])
+            if self.var_auto.get():
+                widths = [max(4, max(len(row[c]) for row in self.values) + 2) for c in range(cols)]
+            else:
+                widths = (self.widths + [1.0] * cols)[:cols]
+            fills = {k: v for k, v in (self.base.get("fills") or {}).items()
+                     if int(k.split(",")[0]) < len(self.values) and int(k.split(",")[1]) < cols}
+            self.result = {"cells": self.values, "header": self.var_header.get(), "header_fill": self.var_header_fill.get(),
+                           "font": self.var_font.get(), "size": size, "border": self.var_border.get(),
+                           "border_width": border_width, "align": self.aligns[:cols], "col_widths": widths, "fills": fills}
+            self.destroy()
+
+
     class SignaturePad(tk.Toplevel):
         def __init__(self, master):
             super().__init__(master)
@@ -143635,6 +144143,13 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         elif tool == "text":
             c.create_rectangle(2, 4, 19, 18, outline=SHADOW, dash=(2, 2))
             c.create_text(11, 11, text="T", font=("Times New Roman", 11, "bold"))
+        elif tool == "table":
+            c.create_rectangle(2, 4, 19, 18, fill=WHITE, outline=BLACK)
+            c.create_rectangle(2, 4, 19, 8, fill="#a8c8f0", outline=BLACK)
+            for x in (8, 13):
+                c.create_line(x, 4, x, 18, fill=BLACK)
+            for y in (13,):
+                c.create_line(2, y, 19, y, fill=BLACK)
         elif tool == "highlight":
             c.create_rectangle(2, 7, 19, 15, fill="#ffff00", outline="")
             c.create_text(11, 11, text="ab", font=("Arial", 7))
@@ -143710,6 +144225,11 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             self.drag = None
             self.selected_xref = None        # selected annotation
             self.selected_image = None       # selected picture: its rectangle on screen (page view)
+            self.selected_table = None       # selected created table (Select tool): its xref
+            self.table_sel = None            # Table tool: {"key", "anchor", "cells"}
+            self.table_cache = None          # ((doc version, page), tables)
+            self.borderless_areas = {}       # page -> areas where a table without lines was found
+            self.doc_version = 0
             self.signature = None
             self.stamp = None
             self.image_bytes = None
@@ -143918,6 +144438,14 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             m.add_separator()
             m.add_command(label="Extract Pages...", command=self.extract_pages)
             m.add_command(label="Split Document...", command=self.split_document)
+
+            m = menubutton("Table")
+            m.add_command(label="Insert Table...", command=lambda: self.insert_table(None))
+            m.add_command(label="Find Tables on This Page", command=lambda: self.set_tool("table"))
+            m.add_command(label="Find a Table without Lines...", command=self._hint_borderless)
+            m.add_separator()
+            m.add_command(label="Export All Tables on This Page to Excel...", command=self.export_page_tables)
+            m.add_command(label="Clear All Cell Colours on This Page", command=self.clear_page_colours)
 
             m = menubutton("Document")
             m.add_command(label="Merge PDFs (append)...", command=self.merge_pdfs)
@@ -144129,6 +144657,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             return self.doc.tobytes(garbage=0) if self.doc is not None else None
 
         def push_undo(self):
+            self.doc_version += 1
             data = self.snapshot()
             self.undo_stack.append((data, self.page_index))
             limit = 5 if data and len(data) > 30_000_000 else UNDO_LIMIT     # big files keep fewer steps
@@ -144139,7 +144668,8 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         def _load_bytes(self, data, page_index):
             self.doc = fitz.open("pdf", data)
             self.page_index = max(0, min(page_index, len(self.doc) - 1))
-            self.selected_xref = self.selected_image = None
+            self.selected_xref = self.selected_image = self.selected_table = self.table_sel = None
+            self.doc_version += 1
             self.search["hits"] = []
             self.refresh_all()
 
@@ -144263,9 +144793,27 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                     current = index == self.search["index"]
                     canvas.create_rectangle(x1 - 1, y1 - 1, x2 + 1, y2 + 1, outline="#ff6000" if current else "#e0c000",
                                             width=2 if current else 1, tags="overlay")
+            if self.tool == "table":
+                self._draw_table_overlay(page)
             rect, resizable = self.selection_view_rect(page)
             if rect is not None:
                 self._draw_selection_box(rect, resizable)
+
+        def _draw_table_overlay(self, page):
+            canvas = self.canvas
+            selected = self.table_sel or {}
+            for table in self.page_tables():
+                if table["cells"] is None:
+                    continue
+                for r, row in enumerate(table["cells"]):
+                    for c, cell in enumerate(row):
+                        if cell is None:
+                            continue
+                        x1, y1, x2, y2 = self.to_canvas_rect(cell * page.rotation_matrix)
+                        on = selected.get("key") == table["key"] and (r, c) in selected.get("cells", ())
+                        canvas.create_rectangle(x1, y1, x2, y2, outline="#00a0c0", dash=(2, 2),
+                                                fill="#3060ff" if on else "", stipple="gray25" if on else "",
+                                                tags="overlay")
 
         def _draw_selection_box(self, rect, resizable):
             canvas = self.canvas
@@ -144388,7 +144936,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             index = max(0, min(len(self.doc) - 1, index))
             if index != self.page_index:
                 self.page_index = index
-                self.selected_xref = self.selected_image = None
+                self.selected_xref = self.selected_image = self.selected_table = self.table_sel = None
             self.render()
             self.canvas.yview_moveto(0)
             if getattr(self, "thumb_positions", None) and index < len(self.thumb_positions):
@@ -144428,8 +144976,14 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             self.canvas.config(cursor=cursors.get(tool, "crosshair"))
             self.status_main.config(text=TOOL_HINTS.get(tool, ""))
             if tool != "select":
-                self.selected_xref = self.selected_image = None
-                self._draw_overlays()
+                self.selected_xref = self.selected_image = self.selected_table = None
+            if tool != "table":
+                self.table_sel = None
+            self._draw_overlays()
+            if tool == "table" and self.page() is not None:
+                count = len(self.page_tables())
+                self.status_main.config(text=(f"{count} table(s) on this page. " if count else
+                                              "No tables with lines found on this page. ") + TOOL_HINTS["table"])
 
         def set_color(self, color):
             self.color = hex_to_rgb(color)
@@ -144467,12 +145021,28 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                     self.drag = {"mode": "resize", "corner": corner, "orig": fitz.Rect(rect), "rect": fitz.Rect(rect)}
                     return
                 self.select(self.object_at(page, point))
-                if self.selected_xref is not None or self.selected_image is not None:
+                if self.selected_xref is not None or self.selected_image is not None or self.selected_table is not None:
                     self.drag = {"mode": "move", "start": point, "last": point}
                 return
             if tool == "edit":
                 self.edit_text_at(point)
                 return
+            if tool == "table":
+                hit = self.table_at(point)
+                if hit is not None and hit[1] is not None:
+                    table, r, c = hit
+                    same = self.table_sel and self.table_sel["key"] == table["key"]
+                    if event.state & 0x0001 and same:
+                        self._select_cells(table, self.table_sel["anchor"], (r, c))
+                    else:
+                        self.table_sel = {"key": table["key"], "anchor": (r, c), "cells": {(r, c)}}
+                    self.drag = {"mode": "cells"}
+                    self._draw_overlays()
+                    cells = len(self.table_sel["cells"])
+                    self.status_main.config(text=f"{cells} cell(s) selected - right-click for colours, text and export")
+                    return
+                self.table_sel = None
+                self._draw_overlays()
             if tool == "note":
                 self.add_note(point)
                 return
@@ -144491,6 +145061,12 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             point = self.to_view(event)
             x0, y0 = self.origin
             z = self.zoom
+            if drag["mode"] == "cells":
+                hit = self.table_at(point)
+                if hit is not None and hit[1] is not None and self.table_sel and hit[0]["key"] == self.table_sel["key"]:
+                    self._select_cells(hit[0], self.table_sel["anchor"], (hit[1], hit[2]))
+                    self._draw_overlays()
+                return
             if drag["mode"] == "pen":
                 last = drag["points"][-1]
                 self.canvas.create_line(x0 + last.x * z, y0 + last.y * z, x0 + point.x * z, y0 + point.y * z,
@@ -144536,7 +145112,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             drag, self.drag = self.drag, None
             self.canvas.delete("rubber")
             page = self.page()
-            if not drag or page is None or drag["mode"] == "pan":
+            if not drag or page is None or drag["mode"] in ("pan", "cells"):
                 return
             if drag["mode"] == "move":
                 delta = drag["last"] - drag["start"]
@@ -144588,6 +145164,9 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                 self.after_change()
             elif tool in ("highlight", "underline", "strike"):
                 self.markup(tool, start, end)
+            elif tool == "table":
+                if not small:
+                    self._table_area_menu(event, start, end)
             elif tool == "text":
                 self.add_text(start, None if small else end)
             elif tool in ("image", "signature", "stamp"):
@@ -144607,8 +145186,11 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                     return
                 self.redact_warned = True
                 self.push_undo()
-                page.add_redact_annot(self.view_rect_to_pdf(start, end), fill=(0, 0, 0))
-                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+                area = self.view_rect_to_pdf(start, end)
+                page = self.page()
+                page.add_redact_annot(area, fill=(0, 0, 0))
+                redact_keeping_marked(self.doc, self.page_index, area=area, images=fitz.PDF_REDACT_IMAGE_PIXELS)
+                self.selected_image = self.selected_table = None
                 self.after_change("Content removed")
             elif tool == "crop":
                 if small:
@@ -144625,7 +145207,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             if page is None or self.tool != "select":
                 return
             self.select(self.object_at(page, self.to_view(event)))
-            if self.selected_xref is not None or self.selected_image is not None:
+            if self.selected_xref is not None or self.selected_image is not None or self.selected_table is not None:
                 self.selection_properties()
 
         def after_change(self, message=None, structure=False):
@@ -144676,6 +145258,9 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             annot = self.annot_at(page, view_point * page.derotation_matrix)
             if annot is not None:
                 return ("annot", annot.xref)
+            for table in reversed(created_tables(self.doc, page)):
+                if view_point in table["bbox"] * page.rotation_matrix:
+                    return ("table", table["xref"])
             best = None
             for obj in image_objects(self.doc, page):
                 view = obj["rect"] * page.rotation_matrix
@@ -144686,7 +145271,12 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         def select(self, hit):
             self.selected_xref = hit[1] if hit and hit[0] == "annot" else None
             self.selected_image = fitz.Rect(hit[1]) if hit and hit[0] == "image" else None
+            self.selected_table = hit[1] if hit and hit[0] == "table" else None
             self._draw_overlays()
+            if self.selected_table is not None:
+                self.status_main.config(text="Table selected: drag to move, drag a corner to resize, double-click to "
+                                             "edit, right-click for options")
+                return
             page = self.page()
             annot = self.selected_annot(page)
             if annot is not None:
@@ -144697,6 +145287,9 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                                              "(Shift = free proportions), right-click for options")
 
         def selection_view_rect(self, page):
+            table = self.selected_created(page)
+            if table is not None:
+                return table["bbox"] * page.rotation_matrix, True
             annot = self.selected_annot(page)
             if annot is not None:
                 return annot.rect * page.rotation_matrix, annot.type[0] in self.RECT_ANNOTS
@@ -144795,6 +145388,11 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
         def move_selection(self, delta):
             page = self.page()
+            table = self.selected_created(page)
+            if table is not None:
+                rect = table["bbox"] * page.rotation_matrix
+                self.set_table_rect(table, rect + (delta.x, delta.y, delta.x, delta.y))
+                return
             annot = self.selected_annot(page)
             if annot is not None:
                 if annot.type[0] not in self.MOVABLE_ANNOTS:
@@ -144823,6 +145421,10 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
         def resize_selection(self, view_rect):
             page = self.page()
+            table = self.selected_created(page)
+            if table is not None:
+                self.set_table_rect(table, fitz.Rect(view_rect))
+                return
             annot = self.selected_annot(page)
             if annot is not None:
                 if annot.type[0] not in self.RECT_ANNOTS:
@@ -145058,14 +145660,20 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         # generic actions (menus, keys) --------------------------------------------------------------
 
         def selection_properties(self):
-            if self.selected_xref is not None:
+            table = self.selected_created(self.page())
+            if table is not None:
+                self.edit_table(table)
+            elif self.selected_xref is not None:
                 self.annotation_properties()
             elif self.selected_image is not None:
                 self.picture_properties()
 
         def delete_selection(self):
             page = self.page()
-            if self.selected_annot(page) is not None:
+            table = self.selected_created(page)
+            if table is not None:
+                self.delete_table(table)
+            elif self.selected_annot(page) is not None:
                 self.push_undo()
                 page = self.page()
                 page.delete_annot(self.selected_annot(page))
@@ -145084,6 +145692,14 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         def duplicate_selection(self):
             page = self.page()
             offset = fitz.Point(12, 12)
+            table = self.selected_created(page)
+            if table is not None:
+                definition = json.loads(json.dumps(table["def"]))
+                rect = fitz.Rect(definition["rect"]) + (offset.x, offset.y, offset.x, offset.y)
+                self.push_undo()
+                self.selected_table = self._draw_definition(definition, rect)
+                self.after_change("Table duplicated")
+                return
             annot = self.selected_annot(page)
             if annot is not None:
                 self.push_undo()
@@ -145105,7 +145721,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                 self.after_change("Picture duplicated")
 
         def _nudge(self, event, dx, dy):
-            if self.selected_xref is None and self.selected_image is None:
+            if self.selected_xref is None and self.selected_image is None and self.selected_table is None:
                 return None
             step = 10 if event.state & 0x0001 else 1
             self.move_selection(fitz.Point(dx * step, dy * step))
@@ -145116,14 +145732,35 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             if page is None:
                 return
             point = self.to_view(event)
-            hit = self.object_at(page, point)
+            menu = w95_menu(self)
+            cell_hit = self.table_at(point) if self.tool == "table" else None
+            hit = None if cell_hit is not None else self.object_at(page, point)
+            if cell_hit is None and hit is None and self.tool != "table":
+                cell_hit = self.table_at(point)                   # a table under the pointer, any tool
+            if cell_hit is not None:
+                table, r, c = cell_hit
+                if self.tool != "table":
+                    self.set_tool("table")
+                if r is not None and not (self.table_sel and self.table_sel["key"] == table["key"]
+                                          and (r, c) in self.table_sel["cells"]):
+                    self.table_sel = {"key": table["key"], "anchor": (r, c), "cells": {(r, c)}}
+                self._draw_overlays()
+                self._table_menu(menu, table, r, c)
+                self._menu = menu
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    menu.grab_release()
+                return
             if hit is not None and self.tool != "select":
                 self.set_tool("select")
             self.select(hit)
-            menu = w95_menu(self)
             page = self.page()
+            table = self.selected_created(page)
             annot = self.selected_annot(page)
-            if annot is not None:
+            if table is not None:
+                self._table_menu(menu, table, None, None)
+            elif annot is not None:
                 kind = annot.type[0]
                 menu.add_command(label=f"{annot.type[1]} Properties...", command=self.annotation_properties)
                 menu.add_separator()
@@ -145218,6 +145855,336 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             annot.update()
             self.after_change(f"{len(words)} words marked")
 
+        # ----- tables ---------------------------------------------------------------------------
+
+        def page_tables(self):
+            page = self.page()
+            if page is None:
+                return []
+            key = (self.doc_version, self.page_index)
+            if self.table_cache and self.table_cache[0] == key:
+                return self.table_cache[1]
+            tables = created_tables(self.doc, page)
+            for table in detected_tables(page, self.borderless_areas.get(self.page_index, [])):
+                if any(same_rect(table["bbox"], t["bbox"], 4) for t in tables):
+                    continue
+                table["key"] = ("bbox",) + tuple(round(v) for v in table["bbox"])
+                tables.append(table)
+            self.table_cache = (key, tables)
+            return tables
+
+        def find_table(self, key):
+            return next((t for t in self.page_tables() if t["key"] == key), None)
+
+        def selected_created(self, page):
+            if page is None or self.selected_table is None:
+                return None
+            return next((t for t in created_tables(self.doc, page) if t["xref"] == self.selected_table), None)
+
+        def table_at(self, view_point):
+            """(table, row, column) under a point of the page view; row/column None for a table that
+            cannot be edited cell by cell on this page (created at another page rotation)."""
+            page = self.page()
+            if page is None:
+                return None
+            point = view_point * page.derotation_matrix
+            for table in self.page_tables():
+                if table["cells"] is not None:
+                    for r, row in enumerate(table["cells"]):
+                        for c, cell in enumerate(row):
+                            if cell is not None and point in cell:
+                                return table, r, c
+                elif point in table["bbox"]:
+                    return table, None, None
+            return None
+
+        def _select_cells(self, table, anchor, corner):
+            r0, r1 = sorted((anchor[0], corner[0]))
+            c0, c1 = sorted((anchor[1], corner[1]))
+            cells = {(r, c) for r in range(r0, r1 + 1) for c in range(c0, c1 + 1)
+                     if c < len(table["cells"][r]) and table["cells"][r][c] is not None}
+            self.table_sel = {"key": table["key"], "anchor": anchor, "cells": cells}
+
+        def _table_area_menu(self, event, start, end):
+            area = self.view_rect_to_pdf(start, end)
+            menu = w95_menu(self)
+            menu.add_command(label="Insert a New Table Here...", command=lambda: self.insert_table(fitz.Rect(start, end)))
+            menu.add_command(label="Find a Table without Lines in This Area", command=lambda: self.find_borderless(area))
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        def _hint_borderless(self):
+            self.set_tool("table")
+            self.status_main.config(text="Drag a rectangle around the table without lines, then choose "
+                                         "'Find a Table without Lines in This Area'")
+
+        def find_borderless(self, area):
+            table = borderless_table(self.page(), area)
+            if table is None:
+                messagebox.showinfo("Tables", "No table found in that area (it needs at least 2 rows and 2 columns "
+                                              "of aligned text).", parent=self)
+                return
+            self.borderless_areas.setdefault(self.page_index, []).append(area)
+            self.table_cache = None
+            self.set_tool("table")
+            self.status_main.config(text=f"Table found: {len(table['cells'])} rows x {len(table['cells'][0])} columns")
+
+        def _table_menu(self, menu, table, r, c):
+            cells = self.table_sel["cells"] if self.table_sel and self.table_sel["key"] == table["key"] else set()
+            if r is not None and not cells:
+                cells = {(r, c)}
+            rows, cols = (len(table["cells"]), max(len(row) for row in table["cells"])) if table["cells"] else (0, 0)
+            editable = table["cells"] is not None
+            state = "normal" if editable else "disabled"
+            every = {(i, j) for i in range(rows) for j in range(cols)}
+            menu.add_command(label=f"Colour Selected Cells ({len(cells)})...", state=state if cells else "disabled",
+                             command=lambda: self.color_cells(table, cells))
+            if r is not None:
+                menu.add_command(label="Colour This Row...", command=lambda: self.color_cells(
+                    table, {(r, j) for j in range(cols)}))
+                menu.add_command(label="Colour This Column...", command=lambda: self.color_cells(
+                    table, {(i, c) for i in range(rows)}))
+            menu.add_command(label="Colour Header Row...", state=state,
+                             command=lambda: self.color_cells(table, {(0, j) for j in range(cols)}))
+            menu.add_command(label="Zebra Stripes (every other row)...", state=state,
+                             command=lambda: self.color_cells(table, {(i, j) for i in range(2, rows, 2)
+                                                                      for j in range(cols)}))
+            menu.add_command(label="Colour Whole Table...", state=state, command=lambda: self.color_cells(table, every))
+            menu.add_separator()
+            menu.add_command(label="Clear Colour of Selected Cells", state=state if cells else "disabled",
+                             command=lambda: self.clear_cells(table, cells))
+            menu.add_command(label="Clear All Colours in This Table", state=state,
+                             command=lambda: self.clear_cells(table, every))
+            menu.add_separator()
+            menu.add_command(label="Edit Cell Text...", state="normal" if r is not None else "disabled",
+                             command=lambda: self.edit_cell(table, r, c))
+            if table["source"] == "created":
+                menu.add_command(label="Edit Table...", command=lambda: self.edit_table(table))
+                menu.add_command(label="Delete Table", command=lambda: self.delete_table(table))
+            menu.add_separator()
+            menu.add_command(label="Copy Table (paste into Excel)", command=lambda: self.copy_table(table))
+            menu.add_command(label="Export Table to Excel...", command=lambda: self.export_table(table, "xlsx"))
+            menu.add_command(label="Export Table to CSV...", command=lambda: self.export_table(table, "csv"))
+
+        def _cell_rects(self, table, cells):
+            return [table["cells"][r][c] for r, c in sorted(cells)
+                    if r < len(table["cells"]) and c < len(table["cells"][r]) and table["cells"][r][c] is not None]
+
+        def color_cells(self, table, cells):
+            if not cells or table["cells"] is None:
+                return
+            fields = [("color", "Colour", "color", getattr(self, "_last_cell_color", "#fff2a8"), None)]
+            if table["source"] != "created":
+                fields.append(("mode", "Where", "choice", "Behind the text",
+                               ("Behind the text", "Over the text (transparent)")))
+            dialog = FormDialog(self, "Cell Colour", fields,
+                                intro=f"{len(cells)} cell(s). 'Behind the text' looks like a real cell fill; if the "
+                                      "table has its own white background, use 'Over the text'.")
+            if dialog.result is None:
+                return
+            color = dialog.result["color"]
+            self._last_cell_color = color
+            if table["source"] == "created":
+                definition = json.loads(json.dumps(table["def"]))
+                for r, c in cells:
+                    definition.setdefault("fills", {})[f"{r},{c}"] = color
+                self._redraw_table(table, definition, f"{len(cells)} cell(s) coloured")
+                return
+            mode = "behind" if dialog.result["mode"] == "Behind the text" else "over"
+            self.push_undo()
+            clear_shading(self.doc, self.page_index, self._cell_rects(table, cells))
+            shade_rects(self.doc, self.page_index, self._cell_rects(table, cells), color, mode)
+            self.after_change(f"{len(cells)} cell(s) coloured")
+
+        def clear_cells(self, table, cells):
+            if table["cells"] is None:
+                return
+            if table["source"] == "created":
+                definition = json.loads(json.dumps(table["def"]))
+                fills = definition.get("fills", {})
+                for r, c in cells:
+                    fills.pop(f"{r},{c}", None)
+                self._redraw_table(table, definition, "Colours cleared")
+                return
+            self.push_undo()
+            removed = clear_shading(self.doc, self.page_index, self._cell_rects(table, cells))
+            if removed == 0:
+                self.undo_stack.pop()
+                self.status_main.config(text="Those cells have no colour added here (colours that came with the PDF "
+                                             "cannot be cleared)")
+                return
+            self.after_change(f"Colour removed from {removed} cell(s)")
+
+        def clear_page_colours(self):
+            page = self.page()
+            if page is None:
+                return
+            shades = marked_streams(self.doc, page, SHADE_MARK)
+            if not shades:
+                self.status_main.config(text="No cell colours added on this page")
+                return
+            self.push_undo()
+            for xref, _info in shades:
+                self.doc.update_stream(xref, b" ")
+            self.after_change("All cell colours removed from this page")
+
+        def edit_cell(self, table, r, c):
+            if r is None:
+                return
+            if table["source"] == "created":
+                definition = json.loads(json.dumps(table["def"]))
+                dialog = FormDialog(self, "Cell Text", [("text", "Text", "text", definition["cells"][r][c], 3)])
+                if dialog.result is not None:
+                    definition["cells"][r][c] = dialog.result["text"].strip()
+                    self._redraw_table(table, definition, "Cell changed")
+                return
+            page = self.page()
+            if page.rotation % 360:
+                messagebox.showinfo("Edit Cell", "Cell text can be edited on pages without rotation.", parent=self)
+                return
+            cell = table["cells"][r][c]
+            spans = [s for b in page.get_text("dict", clip=cell)["blocks"] if b.get("type") == 0
+                     for line in b["lines"] for s in line["spans"] if s["text"].strip()]
+            text = table["data"][r][c] if r < len(table["data"]) and c < len(table["data"][r]) else ""
+            family, bold, italic = guess_style(spans[0]) if spans else ("Arial", False, False)
+            size = round(spans[0]["size"], 1) if spans else 10.0
+            color = rgb_to_hex(int_rgb(spans[0]["color"])) if spans else "#000000"
+            right = bool(spans) and spans[-1]["bbox"][2] > cell.x1 - cell.width * 0.2 and \
+                spans[0]["bbox"][0] > cell.x0 + cell.width * 0.3
+            dialog = FormDialog(self, "Edit Cell Text",
+                                [("text", "Text", "text", text, 3), ("size", "Size (pt)", "float", size, None),
+                                 ("bold", "Bold", "bool", bold, None), ("color", "Colour", "color", color, None),
+                                 ("align", "Align", "choice", "right" if right else "left", ("left", "center", "right"))])
+            result = dialog.result
+            if result is None:
+                return
+            self.push_undo()
+            page = self.page()
+            inner = fitz.Rect(cell.x0 + 0.8, cell.y0 + 0.8, cell.x1 - 0.8, cell.y1 - 0.8)
+            if spans:
+                page.add_redact_annot(inner, fill=False)
+                redact_keeping_marked(self.doc, self.page_index, images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+                page = self.page()
+            if result["text"].strip():
+                fit_textbox(page, _text_rect(cell, result["text"], result["size"], fitz.Matrix(1, 1)),
+                            result["text"].strip(), result["size"], {"left": 0, "center": 1, "right": 2}[result["align"]],
+                            0, hex_to_rgb(result["color"]), font_args(family, result["bold"], italic))
+            self.after_change("Cell text changed")
+
+        def copy_table(self, table):
+            text = "\n".join("\t".join((v or "").replace("\n", " ") for v in row) for row in table["data"])
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.status_main.config(text=f"Table copied ({len(table['data'])} rows) - paste it into Excel")
+
+        def export_table(self, table, kind):
+            path = filedialog.asksaveasfilename(title="Export Table", parent=self, defaultextension=f".{kind}",
+                                                initialfile=f"{self._stem()}_table.{kind}",
+                                                filetypes=[("Excel", "*.xlsx")] if kind == "xlsx" else [("CSV", "*.csv")])
+            if not path:
+                return
+            try:
+                if kind == "xlsx":
+                    table_rows_to_excel([table["data"]], path)
+                else:
+                    import csv
+                    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+                        csv.writer(handle, delimiter=";").writerows(table["data"])
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Export failed:\n{exc}", parent=self)
+                return
+            self.status_main.config(text=f"Table exported: {path}")
+
+        def export_page_tables(self):
+            if not self.need_doc():
+                return
+            tables = self.page_tables()
+            if not tables:
+                messagebox.showinfo("Tables", "No tables found on this page.\nFor a table without lines use the Table "
+                                              "tool and drag around it.", parent=self)
+                return
+            path = filedialog.asksaveasfilename(title="Export Tables", parent=self, defaultextension=".xlsx",
+                                                initialfile=f"{self._stem()}_p{self.page_index + 1}_tables.xlsx",
+                                                filetypes=[("Excel", "*.xlsx")])
+            if not path:
+                return
+            try:
+                table_rows_to_excel([t["data"] for t in tables], path)
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Export failed:\n{exc}", parent=self)
+                return
+            self.status_main.config(text=f"{len(tables)} table(s) exported to {path} (one sheet each)")
+
+        # created tables ------------------------------------------------------------------------------
+
+        def _draw_definition(self, definition, view_rect):
+            page = self.page()
+            view_rect = fitz.Rect(view_rect)
+            view_rect.normalize()
+            definition["rect"] = [round(v, 2) for v in view_rect]
+            definition["rotate"] = page.rotation
+            definition["pdf"] = [round(v, 2) for v in view_rect * page.derotation_matrix]
+            return draw_table(self.doc, self.page_index, definition)
+
+        def insert_table(self, view_rect):
+            if not self.need_doc():
+                return
+            dialog = TableDialog(self)
+            if dialog.result is None:
+                return
+            definition = dialog.result
+            page = self.page()
+            rows = len(definition["cells"])
+            row_h = max(14.0, definition["size"] * 1.9)
+            if view_rect is None or abs(view_rect.width) < 20 or abs(view_rect.height) < 10:
+                left = view_rect.x0 if view_rect is not None else page.rect.width * 0.1
+                top = view_rect.y0 if view_rect is not None else page.rect.height * 0.3
+                view_rect = fitz.Rect(left, top, min(page.rect.width - 20, left + page.rect.width * 0.8),
+                                      top + rows * row_h)
+            self.push_undo()
+            self.selected_table = self._draw_definition(definition, view_rect)
+            if self.tool != "select":
+                self.set_tool("select")
+                self.selected_table = created_tables(self.doc, self.page())[-1]["xref"]
+            self.after_change("Table inserted: drag it to move, drag a corner to resize, double-click to edit")
+
+        def _redraw_table(self, table, definition, message, view_rect=None):
+            page = self.page()
+            if definition.get("rotate", 0) != page.rotation:
+                messagebox.showinfo("Table", f"This table was made with the page at {definition.get('rotate', 0)} "
+                                             f"degrees. Rotate the page back to edit it.", parent=self)
+                return
+            self.push_undo()
+            self.doc.update_stream(table["xref"], b" ")
+            xref = self._draw_definition(definition, view_rect or fitz.Rect(definition["rect"]))
+            if self.selected_table is not None:
+                self.selected_table = xref
+            if self.table_sel and self.table_sel["key"] == table["key"]:
+                self.table_sel["key"] = ("created", xref)
+            self.after_change(message)
+
+        def edit_table(self, table):
+            dialog = TableDialog(self, table["def"])
+            if dialog.result is not None:
+                definition = dict(table["def"])
+                definition.update(dialog.result)
+                self._redraw_table(table, definition, "Table changed")
+
+        def set_table_rect(self, table, view_rect):
+            if view_rect.width < 10 or view_rect.height < 6:
+                return
+            self._redraw_table(table, json.loads(json.dumps(table["def"])), "Table moved / resized", view_rect)
+
+        def delete_table(self, table):
+            self.push_undo()
+            self.doc.update_stream(table["xref"], b" ")
+            self.selected_table = None
+            self.table_sel = None
+            self.after_change("Table deleted")
+
         # ----- text ---------------------------------------------------------------------------
 
         def _line_at(self, pdf_point):
@@ -145243,6 +146210,11 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                 messagebox.showinfo("Edit Text", "Edit Text works on pages without rotation.\n"
                                                  "Rotate the page back to 0 degrees, edit, then rotate it again.",
                                     parent=self)
+                return
+            hit = self.table_at(point)
+            if hit is not None and hit[0]["source"] == "created":
+                if hit[1] is not None:
+                    self.edit_cell(hit[0], hit[1], hit[2])
                 return
             line = self._line_at(self.to_pdf(point))
             if line is None:
@@ -145275,7 +146247,8 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                 if width > line_rect.width * 1.02 and width > 0:
                     new_size = max(3.0, new_size * line_rect.width / width)
             page.add_redact_annot(line_rect, fill=False)
-            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+            redact_keeping_marked(self.doc, self.page_index, images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+            page = self.page()
             if result["text"].strip():
                 page.insert_text(fitz.Point(first["origin"][0], first["origin"][1]), result["text"], fontsize=new_size,
                                  color=hex_to_rgb(result["color"]),
@@ -145332,9 +146305,23 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
             pages = range(len(self.doc)) if result["scope"] == "All pages" else [self.page_index]
             self.push_undo()
             total = 0
+            pattern = re.compile(re.escape(result["find"]), re.IGNORECASE)
             for number in pages:
                 page = self.doc[number]
-                hits = page.search_for(result["find"])
+                tables = created_tables(self.doc, page)
+                for table in tables:                           # created tables: change their cells
+                    cells = table["def"]["cells"]
+                    count = sum(len(pattern.findall(str(v))) for row in cells for v in row)
+                    if count and table["def"].get("rotate", 0) == page.rotation:
+                        definition = json.loads(json.dumps(table["def"]))
+                        definition["cells"] = [[pattern.sub(lambda _m: result["replace"], str(v)) for v in row]
+                                               for row in cells]
+                        self.doc.update_stream(table["xref"], b" ")
+                        draw_table(self.doc, number, definition)
+                        total += count
+                        page = self.doc[number]
+                hits = [h for h in page.search_for(result["find"])
+                        if not any(fitz.Point((h.x0 + h.x1) / 2, (h.y0 + h.y1) / 2) in t["bbox"] for t in tables)]
                 if not hits:
                     continue
                 spans = [s for b in page.get_text("dict")["blocks"] if b.get("type") == 0
@@ -145347,7 +146334,8 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                     family, bold, italic = guess_style(span)
                     jobs.append((hit, span["size"], int_rgb(span["color"]), span["origin"][1], family, bold, italic))
                     page.add_redact_annot(hit, fill=False)
-                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+                redact_keeping_marked(self.doc, number, images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+                page = self.doc[number]
                 for hit, size, color, baseline, family, bold, italic in jobs:
                     if result["replace"]:
                         page.insert_text(fitz.Point(hit.x0, baseline), result["replace"], fontsize=size, color=color,
@@ -145863,6 +146851,9 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
                 self.protect = None
             self.doc, self.path = doc, os.path.abspath(path)
             self.page_index, self.selected_xref, self.selected_image = 0, None, None
+            self.selected_table = self.table_sel = None
+            self.borderless_areas = {}
+            self.doc_version += 1
             self.undo_stack.clear()
             self.redo_stack.clear()
             self.dirty = False
@@ -146086,16 +147077,33 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
         def show_help(self):
             messagebox.showinfo(
                 "How to Use",
-                "EDIT TEXT (E): click a line, change it. The old line is removed and the new text\n"
-                "is written in the same place, size and colour. For many places at once use\n"
-                "Edit > Find & Replace (Ctrl+H).\n\n"
+                "LIMITATIONS\n"
+                "- Edit Text changes one line at a time, in Arial, Times or Courier (the PDF's own\n"
+                "  embedded font cannot be reused), and only on pages without rotation.\n"
+                "- Scanned PDFs are pictures: they have no text to edit or search (no OCR).\n"
+                "- Highlight / Underline / Strikeout follow the words: they cannot be moved.\n"
+                "- A few PDFs draw pictures in a way that cannot be moved; use Whiteout or Redact.\n"
+                "- Whiteout only covers content; Redact is the one that really removes it.\n"
+                "- Tables: merged cells count as one area; colours that came with the PDF cannot be\n"
+                "  cleared; tables without lines are found by text alignment; a table you created\n"
+                "  can be edited only with the page at the rotation it had when you created it.\n"
+                "- Save Optimized makes placed pictures, created tables and cell colours ordinary\n"
+                "  content (still visible, no longer editable). Ctrl+S keeps them editable.\n"
+                "- Word export: the layout is approximate and annotations are not carried over.\n\n"
+                "EDIT TEXT (E): click a line, change it; it keeps its place, size and colour.\n"
+                "For many places at once: Edit > Find & Replace (Ctrl+H).\n\n"
                 "ADD: Text (T), Note (N), Highlight (L) / Underline (U) / Strikeout (K) over words,\n"
                 "Rectangle (R), Ellipse (O), Line (I), Arrow (A), Pen (P), Image (G),\n"
                 "Signature (S, drawn once per session), Stamp (M).\n\n"
+                "SELECT (V): click an object (annotation, picture, created table); drag to move,\n"
+                "drag a corner to resize (Shift = free proportions), arrow keys nudge it,\n"
+                "double-click for its properties, Del deletes, Ctrl+D duplicates.\n"
+                "RIGHT-CLICK any object or text for more options.\n\n"
+                "TABLE (B): click / Shift+click / drag to select cells; right-click to colour cells,\n"
+                "rows, columns or stripes, edit a cell, copy or export to Excel / CSV. Drag on an\n"
+                "empty area to insert a new table or to find a table without lines.\n\n"
                 "HIDE: Whiteout (W) covers content; Redact (X) removes it for good.\n"
                 "Crop (C) keeps an area of the page.\n\n"
-                "SELECT (V): click an annotation, drag boxes / notes to move them, Del deletes.\n"
-                "Double-click a note to edit it.\n\n"
                 "PAGES: right-click a thumbnail, or the Page menu. DOCUMENT: page numbers,\n"
                 "header / footer, watermark, password, properties.\n"
                 "Every change can be undone with Ctrl+Z.",
@@ -146113,6 +147121,7 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
     if __name__ == "__main__":
         main()
+
 
     # class RetroPDFEditor:
         # def __init__(self, rootacrobated):
