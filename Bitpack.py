@@ -143033,827 +143033,3907 @@ if pdfeditorVARvar == 434343434343444444444444333333333334343435:
 
             # Rularea buclei principale
             validation.mainloop()
-        
-    class RetroPDFEditor:
-        def __init__(self, rootacrobated):
-            self.rootacrobated = rootacrobated
-            self.rootacrobated.title("PDF Editor")
-            self.rootacrobated.geometry("1100x700")
-            
-            # Windows 95 color scheme
-            self.bg_color = "#c0c0c0"
-            self.active_bg = "#000080"
-            self.button_bg = "#c0c0c0"
-            self.text_color = "#000000"
-            
-            self.rootacrobated.configure(bg=self.bg_color)
-            
-            self.pdf_document = None
-            self.current_page = 0
-            self.pdf_path = None
-            self.zoom_level = 1.0
-            self.tool_mode = None  # 'text', 'highlight', 'draw', 'erase'
-            self.annotations = []
-            self.current_color = (1, 0, 0)  # Red
-            self.font_size = 12
-            self.drawing = False
-            self.draw_start = None
-            self.temp_shape = None  # For preview rectangle/circle
-            self.draw_points = []  # For freehand drawing
-            
-            self.create_menu()
-            self.create_toolbar()
-            self.create_main_area()
-            self.create_statusbar()
-            
-        def create_menu(self):
-            menubar = tk.Menu(self.rootacrobated, bg=self.bg_color, relief=tk.FLAT)
-            self.rootacrobated.config(menu=menubar)
-            
-            # File menu
-            file_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
-            menubar.add_cascade(label="File", menu=file_menu)
-            file_menu.add_command(label="Open PDF...", command=self.open_pdf, accelerator="Ctrl+O")
-            file_menu.add_command(label="Save", command=self.save_pdf, accelerator="Ctrl+S")
-            file_menu.add_command(label="Save As...", command=self.save_pdf_as)
-            file_menu.add_command(label="Export Page as Image...", command=self.export_page_image)
-            file_menu.add_separator()
-            file_menu.add_command(label="Exit", command=self.rootacrobated.quit)
-            
-            # Edit menu
-            edit_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
-            menubar.add_cascade(label="Edit", menu=edit_menu)
-            edit_menu.add_command(label="Add Text", command=lambda: self.set_tool('text'))
-            edit_menu.add_command(label="Highlight Text", command=lambda: self.set_tool('highlight'))
-            edit_menu.add_command(label="Draw", command=lambda: self.set_tool('draw'))
-            edit_menu.add_command(label="Add Rectangle", command=self.add_rectangle)
-            edit_menu.add_command(label="Add Circle", command=self.add_circle)
-            edit_menu.add_separator()
-            edit_menu.add_command(label="Insert Blank Page", command=self.insert_page)
-            edit_menu.add_command(label="Delete Page", command=self.delete_page)
-            edit_menu.add_command(label="Rotate Page", command=self.rotate_page)
-            edit_menu.add_separator()
-            edit_menu.add_command(label="Merge PDFs...", command=self.merge_pdfs)
-            
-            # View menu
-            view_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
-            menubar.add_cascade(label="View", menu=view_menu)
-            view_menu.add_command(label="Zoom In", command=self.zoom_in, accelerator="+")
-            view_menu.add_command(label="Zoom Out", command=self.zoom_out, accelerator="-")
-            view_menu.add_command(label="Actual Size", command=self.actual_size, accelerator="Ctrl+0")
-            view_menu.add_command(label="Fit Width", command=self.fit_width)
-            view_menu.add_command(label="Fit Page", command=self.fit_page)
-            
-            # Tools menu
-            tools_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
-            menubar.add_cascade(label="Tools", menu=tools_menu)
-            tools_menu.add_command(label="Text Tool", command=lambda: self.set_tool('text'))
-            tools_menu.add_command(label="Highlight Tool", command=lambda: self.set_tool('highlight'))
-            tools_menu.add_command(label="Draw Tool", command=lambda: self.set_tool('draw'))
-            tools_menu.add_separator()
-            tools_menu.add_command(label="Choose Color...", command=self.choose_color)
-            tools_menu.add_command(label="Font Size...", command=self.set_font_size)
-            
-            # Document menu
-            doc_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
-            menubar.add_cascade(label="Document", menu=doc_menu)
-            doc_menu.add_command(label="Document Properties", command=self.show_properties)
-            doc_menu.add_command(label="Extract Pages...", command=self.extract_pages)
-            doc_menu.add_command(label="Split Document...", command=self.split_document)
-            
-            # Help menu
-            help_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
-            menubar.add_cascade(label="Help", menu=help_menu)
-            help_menu.add_command(label="About", command=self.show_about)
-            
-        def create_toolbar(self):
-            toolbar = tk.Frame(self.rootacrobated, bg=self.bg_color, relief=tk.RAISED, bd=2)
-            toolbar.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
-            
-            # File operations
-            btn_open = tk.Button(toolbar, text="Open", width=7, command=self.open_pdf,
-                                bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_open.pack(side=tk.LEFT, padx=2, pady=2)
-            
-            btn_save = tk.Button(toolbar, text="Save", width=7, command=self.save_pdf,
-                                bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_save.pack(side=tk.LEFT, padx=2, pady=2)
-            
-            tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-            
-            # Navigation
-            btn_first = tk.Button(toolbar, text="|<", width=4, command=self.first_page,
-                                 bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_first.pack(side=tk.LEFT, padx=1, pady=2)
-            
-            btn_prev = tk.Button(toolbar, text="<", width=4, command=self.prev_page,
-                                bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_prev.pack(side=tk.LEFT, padx=1, pady=2)
-            
-            self.page_entry = tk.Entry(toolbar, width=5, justify=tk.CENTER)
-            self.page_entry.pack(side=tk.LEFT, padx=2)
-            self.page_entry.bind('<Return>', lambda e: self.goto_page())
-            
-            btn_next = tk.Button(toolbar, text=">", width=4, command=self.next_page,
-                                bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_next.pack(side=tk.LEFT, padx=1, pady=2)
-            
-            btn_last = tk.Button(toolbar, text=">|", width=4, command=self.last_page,
-                                bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_last.pack(side=tk.LEFT, padx=1, pady=2)
-            
-            tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-            
-            # Zoom controls
-            btn_zoom_out = tk.Button(toolbar, text="-", width=3, command=self.zoom_out,
-                                    bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_zoom_out.pack(side=tk.LEFT, padx=1, pady=2)
-            
-            self.zoom_label = tk.Label(toolbar, text="100%", width=6, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
-            self.zoom_label.pack(side=tk.LEFT, padx=2)
-            
-            btn_zoom_in = tk.Button(toolbar, text="+", width=3, command=self.zoom_in,
-                                   bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_zoom_in.pack(side=tk.LEFT, padx=1, pady=2)
-            
-            tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-            
-            # Tool buttons
-            self.btn_text = tk.Button(toolbar, text="Text", width=7, command=lambda: self.set_tool('text'),
-                                     bg=self.button_bg, relief=tk.RAISED, bd=2)
-            self.btn_text.pack(side=tk.LEFT, padx=2, pady=2)
-            
-            self.btn_highlight = tk.Button(toolbar, text="Highlight", width=8, command=lambda: self.set_tool('highlight'),
-                                           bg=self.button_bg, relief=tk.RAISED, bd=2)
-            self.btn_highlight.pack(side=tk.LEFT, padx=2, pady=2)
-            
-            self.btn_draw = tk.Button(toolbar, text="Draw", width=7, command=lambda: self.set_tool('draw'),
-                                     bg=self.button_bg, relief=tk.RAISED, bd=2)
-            self.btn_draw.pack(side=tk.LEFT, padx=2, pady=2)
-            
-            tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
-            
-            # Page operations
-            btn_rotate = tk.Button(toolbar, text="Rotate", width=7, command=self.rotate_page,
-                                  bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_rotate.pack(side=tk.LEFT, padx=2, pady=2)
-            
-            btn_delete = tk.Button(toolbar, text="Del Page", width=8, command=self.delete_page,
-                                  bg=self.button_bg, relief=tk.RAISED, bd=2)
-            btn_delete.pack(side=tk.LEFT, padx=2, pady=2)
-            
-        def create_main_area(self):
-            # Main container
-            main_container = tk.Frame(self.rootacrobated, bg=self.bg_color)
-            main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            # Left sidebar with thumbnails
-            self.sidebar = tk.Frame(main_container, bg=self.bg_color, width=150, relief=tk.SUNKEN, bd=2)
-            self.sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
-            self.sidebar.pack_propagate(False)
-            
-            sidebar_label = tk.Label(self.sidebar, text="Pages", bg=self.bg_color, font=("MS Sans Serif", 8, "bold"))
-            sidebar_label.pack(pady=5)
-            
-            self.thumbnail_canvas = tk.Canvas(self.sidebar, bg="white", width=140)
-            thumb_scrollbar = tk.Scrollbar(self.sidebar, orient=tk.VERTICAL, command=self.thumbnail_canvas.yview)
-            self.thumbnail_canvas.configure(yscrollcommand=thumb_scrollbar.set)
-            
-            thumb_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            self.thumbnail_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            # Bind mouse wheel for thumbnail scrolling
-            self.thumbnail_canvas.bind('<MouseWheel>', self.on_thumbnail_mousewheel)
-            self.thumbnail_canvas.bind('<Button-4>', self.on_thumbnail_mousewheel)
-            self.thumbnail_canvas.bind('<Button-5>', self.on_thumbnail_mousewheel)
-            
-            # Main canvas area
-            canvas_container = tk.Frame(main_container, bg=self.bg_color, relief=tk.SUNKEN, bd=2)
-            canvas_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            self.scrollbar_y = tk.Scrollbar(canvas_container, orient=tk.VERTICAL)
-            self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            self.scrollbar_x = tk.Scrollbar(canvas_container, orient=tk.HORIZONTAL)
-            self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
-            
-            self.canvas = tk.Canvas(canvas_container, bg="white", 
-                                   yscrollcommand=self.scrollbar_y.set,
-                                   xscrollcommand=self.scrollbar_x.set)
-            self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            self.scrollbar_y.config(command=self.canvas.yview)
-            self.scrollbar_x.config(command=self.canvas.xview)
-            
-            # Bind mouse events for drawing
-            self.canvas.bind('<Button-1>', self.on_canvas_click)
-            self.canvas.bind('<B1-Motion>', self.on_canvas_drag)
-            self.canvas.bind('<ButtonRelease-1>', self.on_canvas_release)
-            
-            # Bind mouse wheel for scrolling
-            self.canvas.bind('<MouseWheel>', self.on_mousewheel)
-            self.canvas.bind('<Button-4>', self.on_mousewheel)  # Linux scroll up
-            self.canvas.bind('<Button-5>', self.on_mousewheel)  # Linux scroll down
-            
-        def create_statusbar(self):
-            statusbar = tk.Frame(self.rootacrobated, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
-            statusbar.pack(side=tk.BOTTOM, fill=tk.X)
-            
-            self.status_label = tk.Label(statusbar, text="Ready", bg=self.bg_color, 
-                                         anchor=tk.W, padx=5)
-            self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            
-            self.tool_label = tk.Label(statusbar, text="Tool: Select", bg=self.bg_color, 
-                                       padx=10, relief=tk.SUNKEN, bd=1)
-            self.tool_label.pack(side=tk.RIGHT, padx=2)
-            
-            self.page_label = tk.Label(statusbar, text="No document", bg=self.bg_color, 
-                                       padx=10, relief=tk.SUNKEN, bd=1)
-            self.page_label.pack(side=tk.RIGHT, padx=2)
-            
-        def set_tool(self, tool):
-            self.tool_mode = tool
-            
-            # Reset all button reliefs
-            self.btn_text.config(relief=tk.RAISED)
-            self.btn_highlight.config(relief=tk.RAISED)
-            self.btn_draw.config(relief=tk.RAISED)
-            
-            # Set active button
-            if tool == 'text':
-                self.btn_text.config(relief=tk.SUNKEN)
-                self.tool_label.config(text="Tool: Text")
-            elif tool == 'highlight':
-                self.btn_highlight.config(relief=tk.SUNKEN)
-                self.tool_label.config(text="Tool: Highlight")
-            elif tool == 'draw':
-                self.btn_draw.config(relief=tk.SUNKEN)
-                self.tool_label.config(text="Tool: Draw")
-            elif tool == 'rectangle':
-                self.tool_label.config(text="Tool: Rectangle")
-            elif tool == 'circle':
-                self.tool_label.config(text="Tool: Circle")
+    
+    #!/usr/bin/env python3
+    # -*- coding: utf-8 -*-
+    """
+    PDF Editor 95
+    =============
+
+    PDF editor in Windows 95 style (tkinter, no ttk, Python 3.10+, PyMuPDF, Pillow,
+    pdf2docx + python-docx for the Word export).
+
+    Editing works directly on the PDF (no round trip through Word):
+    * Edit Text: click a line, change it; the old text is removed (redaction without a
+      white box, so backgrounds and table lines stay) and the new text is written with
+      the same size and colour, in a Unicode font (ș ț ă î â).
+    * Find & Replace across the whole document.
+    * Add Text boxes, sticky Notes, Highlight / Underline / Strikeout (follow the words),
+      Rectangle, Ellipse, Line, Arrow, Pen, Image, Signature (drawn once, reused),
+      Stamp (APPROVED / RECEIVED ... with date), Whiteout, Redact (really removes the
+      content underneath), Crop.
+    * Select annotations to move or delete them.
+    * Pages: thumbnails, insert blank / from PDF, duplicate, delete, rotate, move,
+      extract, split, merge, page numbers, header / footer, watermark.
+    * Document: properties, password protection (AES-256), remove password,
+      optimized save, export pages to PNG, text, images, Word (.docx), print.
+    * Undo / Redo for every change; search with highlighted results.
+    """
+
+    import io
+    import logging
+    import os
+    import re
+    import sys
+    import tempfile
+    import threading
+    from datetime import datetime
+
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import colorchooser, filedialog, messagebox
+
+    import fitz  # PyMuPDF
+    from PIL import Image, ImageDraw, ImageFont, ImageTk
+
+
+    # ---------------------------------------------------------------------------
+    # Constants
+    # ---------------------------------------------------------------------------
+
+    APP_NAME = "PDF Editor"
+    APP_VERSION = "1.0"
+
+    IS_WINDOWS = os.name == "nt"
+    CUSTOM_TITLE_BAR = IS_WINDOWS
+
+    FACE = "#c0c0c0"
+    LIGHT = "#dfdfdf"
+    SHADOW = "#808080"
+    NAVY = "#000080"
+    WHITE = "#ffffff"
+    BLACK = "#000000"
+    FONT = ("MS Sans Serif", 8)
+    FONT_BOLD = ("MS Sans Serif", 8, "bold")
+
+    PAD = 12
+    ZOOM_STEPS = (0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0)
+    UNDO_LIMIT = 25
+    THUMB_W = 120
+    MM = 72 / 25.4
+
+    TOOLS = (
+        ("select", "Select", "V"), ("hand", "Hand", "H"), ("edit", "Edit Text", "E"), ("text", "Add Text", "T"),
+        ("highlight", "Highlight", "L"), ("underline", "Underline", "U"), ("strike", "Strikeout", "K"),
+        ("note", "Note", "N"), ("rect", "Rectangle", "R"), ("ellipse", "Ellipse", "O"), ("line", "Line", "I"),
+        ("arrow", "Arrow", "A"), ("pen", "Pen", "P"), ("image", "Image", "G"), ("signature", "Signature", "S"),
+        ("stamp", "Stamp", "M"), ("whiteout", "Whiteout", "W"), ("redact", "Redact", "X"), ("crop", "Crop", "C"),
+    )
+    TOOL_HINTS = {
+        "select": "Click an annotation to select it; drag to move boxes and notes; Del deletes it",
+        "hand": "Drag to scroll the page",
+        "edit": "Click a line of text to change it",
+        "text": "Click where the text starts, or drag a box for it",
+        "highlight": "Drag over the words to highlight", "underline": "Drag over the words to underline",
+        "strike": "Drag over the words to strike out", "note": "Click to place a sticky note",
+        "rect": "Drag a rectangle", "ellipse": "Drag an ellipse", "line": "Drag a line", "arrow": "Drag an arrow",
+        "pen": "Draw freehand", "image": "Click or drag where the picture goes",
+        "signature": "Click or drag where your signature goes", "stamp": "Click or drag where the stamp goes",
+        "whiteout": "Drag over content to cover it with white (it stays underneath)",
+        "redact": "Drag over content to REMOVE it permanently (text, pictures)",
+        "crop": "Drag the area of the page to keep",
+    }
+    COLORS = ("#e00000", "#ff8000", "#f0d000", "#00a000", "#0060e0", "#8000c0", "#000000", "#808080")
+    FAMILIES = ("Arial", "Times New Roman", "Courier New")
+    FONT_FILES = {
+        "Arial": (("arial.ttf", "arialbd.ttf", "ariali.ttf", "arialbi.ttf"),
+                  ("LiberationSans-Regular.ttf", "LiberationSans-Bold.ttf", "LiberationSans-Italic.ttf",
+                   "LiberationSans-BoldItalic.ttf"),
+                  ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "DejaVuSans-Oblique.ttf", "DejaVuSans-BoldOblique.ttf")),
+        "Times New Roman": (("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf"),
+                            ("LiberationSerif-Regular.ttf", "LiberationSerif-Bold.ttf", "LiberationSerif-Italic.ttf",
+                             "LiberationSerif-BoldItalic.ttf"),
+                            ("DejaVuSerif.ttf", "DejaVuSerif-Bold.ttf", "DejaVuSerif-Italic.ttf",
+                             "DejaVuSerif-BoldItalic.ttf")),
+        "Courier New": (("cour.ttf", "courbd.ttf", "couri.ttf", "courbi.ttf"),
+                        ("LiberationMono-Regular.ttf", "LiberationMono-Bold.ttf", "LiberationMono-Italic.ttf",
+                         "LiberationMono-BoldItalic.ttf"),
+                        ("DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf", "DejaVuSansMono-Oblique.ttf",
+                         "DejaVuSansMono-BoldOblique.ttf")),
+    }
+    STAMPS = ("APPROVED", "RECEIVED", "REVIEWED", "PAID", "REJECTED", "CONFIDENTIAL", "DRAFT", "COPY")
+
+
+    # ---------------------------------------------------------------------------
+    # Fonts
+    # ---------------------------------------------------------------------------
+
+    def _font_dirs():
+        dirs = [os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")]
+        if os.environ.get("LOCALAPPDATA"):
+            dirs.append(os.path.join(os.environ["LOCALAPPDATA"], "Microsoft", "Windows", "Fonts"))
+        for root in ("/usr/share/fonts/truetype", "/usr/share/fonts"):
+            if os.path.isdir(root):
+                dirs += [path for path, _d, _f in os.walk(root)]
+        return dirs
+
+
+    FONT_DIRS = _font_dirs()
+    _FONT_CACHE = {}
+
+
+    def font_file(family, bold=False, italic=False):
+        """TrueType file for a family/style, so inserted text supports ș ț ă î â."""
+        family = family if family in FONT_FILES else "Arial"
+        index = (2 if italic else 0) + (1 if bold else 0)
+        key = (family, index)
+        if key not in _FONT_CACHE:
+            found = None
+            for files in FONT_FILES[family]:
+                for name in (files[index], files[0]):
+                    for folder in FONT_DIRS:
+                        path = os.path.join(folder, name)
+                        if os.path.isfile(path):
+                            found = path
+                            break
+                    if found:
+                        break
+                if found:
+                    break
+            _FONT_CACHE[key] = found
+        return _FONT_CACHE[key]
+
+
+    def font_args(family, bold=False, italic=False):
+        path = font_file(family, bold, italic)
+        if path:
+            name = f"F95{family.replace(' ', '')[:5]}{int(bold)}{int(italic)}"
+            return {"fontname": name, "fontfile": path}
+        base = {"Arial": "helv", "Times New Roman": "tiro", "Courier New": "cour"}[family if family in FONT_FILES
+                                                                                  else "Arial"]
+        return {"fontname": base}
+
+
+    def text_width(text, family, bold, italic, size):
+        path = font_file(family, bold, italic)
+        try:
+            font = fitz.Font(fontfile=path) if path else fitz.Font("helv")
+            return font.text_length(text, fontsize=size)
+        except Exception:
+            return len(text) * size * 0.5
+
+
+    def guess_style(span):
+        name = span.get("font", "").lower()
+        flags = span.get("flags", 0)
+        if any(k in name for k in ("times", "serif", "roman", "georgia", "garamond", "cambria")) and "sans" not in name:
+            family = "Times New Roman"
+        elif any(k in name for k in ("courier", "mono", "consol")):
+            family = "Courier New"
+        else:
+            family = "Arial"
+        bold = bool(flags & 16) or "bold" in name or "black" in name or "heavy" in name
+        italic = bool(flags & 2) or "italic" in name or "oblique" in name
+        return family, bold, italic
+
+
+    def int_rgb(value):
+        return ((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255
+
+
+    def hex_to_rgb(color):
+        color = color.lstrip("#")
+        return tuple(int(color[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+    def rgb_to_hex(rgb):
+        return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in rgb)
+
+
+    def parse_ranges(text, count):
+        """'1-3, 5, 8-' -> zero-based page numbers."""
+        pages = []
+        for part in text.replace(";", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                start, end = part.split("-", 1)
+                start = int(start) if start.strip() else 1
+                end = int(end) if end.strip() else count
+                pages.extend(range(start - 1, end))
             else:
-                self.tool_label.config(text="Ready")
-                
-        def on_mousewheel(self, event):
-            if event.num == 5 or event.delta < 0:
-                self.canvas.yview_scroll(1, "units")
-            elif event.num == 4 or event.delta > 0:
-                self.canvas.yview_scroll(-1, "units")
-        
-        def on_thumbnail_mousewheel(self, event):
-            if event.num == 5 or event.delta < 0:
-                self.thumbnail_canvas.yview_scroll(1, "units")
-            elif event.num == 4 or event.delta > 0:
-                self.thumbnail_canvas.yview_scroll(-1, "units")
-                
-        def on_canvas_click(self, event):
-            if not self.pdf_document:
-                return
-                
-            # Convert canvas coordinates to PDF coordinates
-            canvas_x = self.canvas.canvasx(event.x)
-            canvas_y = self.canvas.canvasy(event.y)
-            
-            if self.tool_mode == 'text':
-                text = simpledialog.askstring("Add Text", "Enter text:")
-                if text:
-                    page = self.pdf_document[self.current_page]
-                    pdf_x = canvas_x / self.zoom_level
-                    pdf_y = canvas_y / self.zoom_level
-                    page.insert_text((pdf_x, pdf_y), text, fontsize=self.font_size, 
-                                   color=self.current_color)
-                    self.display_page()
-                    
-            elif self.tool_mode in ['highlight', 'rectangle', 'circle']:
-                self.draw_start = (canvas_x, canvas_y)
-                self.drawing = True
-                
-            elif self.tool_mode == 'draw':
-                self.drawing = True
-                self.draw_points = [(canvas_x, canvas_y)]
-                
-        def on_canvas_drag(self, event):
-            if not self.drawing or not self.pdf_document:
-                return
-                
-            canvas_x = self.canvas.canvasx(event.x)
-            canvas_y = self.canvas.canvasy(event.y)
-            
-            if self.tool_mode == 'draw':
-                # Freehand drawing - add points and draw lines
-                if len(self.draw_points) > 0:
-                    last_point = self.draw_points[-1]
-                    color_hex = '#{:02x}{:02x}{:02x}'.format(
-                        int(self.current_color[0] * 255),
-                        int(self.current_color[1] * 255),
-                        int(self.current_color[2] * 255)
-                    )
-                    # Draw line from last point to current point
-                    self.canvas.create_line(
-                        last_point[0], last_point[1], canvas_x, canvas_y,
-                        fill=color_hex, width=3, capstyle=tk.ROUND, smooth=True
-                    )
-                    self.draw_points.append((canvas_x, canvas_y))
-                return
-            
-            # For other tools, remove previous preview shape
-            if not self.draw_start:
-                return
-                
-            if self.temp_shape:
-                self.canvas.delete(self.temp_shape)
-                self.temp_shape = None
-                
-            # Draw preview shape
-            x1, y1 = self.draw_start
-            
-            if self.tool_mode == 'rectangle':
-                color_hex = '#{:02x}{:02x}{:02x}'.format(
-                    int(self.current_color[0] * 255),
-                    int(self.current_color[1] * 255),
-                    int(self.current_color[2] * 255)
-                )
-                self.temp_shape = self.canvas.create_rectangle(
-                    x1, y1, canvas_x, canvas_y, 
-                    outline=color_hex, width=2
-                )
-            elif self.tool_mode == 'circle':
-                color_hex = '#{:02x}{:02x}{:02x}'.format(
-                    int(self.current_color[0] * 255),
-                    int(self.current_color[1] * 255),
-                    int(self.current_color[2] * 255)
-                )
-                self.temp_shape = self.canvas.create_oval(
-                    x1, y1, canvas_x, canvas_y, 
-                    outline=color_hex, width=2
-                )
-            elif self.tool_mode == 'highlight':
-                color_hex = '#{:02x}{:02x}{:02x}'.format(
-                    int(self.current_color[0] * 255),
-                    int(self.current_color[1] * 255),
-                    int(self.current_color[2] * 255)
-                )
-                self.temp_shape = self.canvas.create_rectangle(
-                    x1, y1, canvas_x, canvas_y,
-                    fill=color_hex, stipple='gray50', outline=''
-                )
-                
-        def on_canvas_release(self, event):
-            if not self.drawing or not self.pdf_document:
-                return
-                
-            canvas_x = self.canvas.canvasx(event.x)
-            canvas_y = self.canvas.canvasy(event.y)
-            
-            # Remove preview shape
-            if self.temp_shape:
-                self.canvas.delete(self.temp_shape)
-                self.temp_shape = None
-            
-            page = self.pdf_document[self.current_page]
-            
-            if self.tool_mode == 'draw':
-                # Freehand drawing - draw all segments
-                if len(self.draw_points) > 1:
-                    for i in range(len(self.draw_points) - 1):
-                        x1, y1 = self.draw_points[i][0] / self.zoom_level, self.draw_points[i][1] / self.zoom_level
-                        x2, y2 = self.draw_points[i + 1][0] / self.zoom_level, self.draw_points[i + 1][1] / self.zoom_level
-                        page.draw_line((x1, y1), (x2, y2), color=self.current_color, width=2)
-                    self.display_page()
-                self.draw_points = []
-                
-            elif self.draw_start:
-                x1, y1 = self.draw_start[0] / self.zoom_level, self.draw_start[1] / self.zoom_level
-                x2, y2 = canvas_x / self.zoom_level, canvas_y / self.zoom_level
-                
-                if self.tool_mode == 'highlight':
-                    rect = fitz.Rect(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-                    highlight = page.add_highlight_annot(rect)
-                    highlight.set_colors({"stroke": self.current_color})
-                    highlight.update()
-                    self.display_page()
-                    
-                elif self.tool_mode == 'rectangle':
-                    rect = fitz.Rect(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-                    page.draw_rect(rect, color=self.current_color, width=2)
-                    self.display_page()
-                    
-                elif self.tool_mode == 'circle':
-                    # Calculate center and radius
-                    center_x = (x1 + x2) / 2
-                    center_y = (y1 + y2) / 2
-                    radius = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 / 2
-                    center = fitz.Point(center_x, center_y)
-                    page.draw_circle(center, radius, color=self.current_color, width=2)
-                    self.display_page()
-                
-                self.draw_start = None
-                
-            self.drawing = False
-            
-        def open_pdf(self):
-            file_path = filedialog.askopenfilename(
-                title="Open PDF File",
-                filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
-            )
-            
-            if file_path:
-                try:
-                    self.pdf_document = fitz.open(file_path)
-                    self.pdf_path = file_path
-                    self.current_page = 0
-                    self.zoom_level = 1.0
-                    self.display_page()
-                    self.generate_thumbnails()
-                    self.status_label.config(text=f"Opened: {file_path}")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to open PDF:\n{str(e)}")
-                    
-        def save_pdf(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            if self.pdf_path:
-                try:
-                    self.pdf_document.save(self.pdf_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
-                    self.status_label.config(text=f"Saved: {self.pdf_path}")
-                    messagebox.showinfo("Success", "PDF saved successfully!")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to save PDF:\n{str(e)}")
-            else:
-                self.save_pdf_as()
-                
-        def save_pdf_as(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            file_path = filedialog.asksaveasfilename(
-                title="Save PDF As",
-                defaultextension=".pdf",
-                filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
-            )
-            
-            if file_path:
-                try:
-                    self.pdf_document.save(file_path)
-                    self.pdf_path = file_path
-                    self.status_label.config(text=f"Saved: {file_path}")
-                    messagebox.showinfo("Success", "PDF saved successfully!")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to save PDF:\n{str(e)}")
-                    
-        def display_page(self):
-            if not self.pdf_document:
-                return
-                
-            page = self.pdf_document[self.current_page]
-            mat = fitz.Matrix(self.zoom_level, self.zoom_level)
-            pix = page.get_pixmap(matrix=mat)
-            
-            img_data = pix.tobytes("ppm")
-            img = Image.open(io.BytesIO(img_data))
-            
-            self.photo = ImageTk.PhotoImage(img)
-            
-            self.canvas.delete("all")
-            self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-            self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
-            
-            self.page_label.config(
-                text=f"Page {self.current_page + 1} of {len(self.pdf_document)}"
-            )
-            self.page_entry.delete(0, tk.END)
-            self.page_entry.insert(0, str(self.current_page + 1))
-            
-            self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
-            
-        def generate_thumbnails(self):
-            if not self.pdf_document:
-                return
-                
-            self.thumbnail_canvas.delete("all")
-            y_pos = 10
-            
-            for i in range(len(self.pdf_document)):
-                page = self.pdf_document[i]
-                mat = fitz.Matrix(0.2, 0.2)
-                pix = page.get_pixmap(matrix=mat)
-                img_data = pix.tobytes("ppm")
-                img = Image.open(io.BytesIO(img_data))
-                
-                thumb = ImageTk.PhotoImage(img)
-                # Store reference to prevent garbage collection
-                if not hasattr(self, 'thumbnails'):
-                    self.thumbnails = []
-                self.thumbnails.append(thumb)
-                
-                self.thumbnail_canvas.create_image(70, y_pos, image=thumb)
-                self.thumbnail_canvas.create_text(70, y_pos + 60, text=f"Page {i+1}")
-                
-                # Make clickable
-                self.thumbnail_canvas.tag_bind(
-                    self.thumbnail_canvas.create_rectangle(10, y_pos - 50, 130, y_pos + 70, outline=""),
-                    '<Button-1>',
-                    lambda e, page_num=i: self.jump_to_page(page_num)
-                )
-                
-                y_pos += 100
-                
-            self.thumbnail_canvas.config(scrollregion=self.thumbnail_canvas.bbox(tk.ALL))
-            
-        def jump_to_page(self, page_num):
-            if self.pdf_document and 0 <= page_num < len(self.pdf_document):
-                self.current_page = page_num
-                self.display_page()
-                
-        def goto_page(self):
+                pages.append(int(part) - 1)
+        pages = [p for p in pages if 0 <= p < count]
+        if not pages:
+            raise ValueError("No valid pages in the range")
+        return pages
+
+
+    # ---------------------------------------------------------------------------
+    # Pictures on the page: each picture we place gets its own marked content snippet
+    # ("q <matrix> cm /Img Do Q"), so it can be moved, resized, rotated or deleted on its
+    # own by editing that snippet. Pictures already in a PDF are converted on first edit.
+    # ---------------------------------------------------------------------------
+
+    IMAGE_MARK = b"% bp95-image\n"
+    _NUM = rb"(-?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+    CM_RE = re.compile(rb"\s+".join([_NUM] * 6) + rb"\s+cm")
+
+
+    def pdf_number(value):
+        text = f"{value:.4f}".rstrip("0").rstrip(".")
+        return "0" if text in ("", "-0") else text
+
+
+    def mark_new_image(doc, page_number):
+        """Tag the snippet that insert_image() just appended to the page."""
+        page = doc[page_number]
+        xref = page.get_contents()[-1]
+        data = doc.xref_stream(xref) or b""
+        if b"Do" in data and not data.startswith(IMAGE_MARK):
+            doc.update_stream(xref, IMAGE_MARK + data)
+
+
+    def image_objects(doc, page):
+        """Pictures on a page: own snippets (movable) first, then the PDF's own pictures."""
+        objects = []
+        for xref in page.get_contents():
+            data = doc.xref_stream(xref) or b""
+            if not data.startswith(IMAGE_MARK):
+                continue
+            found = CM_RE.search(data)
+            name = re.search(rb"/(\S+)\s+Do", data)
+            if not found:
+                continue
+            matrix = fitz.Matrix(*[float(v) for v in found.groups()])
+            rect = fitz.Rect(0, 0, 1, 1) * matrix * page.transformation_matrix
+            img_xref = 0
+            if name:
+                for item in page.get_images(full=True):
+                    if item[7] == name.group(1).decode("latin-1"):
+                        img_xref = item[0]
+            objects.append({"own": xref, "matrix": matrix, "rect": rect, "img_xref": img_xref})
+        try:
+            page._image_info = None              # PyMuPDF caches this per page object
+        except Exception:
+            pass
+        for info in page.get_image_info(xrefs=True):
+            rect = fitz.Rect(info["bbox"])
+            if rect.is_empty or rect.is_infinite:
+                continue
+            if any(max(abs(a - b) for a, b in zip(o["rect"], rect)) < 1.5 for o in objects if o["own"]):
+                continue
+            objects.append({"own": 0, "matrix": None, "rect": rect, "img_xref": info.get("xref", 0)})
+        return objects
+
+
+    def write_matrix(doc, xref, matrix):
+        data = doc.xref_stream(xref)
+        found = CM_RE.search(data)
+        text = " ".join(pdf_number(v) for v in tuple(matrix)).encode() + b" cm"
+        doc.update_stream(xref, data[:found.start()] + text + data[found.end():])
+
+
+    def foreign_image_uses(doc, page, img_xref, remove=False):
+        """Count (and optionally remove) the drawing commands of a PDF picture on this page only."""
+        names = set()
+        for item in page.get_images(full=True):
+            if item[0] == img_xref and img_xref:
+                if item[9]:
+                    for xobject in page.get_xobjects():
+                        if xobject[0] == item[9]:
+                            names.add(xobject[1])
+                else:
+                    names.add(item[7])
+        count = 0
+        for xref in page.get_contents():
+            data = doc.xref_stream(xref) or b""
+            new = data
+            for name in names:
+                new, n = re.subn(rb"/" + re.escape(name.encode("latin-1")) + rb"\s+Do", b"", new)
+                count += n
+            if remove and new != data:
+                doc.update_stream(xref, new)
+        return count
+
+
+    def image_png(doc, page, obj):
+        """PNG bytes of a picture, with its transparency."""
+        if obj.get("img_xref"):
             try:
-                page_num = int(self.page_entry.get()) - 1
-                self.jump_to_page(page_num)
-            except ValueError:
-                messagebox.showerror("Error", "Invalid page number!")
-                
-        def first_page(self):
-            if self.pdf_document:
-                self.current_page = 0
-                self.display_page()
-                
-        def next_page(self):
-            if self.pdf_document and self.current_page < len(self.pdf_document) - 1:
-                self.current_page += 1
-                self.display_page()
-                
-        def prev_page(self):
-            if self.pdf_document and self.current_page > 0:
-                self.current_page -= 1
-                self.display_page()
-                
-        def last_page(self):
-            if self.pdf_document:
-                self.current_page = len(self.pdf_document) - 1
-                self.display_page()
-                
-        def zoom_in(self):
-            if self.pdf_document:
-                self.zoom_level *= 1.25
-                self.display_page()
-                
-        def zoom_out(self):
-            if self.pdf_document:
-                self.zoom_level /= 1.25
-                self.display_page()
-                
-        def actual_size(self):
-            if self.pdf_document:
-                self.zoom_level = 1.0
-                self.display_page()
-                
-        def fit_width(self):
-            if self.pdf_document:
-                page = self.pdf_document[self.current_page]
-                canvas_width = self.canvas.winfo_width()
-                self.zoom_level = canvas_width / page.rect.width
-                self.display_page()
-                
-        def fit_page(self):
-            if self.pdf_document:
-                page = self.pdf_document[self.current_page]
-                canvas_width = self.canvas.winfo_width()
-                canvas_height = self.canvas.winfo_height()
-                zoom_w = canvas_width / page.rect.width
-                zoom_h = canvas_height / page.rect.height
-                self.zoom_level = min(zoom_w, zoom_h)
-                self.display_page()
-                
-        def choose_color(self):
-            color = colorchooser.askcolor(title="Choose Color")
-            if color[0]:
-                rgb = color[0]
-                self.current_color = (rgb[0]/255, rgb[1]/255, rgb[2]/255)
-                self.status_label.config(text=f"Color changed")
-                
-        def set_font_size(self):
-            size = simpledialog.askinteger("Font Size", "Enter font size:", 
-                                           initialvalue=self.font_size, minvalue=6, maxvalue=72)
-            if size:
-                self.font_size = size
-                
-        def add_rectangle(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-            
-            self.set_tool('rectangle')
-            self.status_label.config(text="Click and drag to draw rectangle")
-            
-        def add_circle(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-            
-            self.set_tool('circle')
-            self.status_label.config(text="Click and drag to draw circle")
-            
-        def insert_page(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            self.pdf_document.insert_page(self.current_page + 1)
-            self.current_page += 1
-            self.display_page()
-            self.generate_thumbnails()
-            self.status_label.config(text="Blank page inserted")
-            
-        def delete_page(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            if len(self.pdf_document) == 1:
-                messagebox.showwarning("Warning", "Cannot delete the only page!")
-                return
-                
-            result = messagebox.askyesno("Confirm", 
-                                        f"Delete page {self.current_page + 1}?")
-            if result:
-                self.pdf_document.delete_page(self.current_page)
-                if self.current_page >= len(self.pdf_document):
-                    self.current_page = len(self.pdf_document) - 1
-                self.display_page()
-                self.generate_thumbnails()
-                self.status_label.config(text="Page deleted")
-                
-        def rotate_page(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            page = self.pdf_document[self.current_page]
-            page.set_rotation(page.rotation + 90)
-            self.display_page()
-            self.generate_thumbnails()
-            self.status_label.config(text="Page rotated 90 degrees")
-            
-        def export_page_image(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            file_path = filedialog.asksaveasfilename(
-                title="Export Page as Image",
-                defaultextension=".png",
-                filetypes=[("PNG Files", "*.png"), ("JPEG Files", "*.jpg"), ("All Files", "*.*")]
-            )
-            
-            if file_path:
+                pix = fitz.Pixmap(doc, obj["img_xref"])
+                if pix.colorspace and pix.colorspace.n > 3:
+                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                smask = doc.extract_image(obj["img_xref"]).get("smask")
+                if smask and not pix.alpha:
+                    pix = fitz.Pixmap(pix, fitz.Pixmap(doc, smask))
+                return pix.tobytes("png")
+            except Exception:
+                pass
+        return page.get_pixmap(clip=obj["rect"] * page.rotation_matrix, dpi=200, alpha=False).tobytes("png")
+
+
+    def fit_rect(rect, width, height):
+        """The largest rectangle with the picture's proportions, centred in `rect`."""
+        if width <= 0 or height <= 0 or rect.width <= 0 or rect.height <= 0:
+            return fitz.Rect(rect)
+        scale = min(rect.width / width, rect.height / height)
+        w, h = width * scale, height * scale
+        x0, y0 = rect.x0 + (rect.width - w) / 2, rect.y0 + (rect.height - h) / 2
+        return fitz.Rect(x0, y0, x0 + w, y0 + h)
+
+
+    def insert_picture(doc, page, pdf_rect, data, rotate):
+        """insert_image without PyMuPDF's image re-use and proportion maths: every placement gets
+        its own picture object, and the rectangle is already in the picture's proportions."""
+        doc.InsertedImages = {}
+        page.insert_image(pdf_rect, stream=data, keep_proportion=False, rotate=rotate)
+
+
+    def same_rect(a, b, tolerance=1.5):
+        return max(abs(x - y) for x, y in zip(a, b)) < tolerance
+
+
+    # ---------------------------------------------------------------------------
+    # Signature and stamp pictures
+    # ---------------------------------------------------------------------------
+
+    def stamp_image(text, color, with_date):
+        width, height = 900, 300 if with_date else 220
+        image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        rgb = tuple(int(c * 255) for c in hex_to_rgb(color))
+        draw.rounded_rectangle((8, 8, width - 8, height - 8), radius=36, outline=rgb + (230,), width=14)
+        path = font_file("Arial", True, False)
+        font = ImageFont.truetype(path, 120) if path else ImageFont.load_default(size=120)
+        small = ImageFont.truetype(path, 56) if path else ImageFont.load_default(size=56)
+        while draw.textlength(text, font=font) > width - 80 and font.size > 40:
+            font = ImageFont.truetype(path, font.size - 8) if path else ImageFont.load_default(size=font.size - 8)
+        draw.text((width / 2, 120 if with_date else height / 2), text, fill=rgb + (230,), font=font, anchor="mm")
+        if with_date:
+            draw.text((width / 2, 235), datetime.now().strftime("%d.%m.%Y"), fill=rgb + (230,), font=small, anchor="mm")
+        buffer = io.BytesIO()
+        image.save(buffer, "PNG")
+        return buffer.getvalue()
+
+
+    def remove_images_from_docx(docx_path, output_path):
+        """Strip pictures from a converted .docx (body, tables, headers, footers)."""
+        from docx import Document
+        document = Document(docx_path)
+
+        def strip(paragraphs):
+            for paragraph in paragraphs:
+                for run in paragraph.runs:
+                    for tag in ("drawing", "pict"):
+                        for element in run._element.findall(f".//{{*}}{tag}"):
+                            element.getparent().remove(element)
+
+        strip(document.paragraphs)
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    strip(cell.paragraphs)
+        for section in document.sections:
+            strip(section.header.paragraphs)
+            strip(section.footer.paragraphs)
+        document.save(output_path)
+
+
+    # ---------------------------------------------------------------------------
+    # Windows 95 widgets and dialogs
+    # ---------------------------------------------------------------------------
+
+    def w95_button(parent, text, command, width=None):
+        button = tk.Button(parent, text=text, command=command, font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
+                           relief="raised", bd=2, padx=6, pady=1, highlightthickness=0, takefocus=0)
+        if width:
+            button.config(width=width)
+        return button
+
+
+    def w95_separator(parent):
+        return tk.Frame(parent, width=2, height=22, bd=1, relief="sunken", bg=FACE)
+
+
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                       activeforeground=WHITE, disabledforeground=SHADOW, selectcolor=BLACK)
+
+
+    class FormDialog(tk.Toplevel):
+        """Small Win95 form. fields: (key, label, kind, default, extra) with kind in
+        str, password, int, float, bool, choice, text, color."""
+
+        def __init__(self, master, title, fields, intro=None, ok_text="OK"):
+            super().__init__(master)
+            self.title(title)
+            self.configure(bg=FACE)
+            self.resizable(False, False)
+            self.transient(master)
+            self.result = None
+            self.vars, self.texts, self.kinds = {}, {}, {}
+            body = tk.Frame(self, bg=FACE)
+            body.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 4))
+            row = 0
+            if intro:
+                tk.Label(body, text=intro, font=FONT, bg=FACE, justify="left", wraplength=380).grid(
+                    row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
+                row += 1
+            first = None
+            for key, label, kind, default, extra in fields:
+                self.kinds[key] = kind
+                tk.Label(body, text=label, font=FONT, bg=FACE, anchor="w").grid(row=row, column=0, sticky="nw", pady=2,
+                                                                              padx=(0, 8))
+                if kind == "bool":
+                    var = tk.BooleanVar(value=bool(default))
+                    widget = tk.Checkbutton(body, variable=var, bg=FACE, activebackground=FACE, selectcolor=WHITE,
+                                            highlightthickness=0)
+                elif kind == "choice":
+                    var = tk.StringVar(value=str(default))
+                    widget = tk.OptionMenu(body, var, *extra)
+                    widget.config(font=FONT, bg=FACE, activebackground=FACE, relief="raised", bd=2,
+                                  highlightthickness=0, width=22, anchor="w")
+                    widget["menu"].config(font=FONT, bg=FACE, activebackground=NAVY, activeforeground=WHITE)
+                elif kind == "text":
+                    frame = tk.Frame(body, bd=2, relief="sunken", bg=WHITE)
+                    text = tk.Text(frame, width=44, height=extra or 5, font=("Arial", 10), bd=0, highlightthickness=0,
+                                   wrap="word", undo=True)
+                    text.insert("1.0", str(default))
+                    text.pack(fill="both", expand=True)
+                    self.texts[key] = text
+                    frame.grid(row=row, column=1, sticky="we", pady=2)
+                    first = first or text
+                    row += 1
+                    continue
+                elif kind == "color":
+                    var = tk.StringVar(value=str(default))
+                    widget = tk.Frame(body, bg=FACE)
+                    swatch = tk.Label(widget, bg=str(default), width=4, bd=1, relief="solid")
+                    swatch.pack(side="left")
+
+                    def choose(v=var, s=swatch):
+                        _rgb, value = colorchooser.askcolor(color=v.get(), parent=self)
+                        if value:
+                            v.set(value)
+                            s.config(bg=value)
+
+                    w95_button(widget, "Choose...", choose).pack(side="left", padx=4)
+                else:
+                    var = tk.StringVar(value=str(default))
+                    widget = tk.Entry(body, textvariable=var, font=FONT, relief="sunken", bd=2, highlightthickness=0,
+                                      width=46 if kind == "str" else 12, show="*" if kind == "password" else "")
+                    first = first or widget
+                self.vars[key] = var
+                widget.grid(row=row, column=1, sticky="w", pady=2)
+                row += 1
+            buttons = tk.Frame(self, bg=FACE)
+            buttons.pack(side="bottom", fill="x", padx=10, pady=(4, 10))
+            w95_button(buttons, "Cancel", self.destroy, width=9).pack(side="right")
+            w95_button(buttons, ok_text, self._ok, width=9).pack(side="right", padx=4)
+            self.bind("<Escape>", lambda _e: self.destroy())
+            if not self.texts:
+                self.bind("<Return>", lambda _e: self._ok())
+            self.update_idletasks()
+            self.geometry(f"+{master.winfo_rootx() + 220}+{master.winfo_rooty() + 140}")
+            if first is not None:
+                first.focus_set()
+            self.grab_set()
+            master.wait_window(self)
+
+        def _ok(self):
+            result = {}
+            for key, kind in self.kinds.items():
                 try:
-                    page = self.pdf_document[self.current_page]
-                    mat = fitz.Matrix(2, 2)
-                    pix = page.get_pixmap(matrix=mat)
-                    pix.save(file_path)
-                    self.status_label.config(text=f"Page exported: {file_path}")
-                    messagebox.showinfo("Success", "Page exported successfully!")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to export page:\n{str(e)}")
-                    
-        def merge_pdfs(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            file_paths = filedialog.askopenfilenames(
-                title="Select PDFs to Merge",
-                filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
-            )
-            
-            if file_paths:
-                try:
-                    for file_path in file_paths:
-                        src_pdf = fitz.open(file_path)
-                        self.pdf_document.insert_pdf(src_pdf)
-                        src_pdf.close()
-                    self.display_page()
-                    self.generate_thumbnails()
-                    self.status_label.config(text=f"Merged {len(file_paths)} PDF(s)")
-                    messagebox.showinfo("Success", "PDFs merged successfully!")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to merge PDFs:\n{str(e)}")
-                    
-        def extract_pages(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
-                return
-                
-            # Ask for page range
-            page_range = simpledialog.askstring("Extract Pages", 
-                                               f"Enter page range (e.g., 1-3, 5, 7-9):\n"
-                                               f"Total pages: {len(self.pdf_document)}")
-            if not page_range:
-                return
-                
-            try:
-                # Parse page range
-                pages_to_extract = []
-                parts = page_range.split(',')
-                for part in parts:
-                    part = part.strip()
-                    if '-' in part:
-                        start, end = part.split('-')
-                        pages_to_extract.extend(range(int(start)-1, int(end)))
+                    if kind == "text":
+                        result[key] = self.texts[key].get("1.0", "end-1c")
+                    elif kind == "int":
+                        result[key] = int(self.vars[key].get())
+                    elif kind == "float":
+                        result[key] = float(self.vars[key].get().replace(",", "."))
+                    elif kind == "bool":
+                        result[key] = bool(self.vars[key].get())
                     else:
-                        pages_to_extract.append(int(part)-1)
-                
-                # Create new PDF with extracted pages
-                file_path = filedialog.asksaveasfilename(
-                    title="Save Extracted Pages",
-                    defaultextension=".pdf",
-                    filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
-                )
-                
-                if file_path:
-                    new_pdf = fitz.open()
-                    for page_num in pages_to_extract:
-                        if 0 <= page_num < len(self.pdf_document):
-                            new_pdf.insert_pdf(self.pdf_document, from_page=page_num, to_page=page_num)
-                    new_pdf.save(file_path)
-                    new_pdf.close()
-                    self.status_label.config(text=f"Extracted pages saved: {file_path}")
-                    messagebox.showinfo("Success", "Pages extracted successfully!")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to extract pages:\n{str(e)}")
-                
-        def split_document(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
+                        result[key] = self.vars[key].get()
+                except ValueError:
+                    messagebox.showerror("Invalid value", f"Please check the value of '{key}'.", parent=self)
+                    return
+            self.result = result
+            self.destroy()
+
+
+    class SignaturePad(tk.Toplevel):
+        def __init__(self, master):
+            super().__init__(master)
+            self.title("Draw Your Signature")
+            self.configure(bg=FACE)
+            self.resizable(False, False)
+            self.transient(master)
+            self.result = None
+            self.strokes = []
+            tk.Label(self, text="Sign with the mouse (or a pen tablet). It is kept for this session.", font=FONT,
+                     bg=FACE).pack(side="top", anchor="w", padx=10, pady=(10, 4))
+            frame = tk.Frame(self, bd=2, relief="sunken", bg=WHITE)
+            frame.pack(side="top", padx=10)
+            self.canvas = tk.Canvas(frame, width=520, height=200, bg=WHITE, highlightthickness=0, cursor="pencil")
+            self.canvas.pack()
+            self.canvas.create_line(30, 160, 490, 160, fill=LIGHT, dash=(4, 3))
+            self.canvas.bind("<ButtonPress-1>", lambda e: self.strokes.append([(e.x, e.y)]))
+            self.canvas.bind("<B1-Motion>", self._draw)
+            self.var_color = tk.StringVar(value="#0030a0")
+            row = tk.Frame(self, bg=FACE)
+            row.pack(side="top", fill="x", padx=10, pady=4)
+            for label, color in (("Blue", "#0030a0"), ("Black", "#000000")):
+                tk.Radiobutton(row, text=label, variable=self.var_color, value=color, font=FONT, bg=FACE,
+                               activebackground=FACE, selectcolor=WHITE, highlightthickness=0).pack(side="left")
+            w95_button(row, "Clear", self.clear).pack(side="right")
+            w95_button(row, "Load Picture...", self.load).pack(side="right", padx=4)
+            buttons = tk.Frame(self, bg=FACE)
+            buttons.pack(side="bottom", fill="x", padx=10, pady=(4, 10))
+            w95_button(buttons, "Cancel", self.destroy, width=9).pack(side="right")
+            w95_button(buttons, "Use", self._ok, width=9).pack(side="right", padx=4)
+            self.update_idletasks()
+            self.geometry(f"+{master.winfo_rootx() + 220}+{master.winfo_rooty() + 140}")
+            self.grab_set()
+            master.wait_window(self)
+
+        def _draw(self, event):
+            if not self.strokes:
+                self.strokes.append([])
+            stroke = self.strokes[-1]
+            if stroke:
+                self.canvas.create_line(*stroke[-1], event.x, event.y, fill=self.var_color.get(), width=3,
+                                        capstyle="round", smooth=True)
+            stroke.append((event.x, event.y))
+
+        def clear(self):
+            self.strokes = []
+            self.canvas.delete("all")
+            self.canvas.create_line(30, 160, 490, 160, fill=LIGHT, dash=(4, 3))
+
+        def load(self):
+            path = filedialog.askopenfilename(parent=self, filetypes=[("Pictures", "*.png *.jpg *.jpeg *.bmp")])
+            if path:
+                with Image.open(path) as picture:
+                    picture = picture.convert("RGBA")
+                    buffer = io.BytesIO()
+                    picture.save(buffer, "PNG")
+                self.result = buffer.getvalue()
+                self.destroy()
+
+        def _ok(self):
+            points = [p for stroke in self.strokes for p in stroke]
+            if len(points) < 2:
+                messagebox.showinfo("Signature", "Draw your signature first.", parent=self)
                 return
-                
-            # Ask for split point
-            split_page = simpledialog.askinteger("Split Document", 
-                                                f"Split after page number:\n"
-                                                f"Total pages: {len(self.pdf_document)}",
-                                                minvalue=1, maxvalue=len(self.pdf_document)-1)
-            if not split_page:
+            scale = 3
+            image = Image.new("RGBA", (520 * scale, 200 * scale), (0, 0, 0, 0))
+            draw = ImageDraw.Draw(image)
+            rgb = tuple(int(c * 255) for c in hex_to_rgb(self.var_color.get())) + (255,)
+            for stroke in self.strokes:
+                if len(stroke) > 1:
+                    draw.line([(x * scale, y * scale) for x, y in stroke], fill=rgb, width=3 * scale, joint="curve")
+            image = image.crop(image.getbbox())
+            buffer = io.BytesIO()
+            image.save(buffer, "PNG")
+            self.result = buffer.getvalue()
+            self.destroy()
+
+
+    def draw_tool_icon(canvas, tool):
+        c = canvas
+        if tool == "select":
+            c.create_polygon(6, 3, 6, 17, 9, 14, 12, 20, 14, 19, 11, 13, 15, 13, fill=WHITE, outline=BLACK)
+        elif tool == "hand":
+            c.create_oval(5, 8, 17, 19, fill="#ffe0c0", outline=BLACK)
+            for x in (6, 9, 12, 15):
+                c.create_rectangle(x, 3, x + 2, 11, fill="#ffe0c0", outline=BLACK)
+        elif tool == "edit":
+            c.create_text(8, 11, text="T", font=("Times New Roman", 12, "bold"))
+            c.create_line(13, 18, 19, 5, fill="#e00000", width=2)
+        elif tool == "text":
+            c.create_rectangle(2, 4, 19, 18, outline=SHADOW, dash=(2, 2))
+            c.create_text(11, 11, text="T", font=("Times New Roman", 11, "bold"))
+        elif tool == "highlight":
+            c.create_rectangle(2, 7, 19, 15, fill="#ffff00", outline="")
+            c.create_text(11, 11, text="ab", font=("Arial", 7))
+        elif tool == "underline":
+            c.create_text(11, 9, text="ab", font=("Arial", 8))
+            c.create_line(3, 16, 19, 16, fill="#0060e0", width=2)
+        elif tool == "strike":
+            c.create_text(11, 11, text="ab", font=("Arial", 8))
+            c.create_line(3, 11, 19, 11, fill="#e00000", width=2)
+        elif tool == "note":
+            c.create_polygon(3, 3, 18, 3, 18, 13, 13, 18, 3, 18, fill="#ffff80", outline=BLACK)
+        elif tool == "rect":
+            c.create_rectangle(3, 5, 18, 17, outline="#e00000", width=2)
+        elif tool == "ellipse":
+            c.create_oval(2, 5, 19, 17, outline="#e00000", width=2)
+        elif tool == "line":
+            c.create_line(3, 18, 18, 4, fill=BLACK, width=2)
+        elif tool == "arrow":
+            c.create_line(3, 18, 18, 4, fill=BLACK, width=2, arrow="last", arrowshape=(7, 8, 3))
+        elif tool == "pen":
+            c.create_line(3, 15, 7, 8, 11, 14, 15, 6, 19, 12, fill="#0060e0", width=2, smooth=True)
+        elif tool == "image":
+            c.create_rectangle(3, 4, 18, 18, fill="#c8e6ff", outline=BLACK)
+            c.create_polygon(4, 17, 9, 10, 13, 15, 15, 12, 17, 17, fill="#008000")
+        elif tool == "signature":
+            c.create_line(2, 14, 6, 6, 9, 15, 12, 7, 15, 13, 19, 9, fill="#0030a0", width=2, smooth=True)
+            c.create_line(2, 18, 19, 18, fill=SHADOW)
+        elif tool == "stamp":
+            c.create_rectangle(2, 6, 19, 16, outline="#e00000", width=2)
+            c.create_text(11, 11, text="OK", font=("Arial", 7, "bold"), fill="#e00000")
+        elif tool == "whiteout":
+            c.create_rectangle(3, 5, 18, 17, fill=WHITE, outline=SHADOW)
+        elif tool == "redact":
+            c.create_rectangle(3, 7, 18, 15, fill=BLACK, outline=BLACK)
+        elif tool == "crop":
+            c.create_line(6, 2, 6, 15, 19, 15, fill=BLACK, width=2)
+            c.create_line(2, 6, 15, 6, 15, 19, fill=BLACK, width=2)
+
+
+    # ---------------------------------------------------------------------------
+    # Main window
+    # ---------------------------------------------------------------------------
+
+    class PDFEditor(tk.Tk):
+
+        def __init__(self, open_path=None):
+            super().__init__()
+            self.title(APP_NAME)
+            x = max(0, (self.winfo_screenwidth() - 1280) // 2)
+            y = max(0, (self.winfo_screenheight() - 860) // 2)
+            self.geometry(f"1280x860+{x}+{y}")
+            self.minsize(1000, 640)
+            self.configure(bg=FACE)
+            if CUSTOM_TITLE_BAR:
+                self.configure(bd=2, relief="raised")
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
+
+            self.doc = None
+            self.path = None
+            self.dirty = False
+            self.protect = None              # {"user": ..., "owner": ...} applied on save
+            self.page_index = 0
+            self.zoom = 1.0
+            self.fit_mode = "width"
+            self.tool = "select"
+            self.color = (0.88, 0, 0)
+            self.var_width = tk.DoubleVar(value=2.0)
+            self.var_family = tk.StringVar(value="Arial")
+            self.var_size = tk.DoubleVar(value=12.0)
+            self.undo_stack, self.redo_stack = [], []
+            self.drag = None
+            self.selected_xref = None        # selected annotation
+            self.selected_image = None       # selected picture: its rectangle on screen (page view)
+            self.signature = None
+            self.stamp = None
+            self.image_bytes = None
+            self.photo = None
+            self.thumb_photos = {}
+            self.thumb_job = None
+            self.thumb_generation = 0
+            self.search = {"query": "", "hits": [], "index": -1}
+            self.redact_warned = False
+
+            self._build_titlebar()
+            self._build_menu()
+            self._build_toolbar()
+            self._build_statusbar()
+            self._build_search_bar()
+            self._build_body()
+            self._bind_keys()
+            self.set_tool("select")
+            self.set_color(rgb_to_hex(self.color))
+            self.render()
+            self._update_title()
+            self.protocol("WM_DELETE_WINDOW", self.on_close)
+            if CUSTOM_TITLE_BAR:
+                self.after(10, self._enable_custom_frame)
+            if open_path:
+                self.after(60, lambda: self.open_file(open_path))
+
+        # ----- Windows 95 frame ---------------------------------------------------
+
+        def _build_titlebar(self):
+            self.caption = tk.Frame(self, bg=NAVY, height=20)
+            self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self.caption.pack_propagate(False)
+            icon = tk.Canvas(self.caption, width=16, height=16, bg=NAVY, bd=0, highlightthickness=0)
+            icon.create_polygon(2, 1, 10, 1, 14, 5, 14, 15, 2, 15, fill=WHITE, outline=BLACK)
+            icon.create_rectangle(1, 8, 12, 13, fill="#c00000", outline="")
+            icon.create_text(7, 11, text="PDF", font=("Arial", 4, "bold"), fill=WHITE)
+            icon.pack(side="left", padx=(2, 3))
+            self.caption_icon = icon
+            self.caption_title = tk.Label(self.caption, text=APP_NAME, font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
+            self.caption_title.pack(side="left", fill="x", expand=True)
+            marlett = "Marlett" in tkfont.families(self)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+
+            def caption_button(key, command):
+                return tk.Button(self.caption, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", self.on_close).pack(side="right", padx=(2, 2))
+            self.btn_max = caption_button("max", self.toggle_maximize)
+            self.btn_max.pack(side="right")
+            caption_button("min", self.minimize).pack(side="right")
+            for widget in (self.caption, self.caption_title, icon):
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+            self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
+            self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
+            self.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=NAVY if active else SHADOW)
+            self.caption_title.config(fg=WHITE if active else FACE)
+
+        def _enable_custom_frame(self):
+            self.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            if not IS_WINDOWS:
                 return
-                
             try:
-                folder = filedialog.askdirectory(title="Select Folder to Save Split PDFs")
-                if folder:
-                    # Create first part
-                    pdf1 = fitz.open()
-                    pdf1.insert_pdf(self.pdf_document, from_page=0, to_page=split_page-1)
-                    pdf1.save(f"{folder}/part1.pdf")
-                    pdf1.close()
-                    
-                    # Create second part
-                    pdf2 = fitz.open()
-                    pdf2.insert_pdf(self.pdf_document, from_page=split_page, to_page=len(self.pdf_document)-1)
-                    pdf2.save(f"{folder}/part2.pdf")
-                    pdf2.close()
-                    
-                    self.status_label.config(text=f"Document split into 2 files")
-                    messagebox.showinfo("Success", "Document split successfully!")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to split document:\n{str(e)}")
-                
-        def show_properties(self):
-            if not self.pdf_document:
-                messagebox.showwarning("Warning", "No PDF document loaded!")
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
                 return
-                
-            metadata = self.pdf_document.metadata
-            info = f"Document Properties\n\n"
-            info += f"Title: {metadata.get('title', 'N/A')}\n"
-            info += f"Author: {metadata.get('author', 'N/A')}\n"
-            info += f"Subject: {metadata.get('subject', 'N/A')}\n"
-            info += f"Keywords: {metadata.get('keywords', 'N/A')}\n"
-            info += f"Creator: {metadata.get('creator', 'N/A')}\n"
-            info += f"Producer: {metadata.get('producer', 'N/A')}\n"
-            info += f"Pages: {len(self.pdf_document)}\n"
-            info += f"Format: {metadata.get('format', 'N/A')}\n"
-            
-            messagebox.showinfo("Document Properties", info)
-            
-        def show_about(self):
-            messagebox.showinfo("About", 
-                              "PDF Editor\n\n"
-                              "Version 1.0\n\n"
-                              "A simple PDF editing application\n\n"
-                              "Features:\n"
-                              "- Add text and annotations\n"
-                              "- Highlight and draw\n"
-                              "- Page management\n"
-                              "- Merge and split PDFs\n"
-                              "- Export pages as images")
+            self.withdraw()
+            self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+        def _on_map(self, event):
+            if event.widget is self and self.minimizing and self.state() == "normal":
+                self.minimizing = False
+                self.overrideredirect(True)
+                self.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if CUSTOM_TITLE_BAR:
+                self.minimizing = True
+                self.overrideredirect(False)
+            self.iconify()
+
+        def toggle_maximize(self):
+            if self.maximized:
+                self.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = self.geometry()
+                x, y, width, height = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                if IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                self.geometry(f"{width}x{height}+{x}+{y}")
+            self.maximized = not self.maximized
+            self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+            self.after(60, self.render)
+
+        def _caption_press(self, event):
+            self._drag_offset = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _caption_drag(self, event):
+            if CUSTOM_TITLE_BAR and not self.maximized:
+                self.geometry(f"+{event.x_root - self._drag_offset[0]}+{event.y_root - self._drag_offset[1]}")
+
+        def _grip_press(self, event):
+            self._resize_origin = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize_origin
+                self.geometry(f"{max(1000, width + event.x_root - x0)}x{max(640, height + event.y_root - y0)}")
+
+        # ----- layout ------------------------------------------------------------------
+
+        def _build_menu(self):
+            bar = tk.Frame(self, bg=FACE)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, activebackground=NAVY, activeforeground=WHITE,
+                                       relief="flat", bd=0, padx=6, pady=2, underline=0, takefocus=0,
+                                       highlightthickness=0)
+                button.pack(side="left")
+                menu = w95_menu(button)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Open...", accelerator="Ctrl+O", command=self.open_dialog)
+            m.add_command(label="Save", accelerator="Ctrl+S", command=self.save)
+            m.add_command(label="Save As...", accelerator="Ctrl+Shift+S", command=self.save_as)
+            m.add_command(label="Save Optimized (smaller file)...", command=self.save_optimized)
+            m.add_separator()
+            export = w95_menu(m)
+            export.add_command(label="Word (.docx) with Images...", command=lambda: self.export_word(True))
+            export.add_command(label="Word (.docx) without Images...", command=lambda: self.export_word(False))
+            export.add_separator()
+            export.add_command(label="Current Page as PNG...", command=self.export_page_png)
+            export.add_command(label="All Pages as PNG...", command=self.export_all_png)
+            export.add_command(label="Text (.txt)...", command=self.export_text)
+            export.add_command(label="Embedded Images...", command=self.extract_images)
+            m.add_cascade(label="Export", menu=export)
+            if IS_WINDOWS:
+                m.add_command(label="Print...", accelerator="Ctrl+P", command=self.print_document)
+            m.add_separator()
+            m.add_command(label="Close Document", command=self.close_document)
+            m.add_command(label="Exit", command=self.on_close)
+
+            m = menubutton("Edit")
+            m.add_command(label="Undo", accelerator="Ctrl+Z", command=self.undo)
+            m.add_command(label="Redo", accelerator="Ctrl+Y", command=self.redo)
+            m.add_separator()
+            m.add_command(label="Find...", accelerator="Ctrl+F", command=self.show_search)
+            m.add_command(label="Find Next", accelerator="F3", command=lambda: self.find_step(1))
+            m.add_command(label="Find & Replace Text...", accelerator="Ctrl+H", command=self.find_replace)
+            m.add_separator()
+            m.add_command(label="Object Properties...", accelerator="Alt+Enter", command=self.selection_properties)
+            m.add_command(label="Duplicate Object", accelerator="Ctrl+D", command=self.duplicate_selection)
+            m.add_command(label="Delete Object", accelerator="Del", command=self.delete_selection)
+            m.add_command(label="Remove All Annotations on Page", command=self.clear_annotations)
+            m.add_command(label="Copy Page Text", command=self.copy_page_text)
+
+            m = menubutton("View")
+            m.add_command(label="Zoom In", accelerator="Ctrl++", command=lambda: self.zoom_step(1))
+            m.add_command(label="Zoom Out", accelerator="Ctrl+-", command=lambda: self.zoom_step(-1))
+            m.add_command(label="Actual Size", accelerator="Ctrl+0", command=lambda: self.set_zoom(1.0))
+            m.add_command(label="Fit Width", command=lambda: self.set_fit("width"))
+            m.add_command(label="Fit Page", command=lambda: self.set_fit("page"))
+            m.add_separator()
+            m.add_command(label="First Page", accelerator="Home", command=lambda: self.go(0))
+            m.add_command(label="Last Page", accelerator="End", command=lambda: self.go(10 ** 6))
+
+            m = menubutton("Page")
+            m.add_command(label="Insert Blank Page After", command=self.insert_blank)
+            m.add_command(label="Insert Pages from PDF...", command=self.insert_from_pdf)
+            m.add_command(label="Duplicate Page", command=self.duplicate_page)
+            m.add_command(label="Delete Page(s)...", command=self.delete_pages)
+            m.add_separator()
+            m.add_command(label="Rotate Right", accelerator="Ctrl+R", command=lambda: self.rotate(90))
+            m.add_command(label="Rotate Left", command=lambda: self.rotate(-90))
+            m.add_command(label="Move Page Up", command=lambda: self.move_page(-1))
+            m.add_command(label="Move Page Down", command=lambda: self.move_page(1))
+            m.add_command(label="Reset Crop", command=self.reset_crop)
+            m.add_separator()
+            m.add_command(label="Extract Pages...", command=self.extract_pages)
+            m.add_command(label="Split Document...", command=self.split_document)
+
+            m = menubutton("Document")
+            m.add_command(label="Merge PDFs (append)...", command=self.merge_pdfs)
+            m.add_separator()
+            m.add_command(label="Add Page Numbers...", command=self.page_numbers)
+            m.add_command(label="Header / Footer Text...", command=self.header_footer)
+            m.add_command(label="Watermark...", command=self.watermark)
+            m.add_separator()
+            m.add_command(label="Protect with Password...", command=self.protect_document)
+            m.add_command(label="Remove Password", command=self.remove_password)
+            m.add_command(label="Properties...", command=self.properties)
+
+            m = menubutton("Help")
+            m.add_command(label="How to Use", accelerator="F1", command=self.show_help)
+            m.add_command(label="About PDF Editor", command=lambda: messagebox.showinfo(
+                "About", f"{APP_NAME} {APP_VERSION}\n\nEdits PDF files directly: text, pages, annotations,\n"
+                         "signatures, stamps, redaction and security.", parent=self))
+
+        def _build_toolbar(self):
+            bar = tk.Frame(self, bg=FACE, bd=1, relief="raised")
+            bar.pack(side="top", fill="x")
+            inner = tk.Frame(bar, bg=FACE)
+            inner.pack(side="left", padx=3, pady=3)
+            for entry in (("Open", self.open_dialog), ("Save", self.save), None, ("Undo", self.undo), ("Redo", self.redo),
+                          None, ("|<", lambda: self.go(0)), ("<", lambda: self.go(self.page_index - 1))):
+                if entry is None:
+                    w95_separator(inner).pack(side="left", padx=4)
+                else:
+                    w95_button(inner, entry[0], entry[1]).pack(side="left", padx=1)
+            self.var_page = tk.StringVar(value="")
+            entry = tk.Entry(inner, textvariable=self.var_page, width=5, justify="center", font=FONT, relief="sunken", bd=2,
+                             highlightthickness=0)
+            entry.pack(side="left", padx=2)
+            entry.bind("<Return>", lambda _e: self._goto_entry())
+            self.page_total = tk.Label(inner, text="/ 0", font=FONT, bg=FACE)
+            self.page_total.pack(side="left")
+            for entry in ((">", lambda: self.go(self.page_index + 1)), (">|", lambda: self.go(10 ** 6)), None,
+                          ("-", lambda: self.zoom_step(-1))):
+                if entry is None:
+                    w95_separator(inner).pack(side="left", padx=4)
+                else:
+                    w95_button(inner, entry[0], entry[1]).pack(side="left", padx=1)
+            self.zoom_label = tk.Label(inner, text="100%", font=FONT, bg=WHITE, width=6, bd=1, relief="sunken")
+            self.zoom_label.pack(side="left", padx=2)
+            for entry in (("+", lambda: self.zoom_step(1)), ("Width", lambda: self.set_fit("width")),
+                          ("Page", lambda: self.set_fit("page")), None, ("Rotate", lambda: self.rotate(90)),
+                          ("Find", self.show_search), ("Replace", self.find_replace), None,
+                          ("Word", lambda: self.export_word(True))):
+                if entry is None:
+                    w95_separator(inner).pack(side="left", padx=4)
+                else:
+                    w95_button(inner, entry[0], entry[1]).pack(side="left", padx=1)
+
+        def _build_statusbar(self):
+            bar = tk.Frame(self, bg=FACE)
+            bar.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+            grip = tk.Canvas(bar, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=WHITE)
+                grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+
+            def panel(width=None, expand=False, side="right"):
+                label = tk.Label(bar, text="", font=FONT, bg=FACE, anchor="w", bd=1, relief="sunken", padx=4)
+                if width:
+                    label.config(width=width)
+                label.pack(side=side, fill="x", expand=expand, padx=1)
+                return label
+
+            self.status_pos = panel(16)
+            self.status_size = panel(16)
+            self.status_page = panel(14)
+            self.status_main = panel(expand=True, side="left")
+
+        def _build_search_bar(self):
+            self.search_bar = tk.Frame(self, bg=FACE, bd=1, relief="raised")
+            tk.Label(self.search_bar, text="Find:", font=FONT, bg=FACE).pack(side="left", padx=(6, 2), pady=3)
+            self.var_query = tk.StringVar()
+            self.search_entry = tk.Entry(self.search_bar, textvariable=self.var_query, width=34, font=FONT,
+                                         relief="sunken", bd=2, highlightthickness=0)
+            self.search_entry.pack(side="left", padx=2)
+            self.search_entry.bind("<Return>", lambda _e: self.find_step(1))
+            self.search_entry.bind("<Shift-Return>", lambda _e: self.find_step(-1))
+            w95_button(self.search_bar, "Next", lambda: self.find_step(1)).pack(side="left", padx=1)
+            w95_button(self.search_bar, "Previous", lambda: self.find_step(-1)).pack(side="left", padx=1)
+            self.search_label = tk.Label(self.search_bar, text="", font=FONT, bg=FACE, fg=NAVY)
+            self.search_label.pack(side="left", padx=8)
+            w95_button(self.search_bar, "Close", self.hide_search).pack(side="right", padx=4)
+
+        def _build_body(self):
+            body = tk.Frame(self, bg=FACE)
+            body.pack(side="top", fill="both", expand=True, padx=4, pady=4)
+            self.body = body
+
+            # page thumbnails
+            left = tk.LabelFrame(body, text=" Pages ", font=FONT, bg=FACE, bd=2, relief="groove")
+            left.pack(side="left", fill="y", padx=(0, 4))
+            holder = tk.Frame(left, bd=2, relief="sunken", bg=SHADOW)
+            holder.pack(fill="both", expand=True, padx=3, pady=3)
+            self.thumbs = tk.Canvas(holder, width=THUMB_W + 34, bg=SHADOW, highlightthickness=0, bd=0)
+            scroll = tk.Scrollbar(holder, orient="vertical", command=self.thumbs.yview)
+            self.thumbs.config(yscrollcommand=scroll.set)
+            scroll.pack(side="right", fill="y")
+            self.thumbs.pack(side="left", fill="y", expand=True)
+            self.thumbs.bind("<Button-1>", self._thumb_click)
+            self.thumbs.bind("<Button-3>", self._thumb_menu)
+            self.thumbs.bind("<MouseWheel>", lambda e: self.thumbs.yview_scroll(-1 * (e.delta // 120), "units"))
+            self.thumbs.bind("<Button-4>", lambda _e: self.thumbs.yview_scroll(-3, "units"))
+            self.thumbs.bind("<Button-5>", lambda _e: self.thumbs.yview_scroll(3, "units"))
+            self.thumb_menu = w95_menu(self)
+            for label, command in (("Rotate Right", lambda: self.rotate(90)), ("Rotate Left", lambda: self.rotate(-90)),
+                                   ("Move Up", lambda: self.move_page(-1)), ("Move Down", lambda: self.move_page(1)),
+                                   ("Duplicate", self.duplicate_page), ("Insert Blank After", self.insert_blank),
+                                   ("Delete", lambda: self.delete_pages(current=True)),
+                                   ("Extract...", self.extract_pages)):
+                self.thumb_menu.add_command(label=label, command=command)
+
+            # tools
+            tools = tk.LabelFrame(body, text=" Tools ", font=FONT, bg=FACE, bd=2, relief="groove")
+            tools.pack(side="left", fill="y", padx=(0, 4))
+            grid = tk.Frame(tools, bg=FACE)
+            grid.pack(side="top", padx=2, pady=2)
+            self.tool_buttons = {}
+            for index, (name, label, key) in enumerate(TOOLS):
+                cell = tk.Frame(grid, bg=FACE, bd=2, relief="flat")
+                cell.grid(row=index, column=0, sticky="we")
+                icon = tk.Canvas(cell, width=21, height=21, bg=FACE, bd=0, highlightthickness=0)
+                draw_tool_icon(icon, name)
+                icon.pack(side="left", padx=(2, 3))
+                text = tk.Label(cell, text=label, font=FONT, bg=FACE, anchor="w", width=10)
+                text.pack(side="left")
+                for widget in (cell, icon, text):
+                    widget.bind("<Button-1>", lambda _e, n=name: self.set_tool(n))
+                self.tool_buttons[name] = (cell, icon, text)
+            palette = tk.Frame(tools, bg=FACE)
+            palette.pack(side="top", padx=4, pady=(6, 2))
+            self.swatches = []
+            for index, color in enumerate(COLORS):
+                swatch = tk.Frame(palette, bg=color, width=17, height=17, bd=2, relief="sunken", cursor="hand2")
+                swatch.grid(row=index // 4, column=index % 4, padx=1, pady=1)
+                swatch.bind("<Button-1>", lambda _e, c=color: self.set_color(c))
+                self.swatches.append((color, swatch))
+            options = tk.Frame(tools, bg=FACE)
+            options.pack(side="top", fill="x", padx=4)
+            tk.Label(options, text="Line width", font=FONT, bg=FACE).grid(row=0, column=0, sticky="w")
+            tk.Spinbox(options, from_=0.5, to=12, increment=0.5, textvariable=self.var_width, width=5, font=FONT,
+                       bg=WHITE, relief="sunken", bd=2, highlightthickness=0, buttonbackground=FACE).grid(row=0, column=1)
+            tk.Label(options, text="Text size", font=FONT, bg=FACE).grid(row=1, column=0, sticky="w")
+            tk.Spinbox(options, from_=4, to=96, increment=1, textvariable=self.var_size, width=5, font=FONT,
+                       bg=WHITE, relief="sunken", bd=2, highlightthickness=0, buttonbackground=FACE).grid(row=1, column=1)
+
+            # page view
+            holder = tk.Frame(body, bd=2, relief="sunken", bg=SHADOW)
+            holder.pack(side="left", fill="both", expand=True)
+            self.canvas = tk.Canvas(holder, bg=SHADOW, highlightthickness=0, bd=0)
+            vbar = tk.Scrollbar(holder, orient="vertical", command=self.canvas.yview)
+            hbar = tk.Scrollbar(holder, orient="horizontal", command=self.canvas.xview)
+            self.canvas.config(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+            self.canvas.grid(row=0, column=0, sticky="nsew")
+            vbar.grid(row=0, column=1, sticky="ns")
+            hbar.grid(row=1, column=0, sticky="ew")
+            holder.rowconfigure(0, weight=1)
+            holder.columnconfigure(0, weight=1)
+            self.canvas.bind("<Configure>", lambda _e: self._on_resize())
+            self.canvas.bind("<ButtonPress-1>", self._press)
+            self.canvas.bind("<B1-Motion>", self._motion)
+            self.canvas.bind("<ButtonRelease-1>", self._release)
+            self.canvas.bind("<Double-Button-1>", self._double_click)
+            self.canvas.bind("<Motion>", self._hover)
+            self.canvas.bind("<MouseWheel>", self._wheel)
+            self.canvas.bind("<Button-4>", lambda e: self._wheel(e, -120))
+            self.canvas.bind("<Button-5>", lambda e: self._wheel(e, 120))
+            self.canvas.bind("<Control-MouseWheel>", lambda e: (self.zoom_step(1 if e.delta > 0 else -1), "break")[1])
+            self.drop_hint = None
+
+        def _bind_keys(self):
+            keys = {"<Control-o>": self.open_dialog, "<Control-s>": self.save, "<Control-S>": self.save_as,
+                    "<Control-z>": self.undo, "<Control-y>": self.redo, "<Control-f>": self.show_search,
+                    "<F3>": lambda: self.find_step(1), "<Control-h>": self.find_replace, "<Delete>": self.delete_selection,
+                    "<Control-d>": self.duplicate_selection, "<Alt-Return>": self.selection_properties,
+                    "<Control-plus>": lambda: self.zoom_step(1), "<Control-equal>": lambda: self.zoom_step(1),
+                    "<Control-minus>": lambda: self.zoom_step(-1), "<Control-Key-0>": lambda: self.set_zoom(1.0),
+                    "<Prior>": lambda: self.go(self.page_index - 1), "<Next>": lambda: self.go(self.page_index + 1),
+                    "<Home>": lambda: self.go(0), "<End>": lambda: self.go(10 ** 6), "<Control-r>": lambda: self.rotate(90),
+                    "<F1>": self.show_help, "<Escape>": self._escape}
+            if IS_WINDOWS:
+                keys["<Control-p>"] = self.print_document
+            for _name, _label, letter in TOOLS:
+                keys[f"<Key-{letter.lower()}>"] = lambda n=_name: self.set_tool(n)
+            for key, action in keys.items():
+                self.bind(key, lambda e, a=action: None if self._typing(e) else (a(), "break")[1])
+            for key, (dx, dy) in {"<Left>": (-1, 0), "<Right>": (1, 0), "<Up>": (0, -1), "<Down>": (0, 1)}.items():
+                self.bind(key, lambda e, d=(dx, dy): None if self._typing(e) else self._nudge(e, *d))
+            self.canvas.bind("<Button-3>", self._context_menu)
+
+        def _typing(self, _event=None):
+            return isinstance(self.focus_get(), (tk.Entry, tk.Text, tk.Spinbox))
+
+        # ----- document state ------------------------------------------------------------
+
+        def page(self):
+            return self.doc[self.page_index] if self.doc is not None and len(self.doc) else None
+
+        def snapshot(self):
+            return self.doc.tobytes(garbage=0) if self.doc is not None else None
+
+        def push_undo(self):
+            data = self.snapshot()
+            self.undo_stack.append((data, self.page_index))
+            limit = 5 if data and len(data) > 30_000_000 else UNDO_LIMIT     # big files keep fewer steps
+            del self.undo_stack[:-limit]
+            self.redo_stack.clear()
+            self._mark_dirty()
+
+        def _load_bytes(self, data, page_index):
+            self.doc = fitz.open("pdf", data)
+            self.page_index = max(0, min(page_index, len(self.doc) - 1))
+            self.selected_xref = self.selected_image = None
+            self.search["hits"] = []
+            self.refresh_all()
+
+        def undo(self):
+            if not self.undo_stack:
+                self.status_main.config(text="Nothing to undo")
+                return
+            self.redo_stack.append((self.snapshot(), self.page_index))
+            data, index = self.undo_stack.pop()
+            self._load_bytes(data, index)
+            self._mark_dirty()
+            self.status_main.config(text="Undone")
+
+        def redo(self):
+            if not self.redo_stack:
+                return
+            self.undo_stack.append((self.snapshot(), self.page_index))
+            data, index = self.redo_stack.pop()
+            self._load_bytes(data, index)
+            self._mark_dirty()
+
+        def _mark_dirty(self):
+            if not self.dirty:
+                self.dirty = True
+                self._update_title()
+
+        def _update_title(self):
+            name = os.path.basename(self.path) if self.path else ("untitled.pdf" if self.doc else "")
+            text = f"{name}{' *' if self.dirty else ''} - {APP_NAME}" if name else APP_NAME
+            self.title(text)
+            self.caption_title.config(text=text)
+
+        def need_doc(self):
+            if self.doc is None:
+                messagebox.showinfo(APP_NAME, "Open a PDF first (File > Open).", parent=self)
+                return False
+            return True
+
+        # ----- rendering ------------------------------------------------------------------
+
+        def _on_resize(self):
+            if self.fit_mode:
+                self._apply_fit()
+            self.render()
+
+        def _apply_fit(self):
+            page = self.page()
+            if page is None:
+                return
+            width = max(100, self.canvas.winfo_width() - 2 * PAD - 4)
+            height = max(100, self.canvas.winfo_height() - 2 * PAD - 4)
+            zoom_w = width / page.rect.width
+            self.zoom = zoom_w if self.fit_mode == "width" else min(zoom_w, height / page.rect.height)
+            self.zoom = max(0.1, min(6.0, self.zoom))
+
+        def set_fit(self, mode):
+            self.fit_mode = mode
+            self._apply_fit()
+            self.render()
+
+        def set_zoom(self, zoom):
+            self.fit_mode = None
+            self.zoom = max(0.1, min(6.0, zoom))
+            self.render()
+
+        def zoom_step(self, direction):
+            current = self.zoom
+            if direction > 0:
+                nxt = next((z for z in ZOOM_STEPS if z > current + 0.01), ZOOM_STEPS[-1])
+            else:
+                nxt = next((z for z in reversed(ZOOM_STEPS) if z < current - 0.01), ZOOM_STEPS[0])
+            self.set_zoom(nxt)
+
+        def refresh_all(self):
+            self.render()
+            self.start_thumbnails()
+
+        def render(self):
+            canvas = self.canvas
+            canvas.delete("all")
+            page = self.page()
+            if page is None:
+                canvas.create_text(max(200, canvas.winfo_width() // 2), max(120, canvas.winfo_height() // 2),
+                                   text="Open a PDF (Ctrl+O) to start.\n\nEdit text, add notes, signatures and stamps,\n"
+                                        "reorder pages, protect with a password, export to Word.",
+                                   fill=WHITE, font=FONT_BOLD, justify="center")
+                self.status_page.config(text="No document")
+                self.page_total.config(text="/ 0")
+                self.var_page.set("")
+                self.zoom_label.config(text="")
+                return
+            if self.fit_mode:
+                self._apply_fit()
+            pix = page.get_pixmap(matrix=fitz.Matrix(self.zoom, self.zoom), alpha=False)
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            self.photo = ImageTk.PhotoImage(image, master=canvas)
+            width = max(canvas.winfo_width(), pix.width + 2 * PAD)
+            x0 = max(PAD, (width - pix.width) // 2)
+            self.origin = (x0, PAD)
+            canvas.create_rectangle(x0 + 4, PAD + 4, x0 + pix.width + 4, PAD + pix.height + 4, fill=BLACK, outline="")
+            canvas.create_image(x0, PAD, image=self.photo, anchor="nw")
+            canvas.config(scrollregion=(0, 0, width, pix.height + 2 * PAD))
+            self._draw_overlays()
+            self.status_page.config(text=f"Page {self.page_index + 1} of {len(self.doc)}")
+            self.page_total.config(text=f"/ {len(self.doc)}")
+            self.var_page.set(str(self.page_index + 1))
+            self.zoom_label.config(text=f"{round(self.zoom * 100)}%")
+            rect = page.rect
+            self.status_size.config(text=f"{rect.width / MM:.0f} x {rect.height / MM:.0f} mm")
+            self._mark_thumb()
+
+        def _draw_overlays(self):
+            canvas = self.canvas
+            canvas.delete("overlay")
+            page = self.page()
+            if page is None:
+                return
+            for index, (page_no, rect) in enumerate(self.search["hits"]):
+                if page_no == self.page_index:
+                    x1, y1, x2, y2 = self.to_canvas_rect(rect * page.rotation_matrix)
+                    current = index == self.search["index"]
+                    canvas.create_rectangle(x1 - 1, y1 - 1, x2 + 1, y2 + 1, outline="#ff6000" if current else "#e0c000",
+                                            width=2 if current else 1, tags="overlay")
+            rect, resizable = self.selection_view_rect(page)
+            if rect is not None:
+                self._draw_selection_box(rect, resizable)
+
+        def _draw_selection_box(self, rect, resizable):
+            canvas = self.canvas
+            x1, y1, x2, y2 = self.to_canvas_rect(rect)
+            canvas.create_rectangle(x1 - 3, y1 - 3, x2 + 3, y2 + 3, outline=NAVY, dash=(4, 2), width=2, tags="overlay")
+            if resizable:
+                for cx, cy in ((x1 - 3, y1 - 3), (x2 + 3, y1 - 3), (x1 - 3, y2 + 3), (x2 + 3, y2 + 3)):
+                    canvas.create_rectangle(cx - 4, cy - 4, cx + 4, cy + 4, fill=BLACK, outline=WHITE,
+                                            tags=("overlay", "handle"))
+
+        # coordinates: canvas <-> displayed page (rotated) <-> PDF (unrotated)
+        def to_view(self, event):
+            x = (self.canvas.canvasx(event.x) - self.origin[0]) / self.zoom
+            y = (self.canvas.canvasy(event.y) - self.origin[1]) / self.zoom
+            return fitz.Point(x, y)
+
+        def to_pdf(self, point):
+            return point * self.page().derotation_matrix
+
+        def to_canvas_rect(self, rect):
+            x0, y0 = self.origin
+            return (x0 + rect.x0 * self.zoom, y0 + rect.y0 * self.zoom, x0 + rect.x1 * self.zoom, y0 + rect.y1 * self.zoom)
+
+        def view_rect_to_pdf(self, a, b):
+            rect = fitz.Rect(a, b)
+            rect.normalize()
+            return rect * self.page().derotation_matrix
+
+        # ----- thumbnails -------------------------------------------------------------------
+
+        def start_thumbnails(self):
+            if self.thumb_job is not None:
+                self.after_cancel(self.thumb_job)
+                self.thumb_job = None
+            self.thumb_generation += 1
+            self.thumb_photos = {}
+            self.thumbs.delete("all")
+            if self.doc is None:
+                return
+            self.thumb_positions = []
+            y = 8
+            for index in range(len(self.doc)):
+                rect = self.doc[index].rect
+                height = int(THUMB_W * rect.height / rect.width)
+                self.thumb_positions.append((y, height))
+                self.thumbs.create_rectangle(14, y, 14 + THUMB_W, y + height, fill=WHITE, outline=BLACK,
+                                             tags=(f"t{index}", "thumb"))
+                self.thumbs.create_text(14 + THUMB_W // 2, y + height + 9, text=str(index + 1), font=FONT, fill=WHITE,
+                                        tags=(f"t{index}",))
+                y += height + 24
+            self.thumbs.config(scrollregion=(0, 0, THUMB_W + 30, y))
+            self._mark_thumb()
+            self._thumb_batch(0, self.thumb_generation)
+
+        def _thumb_batch(self, start, generation):
+            if generation != self.thumb_generation or self.doc is None:
+                return
+            end = min(len(self.doc), start + 6)
+            for index in range(start, end):
+                page = self.doc[index]
+                scale = THUMB_W / page.rect.width
+                pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                photo = ImageTk.PhotoImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples),
+                                           master=self.thumbs)
+                self.thumb_photos[index] = photo
+                y, _height = self.thumb_positions[index]
+                self.thumbs.create_image(14, y, image=photo, anchor="nw", tags=(f"t{index}",))
+            self._mark_thumb()
+            if end < len(self.doc):
+                self.thumb_job = self.after(15, lambda: self._thumb_batch(end, generation))
+            else:
+                self.thumb_job = None
+
+        def _update_thumb(self, index):
+            if self.doc is None or index not in range(len(self.doc)) or index >= len(getattr(self, "thumb_positions", [])):
+                return
+            page = self.doc[index]
+            scale = THUMB_W / page.rect.width
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            photo = ImageTk.PhotoImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples), master=self.thumbs)
+            self.thumb_photos[index] = photo
+            y, _height = self.thumb_positions[index]
+            self.thumbs.create_image(14, y, image=photo, anchor="nw", tags=(f"t{index}",))
+            self._mark_thumb()
+
+        def _mark_thumb(self):
+            self.thumbs.delete("mark")
+            if self.doc is None or not getattr(self, "thumb_positions", None) or self.page_index >= len(self.thumb_positions):
+                return
+            y, height = self.thumb_positions[self.page_index]
+            self.thumbs.create_rectangle(10, y - 4, 18 + THUMB_W, y + height + 4, outline="#ffff00", width=3, tags="mark")
+
+        def _thumb_index(self, event):
+            y = self.thumbs.canvasy(event.y)
+            for index, (top, height) in enumerate(getattr(self, "thumb_positions", [])):
+                if top - 6 <= y <= top + height + 20:
+                    return index
+            return None
+
+        def _thumb_click(self, event):
+            index = self._thumb_index(event)
+            if index is not None:
+                self.go(index)
+
+        def _thumb_menu(self, event):
+            index = self._thumb_index(event)
+            if index is None:
+                return
+            self.go(index)
+            try:
+                self.thumb_menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                self.thumb_menu.grab_release()
+
+        # ----- navigation -------------------------------------------------------------------
+
+        def go(self, index):
+            if self.doc is None:
+                return
+            index = max(0, min(len(self.doc) - 1, index))
+            if index != self.page_index:
+                self.page_index = index
+                self.selected_xref = self.selected_image = None
+            self.render()
+            self.canvas.yview_moveto(0)
+            if getattr(self, "thumb_positions", None) and index < len(self.thumb_positions):
+                top, _h = self.thumb_positions[index]
+                total = self.thumb_positions[-1][0] + self.thumb_positions[-1][1] + 24
+                self.thumbs.yview_moveto(max(0, (top - 40) / total))
+
+        def _goto_entry(self):
+            try:
+                self.go(int(self.var_page.get()) - 1)
+            except ValueError:
+                self.var_page.set(str(self.page_index + 1))
+            self.canvas.focus_set()
+
+        def _wheel(self, event, delta=None):
+            delta = event.delta if delta is None else -delta
+            first, last = self.canvas.yview()
+            if delta < 0 and last >= 0.999 and self.page_index < len(self.doc or []) - 1:
+                self.go(self.page_index + 1)
+                return
+            if delta > 0 and first <= 0.001 and self.page_index > 0:
+                self.go(self.page_index - 1)
+                self.canvas.yview_moveto(1.0)
+                return
+            self.canvas.yview_scroll(-1 if delta > 0 else 1, "units")
+
+        # ----- tools ------------------------------------------------------------------------
+
+        def set_tool(self, tool):
+            self.tool = tool
+            for name, (cell, icon, text) in self.tool_buttons.items():
+                on = name == tool
+                cell.config(relief="sunken" if on else "flat", bg=LIGHT if on else FACE)
+                icon.config(bg=LIGHT if on else FACE)
+                text.config(bg=LIGHT if on else FACE)
+            cursors = {"select": "arrow", "hand": "fleur", "edit": "xterm", "text": "xterm", "pen": "pencil"}
+            self.canvas.config(cursor=cursors.get(tool, "crosshair"))
+            self.status_main.config(text=TOOL_HINTS.get(tool, ""))
+            if tool != "select":
+                self.selected_xref = self.selected_image = None
+                self._draw_overlays()
+
+        def set_color(self, color):
+            self.color = hex_to_rgb(color)
+            for value, swatch in self.swatches:
+                swatch.config(relief="raised" if value == color else "sunken")
+
+        def _escape(self):
+            if self.search_bar.winfo_ismapped():
+                self.hide_search()
+            else:
+                self.set_tool("select")
+
+        # ----- mouse ----------------------------------------------------------------------
+
+        def _hover(self, event):
+            if self.page() is not None:
+                point = self.to_view(event)
+                self.status_pos.config(text=f"{point.x / MM:.0f}, {point.y / MM:.0f} mm")
+
+        def _press(self, event):
+            self.canvas.focus_set()
+            page = self.page()
+            if page is None:
+                return
+            point = self.to_view(event)
+            tool = self.tool
+            if tool == "hand":
+                self.canvas.scan_mark(event.x, event.y)
+                self.drag = {"mode": "pan"}
+                return
+            if tool == "select":
+                corner = self._handle_at(event)
+                if corner is not None:
+                    rect, _resizable = self.selection_view_rect(page)
+                    self.drag = {"mode": "resize", "corner": corner, "orig": fitz.Rect(rect), "rect": fitz.Rect(rect)}
+                    return
+                self.select(self.object_at(page, point))
+                if self.selected_xref is not None or self.selected_image is not None:
+                    self.drag = {"mode": "move", "start": point, "last": point}
+                return
+            if tool == "edit":
+                self.edit_text_at(point)
+                return
+            if tool == "note":
+                self.add_note(point)
+                return
+            if tool == "pen":
+                self.drag = {"mode": "pen", "points": [point]}
+                return
+            self.drag = {"mode": "shape", "start": point, "end": point}
+
+        def _motion(self, event):
+            drag = self.drag
+            if not drag:
+                return
+            if drag["mode"] == "pan":
+                self.canvas.scan_dragto(event.x, event.y, gain=1)
+                return
+            point = self.to_view(event)
+            x0, y0 = self.origin
+            z = self.zoom
+            if drag["mode"] == "pen":
+                last = drag["points"][-1]
+                self.canvas.create_line(x0 + last.x * z, y0 + last.y * z, x0 + point.x * z, y0 + point.y * z,
+                                        fill=rgb_to_hex(self.color), width=max(1, self.var_width.get() * z),
+                                        capstyle="round", tags="rubber")
+                drag["points"].append(point)
+                return
+            if drag["mode"] == "move":
+                dx, dy = (point.x - drag["last"].x) * z, (point.y - drag["last"].y) * z
+                drag["last"] = point
+                self.canvas.move("overlay", dx, dy)
+                return
+            if drag["mode"] == "resize":
+                drag["rect"] = self._resized_rect(drag["orig"], drag["corner"], point,
+                                                  keep=self.selected_image is not None and not event.state & 0x0001)
+                self.canvas.delete("overlay")
+                self._draw_selection_box(drag["rect"], True)
+                return
+            drag["end"] = point
+            self.canvas.delete("rubber")
+            a, b = drag["start"], point
+            coords = (x0 + a.x * z, y0 + a.y * z, x0 + b.x * z, y0 + b.y * z)
+            color = rgb_to_hex(self.color)
+            tool = self.tool
+            if tool in ("line", "arrow"):
+                self.canvas.create_line(*coords, fill=color, width=max(1, self.var_width.get() * z),
+                                        arrow="last" if tool == "arrow" else None, tags="rubber")
+            elif tool == "ellipse":
+                self.canvas.create_oval(*coords, outline=color, width=max(1, self.var_width.get() * z), tags="rubber")
+            elif tool == "highlight":
+                self.canvas.create_rectangle(*coords, fill="#ffff00", stipple="gray50", outline="", tags="rubber")
+            elif tool == "redact":
+                self.canvas.create_rectangle(*coords, fill=BLACK, stipple="gray50", outline=BLACK, tags="rubber")
+            elif tool == "whiteout":
+                self.canvas.create_rectangle(*coords, fill=WHITE, outline=SHADOW, tags="rubber")
+            else:
+                self.canvas.create_rectangle(*coords, outline=color if tool == "rect" else BLACK,
+                                             dash=() if tool == "rect" else (4, 2),
+                                             width=max(1, self.var_width.get() * z) if tool == "rect" else 1,
+                                             tags="rubber")
+
+        def _release(self, event):
+            drag, self.drag = self.drag, None
+            self.canvas.delete("rubber")
+            page = self.page()
+            if not drag or page is None or drag["mode"] == "pan":
+                return
+            if drag["mode"] == "move":
+                delta = drag["last"] - drag["start"]
+                if abs(delta.x) + abs(delta.y) < 1:
+                    self._draw_overlays()
+                    return
+                self.move_selection(delta)
+                return
+            if drag["mode"] == "resize":
+                if not same_rect(drag["rect"], drag["orig"], 0.5):
+                    self.resize_selection(drag["rect"])
+                else:
+                    self._draw_overlays()
+                return
+            if drag["mode"] == "pen":
+                points = drag["points"]
+                if len(points) > 1:
+                    self.push_undo()
+                    annot = page.add_ink_annot([[tuple(self.to_pdf(p)) for p in points]])
+                    annot.set_colors(stroke=self.color)
+                    annot.set_border(width=float(self.var_width.get()))
+                    annot.update()
+                    self.after_change()
+                return
+            start, end = drag["start"], drag["end"]
+            small = abs(end.x - start.x) < 4 and abs(end.y - start.y) < 4
+            tool = self.tool
+            if tool in ("line", "arrow"):
+                if small:
+                    return
+                self.push_undo()
+                annot = page.add_line_annot(self.to_pdf(start), self.to_pdf(end))
+                annot.set_colors(stroke=self.color)
+                annot.set_border(width=float(self.var_width.get()))
+                if tool == "arrow":
+                    annot.set_line_ends(fitz.PDF_ANNOT_LE_NONE, fitz.PDF_ANNOT_LE_CLOSED_ARROW)
+                    annot.set_colors(stroke=self.color, fill=self.color)
+                annot.update()
+                self.after_change()
+            elif tool in ("rect", "ellipse"):
+                if small:
+                    return
+                self.push_undo()
+                rect = self.view_rect_to_pdf(start, end)
+                annot = page.add_rect_annot(rect) if tool == "rect" else page.add_circle_annot(rect)
+                annot.set_colors(stroke=self.color)
+                annot.set_border(width=float(self.var_width.get()))
+                annot.update()
+                self.after_change()
+            elif tool in ("highlight", "underline", "strike"):
+                self.markup(tool, start, end)
+            elif tool == "text":
+                self.add_text(start, None if small else end)
+            elif tool in ("image", "signature", "stamp"):
+                self.place_picture(tool, start, None if small else end)
+            elif tool == "whiteout":
+                if small:
+                    return
+                self.push_undo()
+                page.draw_rect(self.view_rect_to_pdf(start, end), color=(1, 1, 1), fill=(1, 1, 1), width=0)
+                self.after_change("Covered with white (the content is still underneath; use Redact to remove it)")
+            elif tool == "redact":
+                if small:
+                    return
+                if not self.redact_warned and not messagebox.askyesno(
+                        "Redact", "Redaction PERMANENTLY removes the text and pictures under the area\n"
+                                  "(they cannot be recovered from the saved file).\n\nContinue?", parent=self):
+                    return
+                self.redact_warned = True
+                self.push_undo()
+                page.add_redact_annot(self.view_rect_to_pdf(start, end), fill=(0, 0, 0))
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS)
+                self.after_change("Content removed")
+            elif tool == "crop":
+                if small:
+                    return
+                rect = self.view_rect_to_pdf(start, end) & page.mediabox
+                if rect.is_empty or rect.width < 20 or rect.height < 20:
+                    return
+                self.push_undo()
+                page.set_cropbox(rect)
+                self.after_change("Page cropped (Page > Reset Crop undoes it)", structure=True)
+
+        def _double_click(self, event):
+            page = self.page()
+            if page is None or self.tool != "select":
+                return
+            self.select(self.object_at(page, self.to_view(event)))
+            if self.selected_xref is not None or self.selected_image is not None:
+                self.selection_properties()
+
+        def after_change(self, message=None, structure=False):
+            if structure:
+                self.refresh_all()
+            else:
+                self.render()
+                self._update_thumb(self.page_index)
+            if message:
+                self.status_main.config(text=message)
+
+        # ----- selection: annotations and pictures ----------------------------------------------
+
+        RECT_ANNOTS = (fitz.PDF_ANNOT_SQUARE, fitz.PDF_ANNOT_CIRCLE, fitz.PDF_ANNOT_FREE_TEXT, fitz.PDF_ANNOT_STAMP)
+        MOVABLE_ANNOTS = RECT_ANNOTS + (fitz.PDF_ANNOT_TEXT, fitz.PDF_ANNOT_LINE, fitz.PDF_ANNOT_INK)
+
+        def annot_at(self, page, pdf_point):
+            found = None
+            for annot in page.annots():
+                rect = fitz.Rect(annot.rect)
+                rect.x0 -= 3
+                rect.y0 -= 3
+                rect.x1 += 3
+                rect.y1 += 3
+                if pdf_point in rect:
+                    found = annot
+            return found
+
+        def selected_annot(self, page):
+            """The selected annotation of `page` (keep `page` alive while using it)."""
+            if page is None or self.selected_xref is None:
+                return None
+            for annot in page.annots():
+                if annot.xref == self.selected_xref:
+                    return annot
+            return None
+
+        def selected_picture(self, page):
+            if page is None or self.selected_image is None:
+                return None
+            for obj in image_objects(self.doc, page):
+                if same_rect(obj["rect"] * page.rotation_matrix, self.selected_image):
+                    return obj
+            return None
+
+        def object_at(self, page, view_point):
+            """('annot', xref) or ('image', view rect) under a point of the page view, annotations first."""
+            annot = self.annot_at(page, view_point * page.derotation_matrix)
+            if annot is not None:
+                return ("annot", annot.xref)
+            best = None
+            for obj in image_objects(self.doc, page):
+                view = obj["rect"] * page.rotation_matrix
+                if view_point in view and (best is None or view.get_area() < best.get_area()):
+                    best = view
+            return ("image", best) if best is not None else None
+
+        def select(self, hit):
+            self.selected_xref = hit[1] if hit and hit[0] == "annot" else None
+            self.selected_image = fitz.Rect(hit[1]) if hit and hit[0] == "image" else None
+            self._draw_overlays()
+            page = self.page()
+            annot = self.selected_annot(page)
+            if annot is not None:
+                how = "drag to move it, " if annot.type[0] in self.MOVABLE_ANNOTS else ""
+                self.status_main.config(text=f"{annot.type[1]} selected: {how}right-click for options, Del deletes it")
+            elif self.selected_image is not None:
+                self.status_main.config(text="Picture selected: drag to move, drag a corner to resize "
+                                             "(Shift = free proportions), right-click for options")
+
+        def selection_view_rect(self, page):
+            annot = self.selected_annot(page)
+            if annot is not None:
+                return annot.rect * page.rotation_matrix, annot.type[0] in self.RECT_ANNOTS
+            if self.selected_image is not None:
+                return fitz.Rect(self.selected_image), True
+            return None, False
+
+        def _handle_at(self, event):
+            page = self.page()
+            rect, resizable = self.selection_view_rect(page)
+            if rect is None or not resizable:
+                return None
+            x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+            x1, y1, x2, y2 = self.to_canvas_rect(rect)
+            for name, (cx, cy) in {"nw": (x1 - 3, y1 - 3), "ne": (x2 + 3, y1 - 3), "sw": (x1 - 3, y2 + 3),
+                                   "se": (x2 + 3, y2 + 3)}.items():
+                if abs(x - cx) <= 6 and abs(y - cy) <= 6:
+                    return name
+            return None
+
+        @staticmethod
+        def _resized_rect(orig, corner, point, keep):
+            left, top, right, bottom = orig
+            if "w" in corner:
+                left = min(point.x, right - 5)
+            else:
+                right = max(point.x, left + 5)
+            if "n" in corner:
+                top = min(point.y, bottom - 5)
+            else:
+                bottom = max(point.y, top + 5)
+            rect = fitz.Rect(left, top, right, bottom)
+            if keep and orig.width > 0 and orig.height > 0:
+                ratio = orig.height / orig.width
+                height = rect.width * ratio
+                if "n" in corner:
+                    rect.y0 = rect.y1 - height
+                else:
+                    rect.y1 = rect.y0 + height
+            return rect
+
+        def _vector_to_pdf(self, page, delta):
+            """A displacement on the page view -> the same displacement in unrotated page space."""
+            return fitz.Point(delta) * page.derotation_matrix - fitz.Point(0, 0) * page.derotation_matrix
+
+        # pictures ------------------------------------------------------------------------------
+
+        def _own_picture(self):
+            """The selected picture as an own (editable) snippet; a picture that came with the PDF is
+            converted first. Call after push_undo(). Returns the object or None."""
+            page = self.page()
+            obj = self.selected_picture(page)
+            if obj is None:
+                return None
+            if obj["own"]:
+                return obj
+            uses = foreign_image_uses(self.doc, page, obj["img_xref"])
+            if uses == 0:
+                messagebox.showinfo(APP_NAME, "This picture is built into the page in a way that cannot be changed "
+                                              "here.\nUse Whiteout or Redact to hide it.", parent=self)
+                return None
+            if uses > 1 and not messagebox.askyesno(
+                    APP_NAME, f"This picture is drawn {uses} times on this page; the other copies will be removed "
+                              "when it is edited.\n\nContinue?", parent=self):
+                return None
+            data = image_png(self.doc, page, obj)
+            foreign_image_uses(self.doc, page, obj["img_xref"], remove=True)
+            page = self.page()
+            insert_picture(self.doc, page, self.selected_image * page.derotation_matrix, data, page.rotation)
+            mark_new_image(self.doc, self.page_index)
+            return self.selected_picture(self.page())
+
+        def _insert_picture(self, data, view_rect, keep=True):
+            view_rect = fitz.Rect(view_rect)
+            view_rect.normalize()
+            with Image.open(io.BytesIO(data)) as picture:
+                width, height = picture.size
+            if view_rect.width < 2 or view_rect.height < 2:                 # a click: default size
+                view_rect = fitz.Rect(view_rect.x0, view_rect.y0, view_rect.x0 + 45 * MM,
+                                      view_rect.y0 + 45 * MM * height / max(1, width))
+            if keep:
+                view_rect = fit_rect(view_rect, width, height)
+            page = self.page()
+            insert_picture(self.doc, page, view_rect * page.derotation_matrix, data, page.rotation)
+            mark_new_image(self.doc, self.page_index)
+            page = self.page()
+            own = [o for o in image_objects(self.doc, page) if o["own"]]
+            return own[-1]["rect"] * page.rotation_matrix if own else fitz.Rect(view_rect)
+
+        def _rewrite_picture(self, obj, matrix):
+            write_matrix(self.doc, obj["own"], matrix)
+            page = self.page()
+            self.selected_image = fitz.Rect(0, 0, 1, 1) * matrix * page.transformation_matrix * page.rotation_matrix
+
+        # operations on the selection ----------------------------------------------------------
+
+        def move_selection(self, delta):
+            page = self.page()
+            annot = self.selected_annot(page)
+            if annot is not None:
+                if annot.type[0] not in self.MOVABLE_ANNOTS:
+                    self._draw_overlays()
+                    self.status_main.config(text=f"A {annot.type[1]} follows the text; it cannot be moved")
+                    return
+                self.push_undo()
+                page = self.page()
+                self.selected_xref = self._shift_annot(page, self.selected_annot(page), self._vector_to_pdf(page, delta))
+                self.after_change("Moved")
+                return
+            if self.selected_image is None:
+                return
+            self.push_undo()
+            obj = self._own_picture()
+            if obj is None:
+                self.undo_stack.pop()
+                self._draw_overlays()
+                return
+            page = self.page()
+            shift = self._vector_to_pdf(page, delta)
+            to_pdf = ~page.transformation_matrix
+            move = fitz.Point(shift) * to_pdf - fitz.Point(0, 0) * to_pdf
+            self._rewrite_picture(obj, obj["matrix"] * fitz.Matrix(1, 0, 0, 1, move.x, move.y))
+            self.after_change("Picture moved")
+
+        def resize_selection(self, view_rect):
+            page = self.page()
+            annot = self.selected_annot(page)
+            if annot is not None:
+                if annot.type[0] not in self.RECT_ANNOTS:
+                    return
+                self.push_undo()
+                page = self.page()
+                annot = self.selected_annot(page)
+                annot.set_rect(fitz.Rect(view_rect) * page.derotation_matrix)
+                annot.update()
+                self.after_change("Resized")
+                return
+            if self.selected_image is None:
+                return
+            self.push_undo()
+            obj = self._own_picture()
+            if obj is None:
+                self.undo_stack.pop()
+                self._draw_overlays()
+                return
+            page = self.page()
+            to_pdf = ~page.transformation_matrix
+            old = fitz.Rect(0, 0, 1, 1) * obj["matrix"]
+            new = fitz.Rect(view_rect) * page.derotation_matrix * to_pdf
+            old.normalize()
+            new.normalize()
+            scale = fitz.Matrix(1, 0, 0, 1, -old.x0, -old.y0) * fitz.Matrix(new.width / old.width, 0, 0,
+                                                                            new.height / old.height, 0, 0) \
+                * fitz.Matrix(1, 0, 0, 1, new.x0, new.y0)
+            self._rewrite_picture(obj, obj["matrix"] * scale)
+            self.after_change(f"Picture resized to {new.width / MM:.0f} x {new.height / MM:.0f} mm")
+
+        def rotate_picture(self, degrees):
+            if self.selected_image is None:
+                return
+            self.push_undo()
+            obj = self._own_picture()
+            if obj is None:
+                self.undo_stack.pop()
+                return
+            old = fitz.Rect(0, 0, 1, 1) * obj["matrix"]
+            center = fitz.Point((old.x0 + old.x1) / 2, (old.y0 + old.y1) / 2)
+            turn = fitz.Matrix(1, 0, 0, 1, -center.x, -center.y) * fitz.Matrix(-degrees) * \
+                fitz.Matrix(1, 0, 0, 1, center.x, center.y)
+            self._rewrite_picture(obj, obj["matrix"] * turn)
+            self.after_change("Picture rotated")
+
+        def replace_picture(self):
+            if self.selected_image is None:
+                return
+            path = filedialog.askopenfilename(title="Replace Picture", parent=self,
+                                              filetypes=[("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"), ("All", "*.*")])
+            if not path:
+                return
+            with Image.open(path) as picture:
+                buffer = io.BytesIO()
+                picture.convert("RGBA").save(buffer, "PNG")
+            self.push_undo()
+            if not self._remove_picture():
+                self.undo_stack.pop()
+                return
+            self.selected_image = self._insert_picture(buffer.getvalue(), self.selected_image)
+            self.after_change("Picture replaced")
+
+        def _remove_picture(self):
+            page = self.page()
+            obj = self.selected_picture(page)
+            if obj is None:
+                return False
+            if obj["own"]:
+                self.doc.update_stream(obj["own"], b" ")
+                return True
+            uses = foreign_image_uses(self.doc, page, obj["img_xref"])
+            if uses == 0:
+                messagebox.showinfo(APP_NAME, "This picture is built into the page in a way that cannot be removed "
+                                              "here.\nUse Whiteout or Redact to hide it.", parent=self)
+                return False
+            if uses > 1 and not messagebox.askyesno(
+                    APP_NAME, f"This picture is drawn {uses} times on this page; all copies will be removed.\n\n"
+                              "Continue?", parent=self):
+                return False
+            foreign_image_uses(self.doc, page, obj["img_xref"], remove=True)
+            return True
+
+        def picture_bytes(self):
+            page = self.page()
+            obj = self.selected_picture(page)
+            return image_png(self.doc, page, obj) if obj else None
+
+        def save_picture(self):
+            data = self.picture_bytes()
+            if data is None:
+                return
+            path = filedialog.asksaveasfilename(title="Save Picture As", parent=self, defaultextension=".png",
+                                                initialfile=f"{self._stem()}_picture.png", filetypes=[("PNG", "*.png")])
+            if path:
+                with open(path, "wb") as handle:
+                    handle.write(data)
+                self.status_main.config(text=f"Picture saved: {path}")
+
+        def use_as_signature(self):
+            data = self.picture_bytes()
+            if data:
+                self.signature = data
+                self.status_main.config(text="This picture is now your signature (Signature tool)")
+
+        # annotations ----------------------------------------------------------------------------
+
+        def _annot_style(self, annot):
+            colors = annot.colors or {}
+            return {"stroke": colors.get("stroke"), "fill": colors.get("fill"),
+                    "width": (annot.border or {}).get("width", 1) or 1, "opacity": annot.opacity,
+                    "info": dict(annot.info), "line_ends": annot.line_ends}
+
+        def _apply_style(self, annot, style):
+            kwargs = {}
+            if style["stroke"]:
+                kwargs["stroke"] = style["stroke"]
+            if style["fill"]:
+                kwargs["fill"] = style["fill"]
+            if kwargs:
+                annot.set_colors(**kwargs)
+            if annot.type[0] not in (fitz.PDF_ANNOT_TEXT, fitz.PDF_ANNOT_HIGHLIGHT, fitz.PDF_ANNOT_UNDERLINE,
+                                     fitz.PDF_ANNOT_STRIKE_OUT):
+                annot.set_border(width=style["width"])
+            if style["opacity"] is not None and 0 <= style["opacity"] < 1:
+                annot.set_opacity(style["opacity"])
+            if style["line_ends"] and annot.type[0] == fitz.PDF_ANNOT_LINE:
+                annot.set_line_ends(*style["line_ends"])
+            info = {k: v for k, v in style["info"].items() if k in ("content", "title", "subject")}
+            if info:
+                annot.set_info(**info)
+            annot.update()
+
+        def _shift_annot(self, page, annot, shift):
+            """Move an annotation by a displacement in unrotated page space; returns its (new) xref."""
+            kind = annot.type[0]
+            if kind in self.RECT_ANNOTS or kind == fitz.PDF_ANNOT_TEXT:
+                rect = annot.rect
+                annot.set_rect(fitz.Rect(rect.x0 + shift.x, rect.y0 + shift.y, rect.x1 + shift.x, rect.y1 + shift.y))
+                annot.update()
+                return annot.xref
+            style = self._annot_style(annot)
+            points = annot.vertices
+            page.delete_annot(annot)
+            if kind == fitz.PDF_ANNOT_LINE:
+                new = page.add_line_annot(fitz.Point(points[0]) + shift, fitz.Point(points[1]) + shift)
+            else:
+                strokes = points if points and isinstance(points[0][0], (list, tuple)) else [points]
+                new = page.add_ink_annot([[(x + shift.x, y + shift.y) for x, y in stroke] for stroke in strokes])
+            self._apply_style(new, style)
+            return new.xref
+
+        def _copy_annot(self, page, annot, shift):
+            kind = annot.type[0]
+            style = self._annot_style(annot)
+            rect = annot.rect + (shift.x, shift.y, shift.x, shift.y)
+            if kind == fitz.PDF_ANNOT_SQUARE:
+                new = page.add_rect_annot(rect)
+            elif kind == fitz.PDF_ANNOT_CIRCLE:
+                new = page.add_circle_annot(rect)
+            elif kind == fitz.PDF_ANNOT_TEXT:
+                new = page.add_text_annot(rect.tl, style["info"].get("content", ""), icon="Note")
+            elif kind in (fitz.PDF_ANNOT_LINE, fitz.PDF_ANNOT_INK):
+                points = annot.vertices
+                if kind == fitz.PDF_ANNOT_LINE:
+                    new = page.add_line_annot(fitz.Point(points[0]) + shift, fitz.Point(points[1]) + shift)
+                else:
+                    strokes = points if points and isinstance(points[0][0], (list, tuple)) else [points]
+                    new = page.add_ink_annot([[(x + shift.x, y + shift.y) for x, y in stroke] for stroke in strokes])
+            else:
+                return None
+            self._apply_style(new, style)
+            return new.xref
+
+        def annotation_properties(self):
+            page = self.page()
+            annot = self.selected_annot(page)
+            if annot is None:
+                return
+            style = self._annot_style(annot)
+            kind = annot.type[0]
+            fields = [("stroke", "Colour", "color", rgb_to_hex(style["stroke"] or (0, 0, 0)), None)]
+            if kind in (fitz.PDF_ANNOT_SQUARE, fitz.PDF_ANNOT_CIRCLE):
+                fields += [("filled", "Filled", "bool", bool(style["fill"]), None),
+                           ("fill", "Fill colour", "color", rgb_to_hex(style["fill"] or (1, 1, 0.6)), None)]
+            if kind in (fitz.PDF_ANNOT_SQUARE, fitz.PDF_ANNOT_CIRCLE, fitz.PDF_ANNOT_LINE, fitz.PDF_ANNOT_INK,
+                        fitz.PDF_ANNOT_POLYGON, fitz.PDF_ANNOT_POLY_LINE):
+                fields.append(("width", "Line width", "float", float(style["width"]), None))
+            fields.append(("opacity", "Opacity (0.1 - 1)", "float", round(style["opacity"] if style["opacity"] is not None
+                                                                         and style["opacity"] >= 0 else 1.0, 2), None))
+            fields.append(("content", "Comment / note text", "text", style["info"].get("content", ""), 4))
+            dialog = FormDialog(self, f"{annot.type[1]} Properties", fields)
+            result = dialog.result
+            if result is None:
+                return
+            self.push_undo()
+            page = self.page()
+            annot = self.selected_annot(page)
+            style["stroke"] = hex_to_rgb(result["stroke"])
+            if "filled" in result:
+                style["fill"] = hex_to_rgb(result["fill"]) if result["filled"] else None
+                if not result["filled"]:
+                    annot.set_colors(fill=[])
+            if "width" in result:
+                style["width"] = max(0.25, result["width"])
+            style["opacity"] = max(0.1, min(1.0, result["opacity"]))
+            if style["opacity"] >= 1:
+                annot.set_opacity(1)
+            style["info"]["content"] = result["content"]
+            self._apply_style(annot, style)
+            self.after_change("Properties changed")
+
+        # picture properties ----------------------------------------------------------------------
+
+        def picture_properties(self):
+            if self.selected_image is None:
+                return
+            rect = self.selected_image
+            dialog = FormDialog(self, "Picture Properties",
+                                [("left", "Left (mm)", "float", round(rect.x0 / MM, 1), None),
+                                 ("top", "Top (mm)", "float", round(rect.y0 / MM, 1), None),
+                                 ("width", "Width (mm)", "float", round(rect.width / MM, 1), None),
+                                 ("height", "Height (mm)", "float", round(rect.height / MM, 1), None),
+                                 ("keep", "Keep proportions (height follows width)", "bool", True, None)])
+            r = dialog.result
+            if r is None or r["width"] <= 0 or r["height"] <= 0:
+                return
+            height = r["width"] * rect.height / rect.width if r["keep"] else r["height"]
+            new = fitz.Rect(r["left"] * MM, r["top"] * MM, (r["left"] + r["width"]) * MM, (r["top"] + height) * MM)
+            if not same_rect(new, rect, 0.2):
+                self.resize_selection(new)
+
+        # generic actions (menus, keys) --------------------------------------------------------------
+
+        def selection_properties(self):
+            if self.selected_xref is not None:
+                self.annotation_properties()
+            elif self.selected_image is not None:
+                self.picture_properties()
+
+        def delete_selection(self):
+            page = self.page()
+            if self.selected_annot(page) is not None:
+                self.push_undo()
+                page = self.page()
+                page.delete_annot(self.selected_annot(page))
+                self.selected_xref = None
+                self.after_change("Annotation deleted")
+            elif self.selected_image is not None:
+                self.push_undo()
+                if self._remove_picture():
+                    self.selected_image = None
+                    self.after_change("Picture deleted")
+                else:
+                    self.undo_stack.pop()
+            else:
+                self.status_main.config(text="Select an object first (Select tool, or right-click it)")
+
+        def duplicate_selection(self):
+            page = self.page()
+            offset = fitz.Point(12, 12)
+            annot = self.selected_annot(page)
+            if annot is not None:
+                self.push_undo()
+                page = self.page()
+                new = self._copy_annot(page, self.selected_annot(page), self._vector_to_pdf(page, offset))
+                if new is None:
+                    self.undo_stack.pop()
+                    self.status_main.config(text="This annotation follows the text; it cannot be duplicated")
+                    return
+                self.selected_xref = new
+                self.after_change("Duplicated")
+            elif self.selected_image is not None:
+                data = self.picture_bytes()
+                if data is None:
+                    return
+                self.push_undo()
+                self.selected_image = self._insert_picture(data, self.selected_image + (offset.x, offset.y, offset.x,
+                                                                                         offset.y), keep=False)
+                self.after_change("Picture duplicated")
+
+        def _nudge(self, event, dx, dy):
+            if self.selected_xref is None and self.selected_image is None:
+                return None
+            step = 10 if event.state & 0x0001 else 1
+            self.move_selection(fitz.Point(dx * step, dy * step))
+            return "break"
+
+        def _context_menu(self, event):
+            page = self.page()
+            if page is None:
+                return
+            point = self.to_view(event)
+            hit = self.object_at(page, point)
+            if hit is not None and self.tool != "select":
+                self.set_tool("select")
+            self.select(hit)
+            menu = w95_menu(self)
+            page = self.page()
+            annot = self.selected_annot(page)
+            if annot is not None:
+                kind = annot.type[0]
+                menu.add_command(label=f"{annot.type[1]} Properties...", command=self.annotation_properties)
+                menu.add_separator()
+                menu.add_command(label="Duplicate", command=self.duplicate_selection,
+                                 state="normal" if kind in self.MOVABLE_ANNOTS else "disabled")
+                menu.add_command(label="Delete", command=self.delete_selection)
+            elif self.selected_image is not None:
+                menu.add_command(label="Picture Properties (position, size)...", command=self.picture_properties)
+                menu.add_command(label="Replace Picture...", command=self.replace_picture)
+                menu.add_command(label="Rotate Right", command=lambda: self.rotate_picture(90))
+                menu.add_command(label="Rotate Left", command=lambda: self.rotate_picture(-90))
+                menu.add_separator()
+                menu.add_command(label="Duplicate", command=self.duplicate_selection)
+                menu.add_command(label="Save Picture As...", command=self.save_picture)
+                menu.add_command(label="Use as My Signature", command=self.use_as_signature)
+                menu.add_separator()
+                menu.add_command(label="Delete", command=self.delete_selection)
+            else:
+                line = self._line_at(self.to_pdf(point))
+                if line is not None:
+                    text = "".join(s["text"] for s in line["spans"]).strip()
+                    menu.add_command(label="Edit This Text...", command=lambda: self.edit_text_at(point))
+                    menu.add_command(label="Copy This Line", command=lambda: (self.clipboard_clear(),
+                                                                              self.clipboard_append(text)))
+                    menu.add_separator()
+                menu.add_command(label="Add Text Here...", command=lambda: self.add_text(point, None))
+                menu.add_command(label="Add Note Here...", command=lambda: self.add_note(point))
+                menu.add_command(label="Place Signature Here", command=lambda: self.place_picture("signature", point, None))
+                menu.add_command(label="Place Stamp Here...", command=lambda: self.place_picture("stamp", point, None))
+                menu.add_separator()
+                menu.add_command(label="Rotate Page Right", command=lambda: self.rotate(90))
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        def clear_annotations(self):
+            page = self.page()
+            if page is None or not list(page.annots()):
+                return
+            self.push_undo()
+            page = self.page()
+            for annot in list(page.annots()):
+                page.delete_annot(annot)
+            self.selected_xref = None
+            self.after_change("All annotations removed from this page")
+
+        def add_note(self, point):
+            dialog = FormDialog(self, "Sticky Note", [("text", "Note", "text", "", 6)])
+            if dialog.result is None or not dialog.result["text"].strip():
+                return
+            self.push_undo()
+            annot = self.page().add_text_annot(self.to_pdf(point), dialog.result["text"], icon="Note")
+            annot.set_colors(stroke=self.color)
+            annot.set_info(title=os.environ.get("USERNAME") or os.environ.get("USER") or "")
+            annot.update()
+            self.after_change("Note added (double-click it with Select to edit)")
+
+        def markup(self, tool, start, end):
+            page = self.page()
+            area = self.view_rect_to_pdf(start, end)
+            words = [w for w in page.get_text("words") if fitz.Rect(w[:4]).intersects(area)
+                     and area.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+            if not words:
+                if tool == "highlight" and area.width > 4 and area.height > 4:
+                    self.push_undo()
+                    annot = page.add_highlight_annot(area)
+                    annot.set_colors(stroke=(1, 1, 0) if self.color == hex_to_rgb(COLORS[0]) else self.color)
+                    annot.update()
+                    self.after_change()
+                else:
+                    self.status_main.config(text="No words under the selection")
+                return
+            lines = {}
+            for w in words:
+                key = (w[5], w[6])
+                rect = fitz.Rect(w[:4])
+                lines[key] = lines[key] | rect if key in lines else rect
+            quads = [rect.quad for rect in lines.values()]
+            self.push_undo()
+            if tool == "highlight":
+                annot = page.add_highlight_annot(quads)
+                color = self.color if self.color != hex_to_rgb(COLORS[0]) else (1, 1, 0)
+            elif tool == "underline":
+                annot = page.add_underline_annot(quads)
+                color = self.color
+            else:
+                annot = page.add_strikeout_annot(quads)
+                color = self.color
+            annot.set_colors(stroke=color)
+            annot.update()
+            self.after_change(f"{len(words)} words marked")
+
+        # ----- text ---------------------------------------------------------------------------
+
+        def _line_at(self, pdf_point):
+            page = self.page()
+            best = None
+            for block in page.get_text("dict")["blocks"]:
+                if block.get("type") != 0:
+                    continue
+                for line in block["lines"]:
+                    spans = [s for s in line["spans"] if s["text"].strip()]
+                    if not spans:
+                        continue
+                    rect = fitz.Rect(line["bbox"])
+                    grown = fitz.Rect(rect.x0 - 2, rect.y0 - 2, rect.x1 + 2, rect.y1 + 2)
+                    if pdf_point in grown:
+                        if best is None or rect.height < fitz.Rect(best["bbox"]).height:
+                            best = line
+            return best
+
+        def edit_text_at(self, point):
+            page = self.page()
+            if page.rotation % 360:
+                messagebox.showinfo("Edit Text", "Edit Text works on pages without rotation.\n"
+                                                 "Rotate the page back to 0 degrees, edit, then rotate it again.",
+                                    parent=self)
+                return
+            line = self._line_at(self.to_pdf(point))
+            if line is None:
+                self.status_main.config(text="No text there. Use Add Text to write new text.")
+                return
+            spans = [s for s in line["spans"] if s["text"]]
+            first = next(s for s in spans if s["text"].strip())
+            text = "".join(s["text"] for s in spans).strip()
+            family, bold, italic = guess_style(first)
+            size = round(first["size"], 1)
+            color = rgb_to_hex(int_rgb(first["color"]))
+            dialog = FormDialog(
+                self, "Edit Text",
+                [("text", "Text", "str", text, None), ("family", "Font", "choice", family, FAMILIES),
+                 ("size", "Size (pt)", "float", size, None), ("bold", "Bold", "bool", bold, None),
+                 ("italic", "Italic", "bool", italic, None), ("color", "Colour", "color", color, None),
+                 ("fit", "Shrink to fit the old width", "bool", True, None)],
+                intro=f"Original font: {first['font']} {size:g} pt. The old line is removed and the new text "
+                      "is written in the same place.")
+            result = dialog.result
+            if result is None or (result["text"] == text and result["size"] == size and result["family"] == family and
+                                  result["bold"] == bold and result["italic"] == italic and result["color"] == color):
+                return
+            self.push_undo()
+            page = self.page()
+            line_rect = fitz.Rect(line["bbox"])
+            new_size = max(3.0, float(result["size"]))
+            if result["fit"]:
+                width = text_width(result["text"], result["family"], result["bold"], result["italic"], new_size)
+                if width > line_rect.width * 1.02 and width > 0:
+                    new_size = max(3.0, new_size * line_rect.width / width)
+            page.add_redact_annot(line_rect, fill=False)
+            page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+            if result["text"].strip():
+                page.insert_text(fitz.Point(first["origin"][0], first["origin"][1]), result["text"], fontsize=new_size,
+                                 color=hex_to_rgb(result["color"]),
+                                 **font_args(result["family"], result["bold"], result["italic"]))
+            note = f" (size reduced to {new_size:.1f} pt to fit)" if abs(new_size - float(result["size"])) > 0.05 else ""
+            self.after_change("Text changed" + note)
+
+        def add_text(self, start, end):
+            dialog = FormDialog(
+                self, "Add Text",
+                [("text", "Text", "text", "", 5), ("family", "Font", "choice", self.var_family.get(), FAMILIES),
+                 ("size", "Size (pt)", "float", float(self.var_size.get()), None), ("bold", "Bold", "bool", False, None),
+                 ("italic", "Italic", "bool", False, None), ("color", "Colour", "color", rgb_to_hex(self.color), None),
+                 ("align", "Align", "choice", "left", ("left", "center", "right"))])
+            result = dialog.result
+            if result is None or not result["text"].strip():
+                return
+            page = self.page()
+            self.var_family.set(result["family"])
+            self.var_size.set(result["size"])
+            size = float(result["size"])
+            if end is None:
+                lines = result["text"].split("\n")
+                width = max(text_width(line, result["family"], result["bold"], result["italic"], size) for line in lines)
+                end = fitz.Point(start.x + width + size, start.y + len(lines) * size * 1.35 + size * 0.6)
+            rect = self.view_rect_to_pdf(start, end)
+            align = {"left": 0, "center": 1, "right": 2}[result["align"]]
+            args = font_args(result["family"], result["bold"], result["italic"])
+            self.push_undo()
+            page = self.page()
+            for _attempt in range(4):
+                left = page.insert_textbox(rect, result["text"], fontsize=size, color=hex_to_rgb(result["color"]),
+                                           align=align, rotate=page.rotation, **args)
+                if left >= 0:
+                    break
+                if page.rotation % 180:
+                    rect.x1 += -left + size
+                else:
+                    rect.y1 += -left + size
+            self.after_change("Text added (it is part of the page now; Undo removes it)")
+
+        def find_replace(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(
+                self, "Find & Replace Text",
+                [("find", "Find", "str", self.var_query.get(), None), ("replace", "Replace with", "str", "", None),
+                 ("scope", "Pages", "choice", "All pages", ("All pages", "Current page"))],
+                intro="Every occurrence is removed and the new text is written in its place with the same\n"
+                      "size and colour (search ignores upper / lower case).", ok_text="Replace All")
+            result = dialog.result
+            if result is None or not result["find"]:
+                return
+            pages = range(len(self.doc)) if result["scope"] == "All pages" else [self.page_index]
+            self.push_undo()
+            total = 0
+            for number in pages:
+                page = self.doc[number]
+                hits = page.search_for(result["find"])
+                if not hits:
+                    continue
+                spans = [s for b in page.get_text("dict")["blocks"] if b.get("type") == 0
+                         for line in b["lines"] for s in line["spans"]]
+                jobs = []
+                for hit in hits:
+                    span = max(spans, key=lambda s: (fitz.Rect(s["bbox"]) & hit).get_area(), default=None)
+                    if span is None:
+                        continue
+                    family, bold, italic = guess_style(span)
+                    jobs.append((hit, span["size"], int_rgb(span["color"]), span["origin"][1], family, bold, italic))
+                    page.add_redact_annot(hit, fill=False)
+                page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=0)
+                for hit, size, color, baseline, family, bold, italic in jobs:
+                    if result["replace"]:
+                        page.insert_text(fitz.Point(hit.x0, baseline), result["replace"], fontsize=size, color=color,
+                                         **font_args(family, bold, italic))
+                    total += 1
+            if total == 0:
+                self.undo_stack.pop()
+                messagebox.showinfo("Find & Replace", f"'{result['find']}' was not found.", parent=self)
+                return
+            self.refresh_all()
+            self.status_main.config(text=f"Replaced {total} occurrence(s)")
+
+        # ----- pictures ------------------------------------------------------------------------
+
+        def place_picture(self, tool, start, end):
+            if tool == "image":
+                path = filedialog.askopenfilename(title="Insert Picture", parent=self,
+                                                  filetypes=[("Pictures", "*.png *.jpg *.jpeg *.bmp *.gif"), ("All", "*.*")])
+                if not path:
+                    return
+                with Image.open(path) as picture:
+                    picture = picture.convert("RGBA")
+                    buffer = io.BytesIO()
+                    picture.save(buffer, "PNG")
+                data = buffer.getvalue()
+                default_w = 60 * MM
+            elif tool == "signature":
+                if self.signature is None:
+                    pad = SignaturePad(self)
+                    if pad.result is None:
+                        return
+                    self.signature = pad.result
+                data = self.signature
+                default_w = 45 * MM
+            else:
+                dialog = FormDialog(self, "Stamp", [("text", "Stamp", "choice", (self.stamp or {}).get("text", "APPROVED"),
+                                                     STAMPS + ("Custom...",)),
+                                                    ("custom", "Custom text", "str", "", None),
+                                                    ("color", "Colour", "color", (self.stamp or {}).get("color", "#c00000"),
+                                                     None),
+                                                    ("date", "Add today's date", "bool", True, None)])
+                if dialog.result is None:
+                    return
+                text = dialog.result["custom"].strip().upper() if dialog.result["text"] == "Custom..." else \
+                    dialog.result["text"]
+                if not text:
+                    return
+                self.stamp = {"text": text, "color": dialog.result["color"]}
+                data = stamp_image(text, dialog.result["color"], dialog.result["date"])
+                default_w = 50 * MM
+            with Image.open(io.BytesIO(data)) as picture:
+                ratio = picture.height / picture.width
+            if end is None:
+                end = fitz.Point(start.x + default_w, start.y + default_w * ratio)
+            rect = fitz.Rect(start, end)
+            rect.normalize()
+            self.push_undo()
+            try:
+                self.selected_image = self._insert_picture(data, rect)
+            except Exception as exc:
+                self._load_bytes(*self.undo_stack.pop())
+                messagebox.showerror(APP_NAME, f"The picture could not be placed:\n{exc}", parent=self)
+                return
+            self.selected_xref = None
+            self.after_change({"image": "Picture inserted", "signature": "Signature placed (Signature tool keeps it "
+                                                                        "for this session)",
+                               "stamp": "Stamp placed"}[tool])
+
+        # ----- search ---------------------------------------------------------------------------
+
+        def show_search(self):
+            if not self.need_doc():
+                return
+            if not self.search_bar.winfo_ismapped():
+                self.search_bar.pack(side="top", fill="x", before=self.body)
+            self.search_entry.focus_set()
+            self.search_entry.select_range(0, "end")
+
+        def hide_search(self):
+            self.search_bar.pack_forget()
+            self.search = {"query": "", "hits": [], "index": -1}
+            self._draw_overlays()
+            self.canvas.focus_set()
+
+        def find_step(self, direction):
+            if self.doc is None:
+                return
+            query = self.var_query.get().strip()
+            if not query:
+                self.show_search()
+                return
+            if query != self.search["query"]:
+                hits = []
+                for number in range(len(self.doc)):
+                    hits += [(number, rect) for rect in self.doc[number].search_for(query)]
+                self.search = {"query": query, "hits": hits, "index": -1}
+                if hits:
+                    after = [i for i, (p, _r) in enumerate(hits) if p >= self.page_index]
+                    self.search["index"] = (after[0] if after else 0) - (1 if direction > 0 else 0)
+            hits = self.search["hits"]
+            if not hits:
+                self.search_label.config(text="Not found")
+                self.bell()
+                self._draw_overlays()
+                return
+            self.search["index"] = (self.search["index"] + direction) % len(hits)
+            page_no, rect = hits[self.search["index"]]
+            if page_no != self.page_index:
+                self.page_index = page_no
+                self.render()
+            else:
+                self._draw_overlays()
+            page = self.page()
+            _x1, y1, _x2, _y2 = self.to_canvas_rect(rect * page.rotation_matrix)
+            total = float(self.canvas.cget("scrollregion").split()[3])
+            self.canvas.yview_moveto(max(0, (y1 - 120) / total))
+            self.search_label.config(text=f"{self.search['index'] + 1} of {len(hits)}")
+            self._mark_thumb()
+
+        def copy_page_text(self):
+            page = self.page()
+            if page is None:
+                return
+            self.clipboard_clear()
+            self.clipboard_append(page.get_text())
+            self.status_main.config(text="Page text copied to the clipboard")
+
+        # ----- pages ------------------------------------------------------------------------------
+
+        def insert_blank(self):
+            if not self.need_doc():
+                return
+            rect = self.page().rect
+            self.push_undo()
+            self.doc.new_page(self.page_index + 1, width=rect.width, height=rect.height)
+            self.page_index += 1
+            self.after_change("Blank page inserted", structure=True)
+
+        def insert_from_pdf(self):
+            if not self.need_doc():
+                return
+            path = filedialog.askopenfilename(title="Insert Pages from PDF", parent=self, filetypes=[("PDF", "*.pdf")])
+            if not path:
+                return
+            other = self._open_any(path)
+            if other is None:
+                return
+            dialog = FormDialog(self, "Insert Pages", [("pages", "Pages to insert", "str", f"1-{len(other)}", None),
+                                                       ("where", "Insert", "choice", "After current page",
+                                                        ("After current page", "Before current page", "At the end"))])
+            if dialog.result is None:
+                return
+            try:
+                pages = parse_ranges(dialog.result["pages"], len(other))
+            except ValueError as exc:
+                messagebox.showerror(APP_NAME, str(exc), parent=self)
+                return
+            position = {"After current page": self.page_index + 1, "Before current page": self.page_index,
+                        "At the end": len(self.doc)}[dialog.result["where"]]
+            self.push_undo()
+            for offset, number in enumerate(pages):
+                self.doc.insert_pdf(other, from_page=number, to_page=number, start_at=position + offset)
+            other.close()
+            self.page_index = position
+            self.after_change(f"{len(pages)} page(s) inserted", structure=True)
+
+        def duplicate_page(self):
+            if not self.need_doc():
+                return
+            self.push_undo()
+            # copy through a temporary document: fullcopy_page() in PyMuPDF 1.24 fails on blank pages
+            copy = fitz.open()
+            copy.insert_pdf(self.doc, from_page=self.page_index, to_page=self.page_index)
+            self.doc.insert_pdf(copy, start_at=self.page_index + 1)
+            copy.close()
+            self.page_index += 1
+            self.after_change("Page duplicated", structure=True)
+
+        def delete_pages(self, current=False):
+            if not self.need_doc():
+                return
+            if len(self.doc) == 1:
+                messagebox.showinfo(APP_NAME, "A PDF needs at least one page.", parent=self)
+                return
+            if current:
+                pages = [self.page_index]
+            else:
+                dialog = FormDialog(self, "Delete Pages", [("pages", "Pages (e.g. 2, 5-7)", "str",
+                                                            str(self.page_index + 1), None)])
+                if dialog.result is None:
+                    return
+                try:
+                    pages = sorted(set(parse_ranges(dialog.result["pages"], len(self.doc))))
+                except ValueError as exc:
+                    messagebox.showerror(APP_NAME, str(exc), parent=self)
+                    return
+                if len(pages) >= len(self.doc):
+                    messagebox.showinfo(APP_NAME, "A PDF needs at least one page.", parent=self)
+                    return
+            self.push_undo()
+            self.doc.delete_pages(pages)
+            self.page_index = min(self.page_index, len(self.doc) - 1)
+            self.after_change(f"{len(pages)} page(s) deleted", structure=True)
+
+        def rotate(self, degrees):
+            if not self.need_doc():
+                return
+            self.push_undo()
+            page = self.page()
+            page.set_rotation((page.rotation + degrees) % 360)
+            self.after_change(f"Page rotated to {page.rotation} degrees", structure=True)
+
+        def move_page(self, delta):
+            if not self.need_doc():
+                return
+            target = self.page_index + delta
+            if not 0 <= target < len(self.doc):
+                return
+            self.push_undo()
+            self.doc.move_page(self.page_index, target if delta < 0 else target + 1)
+            self.page_index = target
+            self.after_change(f"Page moved to position {target + 1}", structure=True)
+
+        def reset_crop(self):
+            page = self.page()
+            if page is None or page.cropbox == page.mediabox:
+                return
+            self.push_undo()
+            page.set_cropbox(page.mediabox)
+            self.after_change("Crop removed", structure=True)
+
+        def extract_pages(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(self, "Extract Pages", [("pages", "Pages (e.g. 1-3, 5)", "str",
+                                                         str(self.page_index + 1), None)])
+            if dialog.result is None:
+                return
+            try:
+                pages = parse_ranges(dialog.result["pages"], len(self.doc))
+            except ValueError as exc:
+                messagebox.showerror(APP_NAME, str(exc), parent=self)
+                return
+            path = filedialog.asksaveasfilename(title="Save Extracted Pages", parent=self, defaultextension=".pdf",
+                                                initialfile=self._stem() + "_pages.pdf", filetypes=[("PDF", "*.pdf")])
+            if not path:
+                return
+            new = fitz.open()
+            for number in pages:
+                new.insert_pdf(self.doc, from_page=number, to_page=number)
+            new.save(path, garbage=3, deflate=True)
+            new.close()
+            self.status_main.config(text=f"{len(pages)} page(s) saved to {path}")
+
+        def split_document(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(self, "Split Document",
+                                [("mode", "Split", "choice", "Every N pages", ("Every N pages", "By ranges")),
+                                 ("n", "N (pages per file)", "int", 1, None),
+                                 ("ranges", "Ranges (e.g. 1-3; 4-10)", "str", "", None)],
+                                intro="Files are written as <name>_part1.pdf, <name>_part2.pdf ...")
+            if dialog.result is None:
+                return
+            count = len(self.doc)
+            if dialog.result["mode"] == "Every N pages":
+                n = max(1, dialog.result["n"])
+                groups = [list(range(i, min(count, i + n))) for i in range(0, count, n)]
+            else:
+                try:
+                    groups = [parse_ranges(part, count) for part in dialog.result["ranges"].split(";") if part.strip()]
+                except ValueError as exc:
+                    messagebox.showerror(APP_NAME, str(exc), parent=self)
+                    return
+            folder = filedialog.askdirectory(title="Folder for the Split Files", parent=self)
+            if not folder:
+                return
+            for number, group in enumerate(groups, 1):
+                new = fitz.open()
+                for page_no in group:
+                    new.insert_pdf(self.doc, from_page=page_no, to_page=page_no)
+                new.save(os.path.join(folder, f"{self._stem()}_part{number}.pdf"), garbage=3, deflate=True)
+                new.close()
+            self.status_main.config(text=f"Split into {len(groups)} files in {folder}")
+
+        def merge_pdfs(self):
+            if not self.need_doc():
+                return
+            paths = filedialog.askopenfilenames(title="PDFs to Append", parent=self, filetypes=[("PDF", "*.pdf")])
+            if not paths:
+                return
+            others = []
+            for path in paths:
+                other = self._open_any(path)
+                if other is None:
+                    return
+                others.append(other)
+            self.push_undo()
+            added = 0
+            for other in others:
+                added += len(other)
+                self.doc.insert_pdf(other)
+                other.close()
+            self.after_change(f"{len(paths)} file(s), {added} page(s) appended", structure=True)
+
+        # ----- document stamps ----------------------------------------------------------------------
+
+        def _place_line(self, page, text, position, size, color, family="Arial"):
+            """Write a line of text at top/bottom left/center/right, upright on rotated pages too."""
+            view = page.rect
+            margin = 12 * MM
+            width = text_width(text, family, False, False, size)
+            vertical, horizontal = position.split("-")
+            y = margin * 0.8 if vertical == "top" else view.height - margin * 0.6
+            x = {"left": margin, "center": (view.width - width) / 2, "right": view.width - margin - width}[horizontal]
+            point = fitz.Point(x, y) * page.derotation_matrix
+            page.insert_text(point, text, fontsize=size, color=color, rotate=page.rotation, **font_args(family))
+
+        def page_numbers(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(self, "Page Numbers",
+                                [("format", "Format", "choice", "Page {n} of {total}",
+                                  ("Page {n} of {total}", "{n} / {total}", "{n}", "- {n} -")),
+                                 ("position", "Position", "choice", "bottom-center",
+                                  ("bottom-center", "bottom-right", "bottom-left", "top-center", "top-right", "top-left")),
+                                 ("start", "First number", "int", 1, None), ("skip", "Skip the first page", "bool", False,
+                                                                             None),
+                                 ("size", "Size (pt)", "float", 9, None), ("color", "Colour", "color", "#404040", None)])
+            if dialog.result is None:
+                return
+            r = dialog.result
+            self.push_undo()
+            total = len(self.doc) - (1 if r["skip"] else 0)
+            for index in range(len(self.doc)):
+                if r["skip"] and index == 0:
+                    continue
+                n = index + r["start"] - (1 if r["skip"] else 0)
+                text = r["format"].replace("{n}", str(n)).replace("{total}", str(total + r["start"] - 1))
+                self._place_line(self.doc[index], text, r["position"], r["size"], hex_to_rgb(r["color"]))
+            self.after_change("Page numbers added", structure=True)
+
+        def header_footer(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(self, "Header / Footer",
+                                [("header", "Header text", "str", "", None),
+                                 ("header_pos", "Header position", "choice", "top-center",
+                                  ("top-left", "top-center", "top-right")),
+                                 ("footer", "Footer text", "str", "", None),
+                                 ("footer_pos", "Footer position", "choice", "bottom-left",
+                                  ("bottom-left", "bottom-center", "bottom-right")),
+                                 ("size", "Size (pt)", "float", 9, None), ("color", "Colour", "color", "#404040", None)],
+                                intro="You can use {date} and {file} in the texts.")
+            if dialog.result is None:
+                return
+            r = dialog.result
+            if not r["header"].strip() and not r["footer"].strip():
+                return
+            replace = {"{date}": datetime.now().strftime("%d.%m.%Y"), "{file}": os.path.basename(self.path or "")}
+            self.push_undo()
+            for page in self.doc:
+                for key in ("header", "footer"):
+                    text = r[key]
+                    for token, value in replace.items():
+                        text = text.replace(token, value)
+                    if text.strip():
+                        self._place_line(page, text, r[f"{key}_pos"], r["size"], hex_to_rgb(r["color"]))
+            self.after_change("Header / footer added", structure=True)
+
+        def watermark(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(self, "Watermark",
+                                [("text", "Text", "str", "CONFIDENTIAL", None), ("size", "Size (pt)", "float", 64, None),
+                                 ("color", "Colour", "color", "#c00000", None),
+                                 ("opacity", "Opacity (0.05 - 1)", "float", 0.18, None),
+                                 ("angle", "Angle (degrees)", "float", 45, None),
+                                 ("pages", "Pages", "str", f"1-{len(self.doc)}", None)])
+            if dialog.result is None or not dialog.result["text"].strip():
+                return
+            r = dialog.result
+            try:
+                pages = parse_ranges(r["pages"], len(self.doc))
+            except ValueError as exc:
+                messagebox.showerror(APP_NAME, str(exc), parent=self)
+                return
+            self.push_undo()
+            args = font_args("Arial", True)
+            width = text_width(r["text"], "Arial", True, False, r["size"])
+            for number in pages:
+                page = self.doc[number]
+                center = fitz.Point(page.rect.width / 2, page.rect.height / 2) * page.derotation_matrix
+                start = fitz.Point(center.x - width / 2, center.y + r["size"] * 0.35)
+                page.insert_text(start, r["text"], fontsize=r["size"], color=hex_to_rgb(r["color"]),
+                                 fill_opacity=max(0.05, min(1.0, r["opacity"])),
+                                 morph=(center, fitz.Matrix(r["angle"] + page.rotation)), **args)
+            self.after_change(f"Watermark added to {len(pages)} page(s)", structure=True)
+
+        # ----- security and properties ----------------------------------------------------------------
+
+        def protect_document(self):
+            if not self.need_doc():
+                return
+            dialog = FormDialog(self, "Protect with Password",
+                                [("user", "Password to open", "password", "", None),
+                                 ("confirm", "Repeat password", "password", "", None),
+                                 ("owner", "Owner password (optional)", "password", "", None),
+                                 ("print", "Allow printing", "bool", True, None),
+                                 ("copy", "Allow copying text", "bool", False, None)],
+                                intro="The file is encrypted with AES-256 when you save it.")
+            if dialog.result is None:
+                return
+            r = dialog.result
+            if not r["user"] or r["user"] != r["confirm"]:
+                messagebox.showerror(APP_NAME, "The passwords are empty or do not match.", parent=self)
+                return
+            permissions = fitz.PDF_PERM_ACCESSIBILITY
+            if r["print"]:
+                permissions |= fitz.PDF_PERM_PRINT | fitz.PDF_PERM_PRINT_HQ
+            if r["copy"]:
+                permissions |= fitz.PDF_PERM_COPY
+            self.protect = {"user": r["user"], "owner": r["owner"] or r["user"] + "#owner", "permissions": permissions}
+            self._mark_dirty()
+            self.status_main.config(text="Password set: it is applied when you save (Ctrl+S)")
+
+        def remove_password(self):
+            if self.protect is None:
+                self.status_main.config(text="This document has no password")
+                return
+            self.protect = None
+            self._mark_dirty()
+            self.status_main.config(text="Password removed: save to write the file without it")
+
+        def properties(self):
+            if not self.need_doc():
+                return
+            meta = self.doc.metadata or {}
+            size = len(self.doc.tobytes(garbage=0)) / 1024
+            dialog = FormDialog(self, "Document Properties",
+                                [("title", "Title", "str", meta.get("title", ""), None),
+                                 ("author", "Author", "str", meta.get("author", ""), None),
+                                 ("subject", "Subject", "str", meta.get("subject", ""), None),
+                                 ("keywords", "Keywords", "str", meta.get("keywords", ""), None)],
+                                intro=f"Pages: {len(self.doc)}   |   Size: about {size:,.0f} KB   |   PDF: "
+                                      f"{meta.get('format', '')}\nCreator: {meta.get('creator', '')}   |   "
+                                      f"Producer: {meta.get('producer', '')}\nEncrypted: "
+                                      f"{'yes' if self.protect else 'no'}")
+            if dialog.result is None:
+                return
+            self.push_undo()
+            meta.update(dialog.result)
+            self.doc.set_metadata(meta)
+            self.status_main.config(text="Properties updated")
+
+        # ----- files -------------------------------------------------------------------------------
+
+        def _stem(self):
+            return os.path.splitext(os.path.basename(self.path))[0] if self.path else "document"
+
+        def _open_any(self, path, with_password=False):
+            """Open a PDF, asking for its password when needed. Returns the document (or None);
+            with_password=True returns (document, password)."""
+            try:
+                with open(path, "rb") as handle:
+                    data = handle.read()
+                doc = fitz.open("pdf", data)
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Cannot open the PDF:\n{exc}", parent=self)
+                return (None, None) if with_password else None
+            password = None
+            if doc.needs_pass:
+                for _attempt in range(3):
+                    dialog = FormDialog(self, "Password", [("password", "Password", "password", "", None)],
+                                        intro=f"{os.path.basename(path)} is protected.")
+                    if dialog.result is None:
+                        return (None, None) if with_password else None
+                    if doc.authenticate(dialog.result["password"]):
+                        password = dialog.result["password"]
+                        break
+                    messagebox.showerror(APP_NAME, "Wrong password.", parent=self)
+                else:
+                    return (None, None) if with_password else None
+            return (doc, password) if with_password else doc
+
+        def _confirm_discard(self):
+            if not self.dirty:
+                return True
+            answer = messagebox.askyesnocancel(APP_NAME, "Save the changes to the PDF?", parent=self)
+            if answer is None:
+                return False
+            return self.save() if answer else True
+
+        def open_dialog(self):
+            if not self._confirm_discard():
+                return
+            path = filedialog.askopenfilename(title="Open PDF", parent=self, filetypes=[("PDF", "*.pdf"), ("All", "*.*")])
+            if path:
+                self.open_file(path, confirmed=True)
+
+        def open_file(self, path, confirmed=False):
+            if not confirmed and not self._confirm_discard():
+                return
+            doc, password = self._open_any(path, with_password=True)
+            if doc is None:
+                return
+            if password:
+                self.protect = {"user": password, "owner": password + "#owner",
+                                "permissions": fitz.PDF_PERM_ACCESSIBILITY | fitz.PDF_PERM_PRINT | fitz.PDF_PERM_PRINT_HQ}
+                data = doc.tobytes(encryption=fitz.PDF_ENCRYPT_NONE)     # unencrypted working copy in memory
+                doc = fitz.open("pdf", data)
+            else:
+                self.protect = None
+            self.doc, self.path = doc, os.path.abspath(path)
+            self.page_index, self.selected_xref, self.selected_image = 0, None, None
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self.dirty = False
+            self.search = {"query": "", "hits": [], "index": -1}
+            self.fit_mode = "width"
+            self.refresh_all()
+            self._update_title()
+            extra = " (password protected: kept when saving)" if self.protect else ""
+            self.status_main.config(text=f"Opened {os.path.basename(path)}: {len(doc)} page(s){extra}")
+
+        def close_document(self):
+            if not self._confirm_discard():
+                return
+            self.doc, self.path, self.protect = None, None, None
+            self.dirty = False
+            self.undo_stack.clear()
+            self.redo_stack.clear()
+            self.refresh_all()
+            self._update_title()
+
+        def _write(self, path, optimized=False):
+            options = {"garbage": 4 if optimized else 3, "deflate": True, "clean": optimized}
+            if optimized:
+                options.update(deflate_images=True, deflate_fonts=True)
+            if self.protect:
+                options.update(encryption=fitz.PDF_ENCRYPT_AES_256, user_pw=self.protect["user"],
+                               owner_pw=self.protect["owner"], permissions=self.protect["permissions"])
+            data = self.doc.tobytes(**options)
+            tmp = path + ".part"
+            with open(tmp, "wb") as handle:
+                handle.write(data)
+            os.replace(tmp, path)
+            return len(data)
+
+        def save(self):
+            if not self.need_doc():
+                return False
+            if not self.path:
+                return self.save_as()
+            try:
+                size = self._write(self.path)
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Cannot save:\n{exc}", parent=self)
+                return False
+            self.dirty = False
+            self._update_title()
+            self.status_main.config(text=f"Saved {os.path.basename(self.path)} ({size / 1024:,.0f} KB)"
+                                         + ("  [password protected]" if self.protect else ""))
+            return True
+
+        def save_as(self):
+            if not self.need_doc():
+                return False
+            path = filedialog.asksaveasfilename(title="Save PDF As", parent=self, defaultextension=".pdf",
+                                                initialfile=self._stem() + ".pdf", filetypes=[("PDF", "*.pdf")])
+            if not path:
+                return False
+            self.path = os.path.abspath(path)
+            return self.save()
+
+        def save_optimized(self):
+            if not self.need_doc():
+                return
+            before = len(self.doc.tobytes(garbage=0))
+            path = filedialog.asksaveasfilename(title="Save Optimized", parent=self, defaultextension=".pdf",
+                                                initialfile=self._stem() + "_small.pdf", filetypes=[("PDF", "*.pdf")])
+            if not path:
+                return
+            try:
+                after = self._write(path, optimized=True)
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Cannot save:\n{exc}", parent=self)
+                return
+            self.status_main.config(text=f"Optimized: {before / 1024:,.0f} KB -> {after / 1024:,.0f} KB ({path})")
+
+        # ----- exports ------------------------------------------------------------------------------
+
+        def export_page_png(self):
+            page = self.page()
+            if page is None:
+                return
+            path = filedialog.asksaveasfilename(title="Export Page", parent=self, defaultextension=".png",
+                                                initialfile=f"{self._stem()}_p{self.page_index + 1}.png",
+                                                filetypes=[("PNG", "*.png")])
+            if path:
+                page.get_pixmap(dpi=200, alpha=False).save(path)
+                self.status_main.config(text=f"Page exported: {path}")
+
+        def export_all_png(self):
+            if not self.need_doc():
+                return
+            folder = filedialog.askdirectory(title="Folder for the Pictures", parent=self)
+            if not folder:
+                return
+            for index, page in enumerate(self.doc, 1):
+                page.get_pixmap(dpi=150, alpha=False).save(os.path.join(folder, f"{self._stem()}_p{index:03d}.png"))
+                if index % 5 == 0:
+                    self.status_main.config(text=f"Exporting {index}/{len(self.doc)}...")
+                    self.update_idletasks()
+            self.status_main.config(text=f"{len(self.doc)} page(s) exported to {folder}")
+
+        def export_text(self):
+            if not self.need_doc():
+                return
+            path = filedialog.asksaveasfilename(title="Export Text", parent=self, defaultextension=".txt",
+                                                initialfile=self._stem() + ".txt", filetypes=[("Text", "*.txt")])
+            if path:
+                with open(path, "w", encoding="utf-8") as handle:
+                    for index, page in enumerate(self.doc, 1):
+                        handle.write(f"--- Page {index} ---\n{page.get_text()}\n")
+                self.status_main.config(text=f"Text exported: {path}")
+
+        def extract_images(self):
+            if not self.need_doc():
+                return
+            folder = filedialog.askdirectory(title="Folder for the Images", parent=self)
+            if not folder:
+                return
+            count, seen = 0, set()
+            for index, page in enumerate(self.doc, 1):
+                for number, image in enumerate(page.get_images(full=True), 1):
+                    xref = image[0]
+                    if xref in seen:
+                        continue
+                    seen.add(xref)
+                    try:
+                        data = self.doc.extract_image(xref)
+                    except Exception:
+                        continue
+                    with open(os.path.join(folder, f"page{index}_img{number}.{data['ext']}"), "wb") as handle:
+                        handle.write(data["image"])
+                    count += 1
+            self.status_main.config(text=f"{count} image(s) extracted to {folder}" if count else "No images found")
+
+        def export_word(self, with_images=True):
+            if not self.need_doc():
+                return
+            try:
+                from pdf2docx import Converter
+            except ImportError:
+                messagebox.showerror(APP_NAME, "The Word export needs the pdf2docx package.", parent=self)
+                return
+            suffix = "" if with_images else "_no_images"
+            path = filedialog.asksaveasfilename(title="Export to Word", parent=self, defaultextension=".docx",
+                                                initialfile=f"{self._stem()}{suffix}.docx",
+                                                filetypes=[("Word", "*.docx")])
+            if not path:
+                return
+            source = os.path.join(tempfile.gettempdir(), "pdf_editor_95_export.pdf")
+            # convert a copy without annotations: Word cannot hold them, and some (rectangles)
+            # make pdf2docx drop part of the page
+            copy = fitz.open("pdf", self.doc.tobytes())
+            for page in copy:
+                for annot in list(page.annots()):
+                    page.delete_annot(annot)
+            copy.save(source, garbage=3, deflate=True)
+            copy.close()
+            self.status_main.config(text="Converting to Word in the background...")
+            result = {"skipped": []}
+
+            class Collector(logging.Handler):
+                def emit(self, record):
+                    found = re.search(r"Ignore page (\d+)", record.getMessage())
+                    if found:
+                        result["skipped"].append(int(found.group(1)) + 1)
+
+            def work():
+                root = logging.getLogger()
+                root.setLevel(logging.ERROR)
+                collector = Collector(level=logging.ERROR)
+                root.addHandler(collector)
+                try:
+                    target = path if with_images else path + ".tmp.docx"
+                    converter = Converter(source)
+                    converter.convert(target)
+                    converter.close()
+                    if not with_images:
+                        remove_images_from_docx(target, path)
+                        os.remove(target)
+                    result["ok"] = True
+                except Exception as exc:
+                    result["error"] = exc
+                finally:
+                    root.removeHandler(collector)
+
+            thread = threading.Thread(target=work, daemon=True)
+            thread.start()
+
+            def poll():
+                if thread.is_alive():
+                    self.after(200, poll)
+                    return
+                if "error" in result:
+                    messagebox.showerror(APP_NAME, f"Word export failed:\n{result['error']}", parent=self)
+                    self.status_main.config(text="Word export failed")
+                elif result["skipped"]:
+                    pages = ", ".join(str(n) for n in sorted(set(result["skipped"])))
+                    messagebox.showwarning(APP_NAME, f"The Word document was saved, but the converter could not "
+                                                     f"rebuild page(s) {pages}; they may be missing or incomplete.\n\n"
+                                                     f"{path}", parent=self)
+                    self.status_main.config(text=f"Word document saved with problems on page(s) {pages}: {path}")
+                else:
+                    self.status_main.config(text=f"Word document saved (annotations are not carried into Word): "
+                                                 f"{path}")
+
+            poll()
+
+        def print_document(self):
+            if not IS_WINDOWS or not self.need_doc():
+                return
+            path = os.path.join(tempfile.gettempdir(), "pdf_editor_95_print.pdf")
+            self.doc.save(path)
+            try:
+                os.startfile(path, "print")
+                self.status_main.config(text="Sent to the default printer")
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Cannot print:\n{exc}", parent=self)
+
+        # ----- help and closing ------------------------------------------------------------------------
+
+        def show_help(self):
+            messagebox.showinfo(
+                "How to Use",
+                "EDIT TEXT (E): click a line, change it. The old line is removed and the new text\n"
+                "is written in the same place, size and colour. For many places at once use\n"
+                "Edit > Find & Replace (Ctrl+H).\n\n"
+                "ADD: Text (T), Note (N), Highlight (L) / Underline (U) / Strikeout (K) over words,\n"
+                "Rectangle (R), Ellipse (O), Line (I), Arrow (A), Pen (P), Image (G),\n"
+                "Signature (S, drawn once per session), Stamp (M).\n\n"
+                "HIDE: Whiteout (W) covers content; Redact (X) removes it for good.\n"
+                "Crop (C) keeps an area of the page.\n\n"
+                "SELECT (V): click an annotation, drag boxes / notes to move them, Del deletes.\n"
+                "Double-click a note to edit it.\n\n"
+                "PAGES: right-click a thumbnail, or the Page menu. DOCUMENT: page numbers,\n"
+                "header / footer, watermark, password, properties.\n"
+                "Every change can be undone with Ctrl+Z.",
+                parent=self)
+
+        def on_close(self):
+            if self._confirm_discard():
+                self.destroy()
+
+
+    def main():
+        path = sys.argv[1] if len(sys.argv) > 1 and os.path.isfile(sys.argv[1]) else None
+        PDFEditor(path).mainloop()
+
 
     if __name__ == "__main__":
-        rootacrobated = tk.Tk()
-        app = RetroPDFEditor(rootacrobated)
-        rootacrobated.mainloop()
+        main()
+
+    # class RetroPDFEditor:
+        # def __init__(self, rootacrobated):
+            # self.rootacrobated = rootacrobated
+            # self.rootacrobated.title("PDF Editor")
+            # self.rootacrobated.geometry("1100x700")
+            
+            # # Windows 95 color scheme
+            # self.bg_color = "#c0c0c0"
+            # self.active_bg = "#000080"
+            # self.button_bg = "#c0c0c0"
+            # self.text_color = "#000000"
+            
+            # self.rootacrobated.configure(bg=self.bg_color)
+            
+            # self.pdf_document = None
+            # self.current_page = 0
+            # self.pdf_path = None
+            # self.zoom_level = 1.0
+            # self.tool_mode = None  # 'text', 'highlight', 'draw', 'erase'
+            # self.annotations = []
+            # self.current_color = (1, 0, 0)  # Red
+            # self.font_size = 12
+            # self.drawing = False
+            # self.draw_start = None
+            # self.temp_shape = None  # For preview rectangle/circle
+            # self.draw_points = []  # For freehand drawing
+            
+            # self.create_menu()
+            # self.create_toolbar()
+            # self.create_main_area()
+            # self.create_statusbar()
+            
+        # def create_menu(self):
+            # menubar = tk.Menu(self.rootacrobated, bg=self.bg_color, relief=tk.FLAT)
+            # self.rootacrobated.config(menu=menubar)
+            
+            # # File menu
+            # file_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
+            # menubar.add_cascade(label="File", menu=file_menu)
+            # file_menu.add_command(label="Open PDF...", command=self.open_pdf, accelerator="Ctrl+O")
+            # file_menu.add_command(label="Save", command=self.save_pdf, accelerator="Ctrl+S")
+            # file_menu.add_command(label="Save As...", command=self.save_pdf_as)
+            # file_menu.add_command(label="Export Page as Image...", command=self.export_page_image)
+            # file_menu.add_separator()
+            # file_menu.add_command(label="Exit", command=self.rootacrobated.quit)
+            
+            # # Edit menu
+            # edit_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
+            # menubar.add_cascade(label="Edit", menu=edit_menu)
+            # edit_menu.add_command(label="Add Text", command=lambda: self.set_tool('text'))
+            # edit_menu.add_command(label="Highlight Text", command=lambda: self.set_tool('highlight'))
+            # edit_menu.add_command(label="Draw", command=lambda: self.set_tool('draw'))
+            # edit_menu.add_command(label="Add Rectangle", command=self.add_rectangle)
+            # edit_menu.add_command(label="Add Circle", command=self.add_circle)
+            # edit_menu.add_separator()
+            # edit_menu.add_command(label="Insert Blank Page", command=self.insert_page)
+            # edit_menu.add_command(label="Delete Page", command=self.delete_page)
+            # edit_menu.add_command(label="Rotate Page", command=self.rotate_page)
+            # edit_menu.add_separator()
+            # edit_menu.add_command(label="Merge PDFs...", command=self.merge_pdfs)
+            
+            # # View menu
+            # view_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
+            # menubar.add_cascade(label="View", menu=view_menu)
+            # view_menu.add_command(label="Zoom In", command=self.zoom_in, accelerator="+")
+            # view_menu.add_command(label="Zoom Out", command=self.zoom_out, accelerator="-")
+            # view_menu.add_command(label="Actual Size", command=self.actual_size, accelerator="Ctrl+0")
+            # view_menu.add_command(label="Fit Width", command=self.fit_width)
+            # view_menu.add_command(label="Fit Page", command=self.fit_page)
+            
+            # # Tools menu
+            # tools_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
+            # menubar.add_cascade(label="Tools", menu=tools_menu)
+            # tools_menu.add_command(label="Text Tool", command=lambda: self.set_tool('text'))
+            # tools_menu.add_command(label="Highlight Tool", command=lambda: self.set_tool('highlight'))
+            # tools_menu.add_command(label="Draw Tool", command=lambda: self.set_tool('draw'))
+            # tools_menu.add_separator()
+            # tools_menu.add_command(label="Choose Color...", command=self.choose_color)
+            # tools_menu.add_command(label="Font Size...", command=self.set_font_size)
+            
+            # # Document menu
+            # doc_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
+            # menubar.add_cascade(label="Document", menu=doc_menu)
+            # doc_menu.add_command(label="Document Properties", command=self.show_properties)
+            # doc_menu.add_command(label="Extract Pages...", command=self.extract_pages)
+            # doc_menu.add_command(label="Split Document...", command=self.split_document)
+            
+            # # Help menu
+            # help_menu = tk.Menu(menubar, tearoff=0, bg=self.bg_color)
+            # menubar.add_cascade(label="Help", menu=help_menu)
+            # help_menu.add_command(label="About", command=self.show_about)
+            
+        # def create_toolbar(self):
+            # toolbar = tk.Frame(self.rootacrobated, bg=self.bg_color, relief=tk.RAISED, bd=2)
+            # toolbar.pack(side=tk.TOP, fill=tk.X, padx=2, pady=2)
+            
+            # # File operations
+            # btn_open = tk.Button(toolbar, text="Open", width=7, command=self.open_pdf,
+                                # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_open.pack(side=tk.LEFT, padx=2, pady=2)
+            
+            # btn_save = tk.Button(toolbar, text="Save", width=7, command=self.save_pdf,
+                                # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_save.pack(side=tk.LEFT, padx=2, pady=2)
+            
+            # tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            
+            # # Navigation
+            # btn_first = tk.Button(toolbar, text="|<", width=4, command=self.first_page,
+                                 # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_first.pack(side=tk.LEFT, padx=1, pady=2)
+            
+            # btn_prev = tk.Button(toolbar, text="<", width=4, command=self.prev_page,
+                                # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_prev.pack(side=tk.LEFT, padx=1, pady=2)
+            
+            # self.page_entry = tk.Entry(toolbar, width=5, justify=tk.CENTER)
+            # self.page_entry.pack(side=tk.LEFT, padx=2)
+            # self.page_entry.bind('<Return>', lambda e: self.goto_page())
+            
+            # btn_next = tk.Button(toolbar, text=">", width=4, command=self.next_page,
+                                # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_next.pack(side=tk.LEFT, padx=1, pady=2)
+            
+            # btn_last = tk.Button(toolbar, text=">|", width=4, command=self.last_page,
+                                # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_last.pack(side=tk.LEFT, padx=1, pady=2)
+            
+            # tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            
+            # # Zoom controls
+            # btn_zoom_out = tk.Button(toolbar, text="-", width=3, command=self.zoom_out,
+                                    # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_zoom_out.pack(side=tk.LEFT, padx=1, pady=2)
+            
+            # self.zoom_label = tk.Label(toolbar, text="100%", width=6, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
+            # self.zoom_label.pack(side=tk.LEFT, padx=2)
+            
+            # btn_zoom_in = tk.Button(toolbar, text="+", width=3, command=self.zoom_in,
+                                   # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_zoom_in.pack(side=tk.LEFT, padx=1, pady=2)
+            
+            # tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            
+            # # Tool buttons
+            # self.btn_text = tk.Button(toolbar, text="Text", width=7, command=lambda: self.set_tool('text'),
+                                     # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # self.btn_text.pack(side=tk.LEFT, padx=2, pady=2)
+            
+            # self.btn_highlight = tk.Button(toolbar, text="Highlight", width=8, command=lambda: self.set_tool('highlight'),
+                                           # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # self.btn_highlight.pack(side=tk.LEFT, padx=2, pady=2)
+            
+            # self.btn_draw = tk.Button(toolbar, text="Draw", width=7, command=lambda: self.set_tool('draw'),
+                                     # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # self.btn_draw.pack(side=tk.LEFT, padx=2, pady=2)
+            
+            # tk.Frame(toolbar, width=2, bg="#808080", relief=tk.SUNKEN).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+            
+            # # Page operations
+            # btn_rotate = tk.Button(toolbar, text="Rotate", width=7, command=self.rotate_page,
+                                  # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_rotate.pack(side=tk.LEFT, padx=2, pady=2)
+            
+            # btn_delete = tk.Button(toolbar, text="Del Page", width=8, command=self.delete_page,
+                                  # bg=self.button_bg, relief=tk.RAISED, bd=2)
+            # btn_delete.pack(side=tk.LEFT, padx=2, pady=2)
+            
+        # def create_main_area(self):
+            # # Main container
+            # main_container = tk.Frame(self.rootacrobated, bg=self.bg_color)
+            # main_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # # Left sidebar with thumbnails
+            # self.sidebar = tk.Frame(main_container, bg=self.bg_color, width=150, relief=tk.SUNKEN, bd=2)
+            # self.sidebar.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+            # self.sidebar.pack_propagate(False)
+            
+            # sidebar_label = tk.Label(self.sidebar, text="Pages", bg=self.bg_color, font=("MS Sans Serif", 8, "bold"))
+            # sidebar_label.pack(pady=5)
+            
+            # self.thumbnail_canvas = tk.Canvas(self.sidebar, bg="white", width=140)
+            # thumb_scrollbar = tk.Scrollbar(self.sidebar, orient=tk.VERTICAL, command=self.thumbnail_canvas.yview)
+            # self.thumbnail_canvas.configure(yscrollcommand=thumb_scrollbar.set)
+            
+            # thumb_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            # self.thumbnail_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # # Bind mouse wheel for thumbnail scrolling
+            # self.thumbnail_canvas.bind('<MouseWheel>', self.on_thumbnail_mousewheel)
+            # self.thumbnail_canvas.bind('<Button-4>', self.on_thumbnail_mousewheel)
+            # self.thumbnail_canvas.bind('<Button-5>', self.on_thumbnail_mousewheel)
+            
+            # # Main canvas area
+            # canvas_container = tk.Frame(main_container, bg=self.bg_color, relief=tk.SUNKEN, bd=2)
+            # canvas_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # self.scrollbar_y = tk.Scrollbar(canvas_container, orient=tk.VERTICAL)
+            # self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+            
+            # self.scrollbar_x = tk.Scrollbar(canvas_container, orient=tk.HORIZONTAL)
+            # self.scrollbar_x.pack(side=tk.BOTTOM, fill=tk.X)
+            
+            # self.canvas = tk.Canvas(canvas_container, bg="white", 
+                                   # yscrollcommand=self.scrollbar_y.set,
+                                   # xscrollcommand=self.scrollbar_x.set)
+            # self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            
+            # self.scrollbar_y.config(command=self.canvas.yview)
+            # self.scrollbar_x.config(command=self.canvas.xview)
+            
+            # # Bind mouse events for drawing
+            # self.canvas.bind('<Button-1>', self.on_canvas_click)
+            # self.canvas.bind('<B1-Motion>', self.on_canvas_drag)
+            # self.canvas.bind('<ButtonRelease-1>', self.on_canvas_release)
+            
+            # # Bind mouse wheel for scrolling
+            # self.canvas.bind('<MouseWheel>', self.on_mousewheel)
+            # self.canvas.bind('<Button-4>', self.on_mousewheel)  # Linux scroll up
+            # self.canvas.bind('<Button-5>', self.on_mousewheel)  # Linux scroll down
+            
+        # def create_statusbar(self):
+            # statusbar = tk.Frame(self.rootacrobated, bg=self.bg_color, relief=tk.SUNKEN, bd=1)
+            # statusbar.pack(side=tk.BOTTOM, fill=tk.X)
+            
+            # self.status_label = tk.Label(statusbar, text="Ready", bg=self.bg_color, 
+                                         # anchor=tk.W, padx=5)
+            # self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            
+            # self.tool_label = tk.Label(statusbar, text="Tool: Select", bg=self.bg_color, 
+                                       # padx=10, relief=tk.SUNKEN, bd=1)
+            # self.tool_label.pack(side=tk.RIGHT, padx=2)
+            
+            # self.page_label = tk.Label(statusbar, text="No document", bg=self.bg_color, 
+                                       # padx=10, relief=tk.SUNKEN, bd=1)
+            # self.page_label.pack(side=tk.RIGHT, padx=2)
+            
+        # def set_tool(self, tool):
+            # self.tool_mode = tool
+            
+            # # Reset all button reliefs
+            # self.btn_text.config(relief=tk.RAISED)
+            # self.btn_highlight.config(relief=tk.RAISED)
+            # self.btn_draw.config(relief=tk.RAISED)
+            
+            # # Set active button
+            # if tool == 'text':
+                # self.btn_text.config(relief=tk.SUNKEN)
+                # self.tool_label.config(text="Tool: Text")
+            # elif tool == 'highlight':
+                # self.btn_highlight.config(relief=tk.SUNKEN)
+                # self.tool_label.config(text="Tool: Highlight")
+            # elif tool == 'draw':
+                # self.btn_draw.config(relief=tk.SUNKEN)
+                # self.tool_label.config(text="Tool: Draw")
+            # elif tool == 'rectangle':
+                # self.tool_label.config(text="Tool: Rectangle")
+            # elif tool == 'circle':
+                # self.tool_label.config(text="Tool: Circle")
+            # else:
+                # self.tool_label.config(text="Ready")
+                
+        # def on_mousewheel(self, event):
+            # if event.num == 5 or event.delta < 0:
+                # self.canvas.yview_scroll(1, "units")
+            # elif event.num == 4 or event.delta > 0:
+                # self.canvas.yview_scroll(-1, "units")
+        
+        # def on_thumbnail_mousewheel(self, event):
+            # if event.num == 5 or event.delta < 0:
+                # self.thumbnail_canvas.yview_scroll(1, "units")
+            # elif event.num == 4 or event.delta > 0:
+                # self.thumbnail_canvas.yview_scroll(-1, "units")
+                
+        # def on_canvas_click(self, event):
+            # if not self.pdf_document:
+                # return
+                
+            # # Convert canvas coordinates to PDF coordinates
+            # canvas_x = self.canvas.canvasx(event.x)
+            # canvas_y = self.canvas.canvasy(event.y)
+            
+            # if self.tool_mode == 'text':
+                # text = simpledialog.askstring("Add Text", "Enter text:")
+                # if text:
+                    # page = self.pdf_document[self.current_page]
+                    # pdf_x = canvas_x / self.zoom_level
+                    # pdf_y = canvas_y / self.zoom_level
+                    # page.insert_text((pdf_x, pdf_y), text, fontsize=self.font_size, 
+                                   # color=self.current_color)
+                    # self.display_page()
+                    
+            # elif self.tool_mode in ['highlight', 'rectangle', 'circle']:
+                # self.draw_start = (canvas_x, canvas_y)
+                # self.drawing = True
+                
+            # elif self.tool_mode == 'draw':
+                # self.drawing = True
+                # self.draw_points = [(canvas_x, canvas_y)]
+                
+        # def on_canvas_drag(self, event):
+            # if not self.drawing or not self.pdf_document:
+                # return
+                
+            # canvas_x = self.canvas.canvasx(event.x)
+            # canvas_y = self.canvas.canvasy(event.y)
+            
+            # if self.tool_mode == 'draw':
+                # # Freehand drawing - add points and draw lines
+                # if len(self.draw_points) > 0:
+                    # last_point = self.draw_points[-1]
+                    # color_hex = '#{:02x}{:02x}{:02x}'.format(
+                        # int(self.current_color[0] * 255),
+                        # int(self.current_color[1] * 255),
+                        # int(self.current_color[2] * 255)
+                    # )
+                    # # Draw line from last point to current point
+                    # self.canvas.create_line(
+                        # last_point[0], last_point[1], canvas_x, canvas_y,
+                        # fill=color_hex, width=3, capstyle=tk.ROUND, smooth=True
+                    # )
+                    # self.draw_points.append((canvas_x, canvas_y))
+                # return
+            
+            # # For other tools, remove previous preview shape
+            # if not self.draw_start:
+                # return
+                
+            # if self.temp_shape:
+                # self.canvas.delete(self.temp_shape)
+                # self.temp_shape = None
+                
+            # # Draw preview shape
+            # x1, y1 = self.draw_start
+            
+            # if self.tool_mode == 'rectangle':
+                # color_hex = '#{:02x}{:02x}{:02x}'.format(
+                    # int(self.current_color[0] * 255),
+                    # int(self.current_color[1] * 255),
+                    # int(self.current_color[2] * 255)
+                # )
+                # self.temp_shape = self.canvas.create_rectangle(
+                    # x1, y1, canvas_x, canvas_y, 
+                    # outline=color_hex, width=2
+                # )
+            # elif self.tool_mode == 'circle':
+                # color_hex = '#{:02x}{:02x}{:02x}'.format(
+                    # int(self.current_color[0] * 255),
+                    # int(self.current_color[1] * 255),
+                    # int(self.current_color[2] * 255)
+                # )
+                # self.temp_shape = self.canvas.create_oval(
+                    # x1, y1, canvas_x, canvas_y, 
+                    # outline=color_hex, width=2
+                # )
+            # elif self.tool_mode == 'highlight':
+                # color_hex = '#{:02x}{:02x}{:02x}'.format(
+                    # int(self.current_color[0] * 255),
+                    # int(self.current_color[1] * 255),
+                    # int(self.current_color[2] * 255)
+                # )
+                # self.temp_shape = self.canvas.create_rectangle(
+                    # x1, y1, canvas_x, canvas_y,
+                    # fill=color_hex, stipple='gray50', outline=''
+                # )
+                
+        # def on_canvas_release(self, event):
+            # if not self.drawing or not self.pdf_document:
+                # return
+                
+            # canvas_x = self.canvas.canvasx(event.x)
+            # canvas_y = self.canvas.canvasy(event.y)
+            
+            # # Remove preview shape
+            # if self.temp_shape:
+                # self.canvas.delete(self.temp_shape)
+                # self.temp_shape = None
+            
+            # page = self.pdf_document[self.current_page]
+            
+            # if self.tool_mode == 'draw':
+                # # Freehand drawing - draw all segments
+                # if len(self.draw_points) > 1:
+                    # for i in range(len(self.draw_points) - 1):
+                        # x1, y1 = self.draw_points[i][0] / self.zoom_level, self.draw_points[i][1] / self.zoom_level
+                        # x2, y2 = self.draw_points[i + 1][0] / self.zoom_level, self.draw_points[i + 1][1] / self.zoom_level
+                        # page.draw_line((x1, y1), (x2, y2), color=self.current_color, width=2)
+                    # self.display_page()
+                # self.draw_points = []
+                
+            # elif self.draw_start:
+                # x1, y1 = self.draw_start[0] / self.zoom_level, self.draw_start[1] / self.zoom_level
+                # x2, y2 = canvas_x / self.zoom_level, canvas_y / self.zoom_level
+                
+                # if self.tool_mode == 'highlight':
+                    # rect = fitz.Rect(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+                    # highlight = page.add_highlight_annot(rect)
+                    # highlight.set_colors({"stroke": self.current_color})
+                    # highlight.update()
+                    # self.display_page()
+                    
+                # elif self.tool_mode == 'rectangle':
+                    # rect = fitz.Rect(min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+                    # page.draw_rect(rect, color=self.current_color, width=2)
+                    # self.display_page()
+                    
+                # elif self.tool_mode == 'circle':
+                    # # Calculate center and radius
+                    # center_x = (x1 + x2) / 2
+                    # center_y = (y1 + y2) / 2
+                    # radius = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 / 2
+                    # center = fitz.Point(center_x, center_y)
+                    # page.draw_circle(center, radius, color=self.current_color, width=2)
+                    # self.display_page()
+                
+                # self.draw_start = None
+                
+            # self.drawing = False
+            
+        # def open_pdf(self):
+            # file_path = filedialog.askopenfilename(
+                # title="Open PDF File",
+                # filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
+            # )
+            
+            # if file_path:
+                # try:
+                    # self.pdf_document = fitz.open(file_path)
+                    # self.pdf_path = file_path
+                    # self.current_page = 0
+                    # self.zoom_level = 1.0
+                    # self.display_page()
+                    # self.generate_thumbnails()
+                    # self.status_label.config(text=f"Opened: {file_path}")
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Failed to open PDF:\n{str(e)}")
+                    
+        # def save_pdf(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # if self.pdf_path:
+                # try:
+                    # self.pdf_document.save(self.pdf_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+                    # self.status_label.config(text=f"Saved: {self.pdf_path}")
+                    # messagebox.showinfo("Success", "PDF saved successfully!")
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Failed to save PDF:\n{str(e)}")
+            # else:
+                # self.save_pdf_as()
+                
+        # def save_pdf_as(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # file_path = filedialog.asksaveasfilename(
+                # title="Save PDF As",
+                # defaultextension=".pdf",
+                # filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
+            # )
+            
+            # if file_path:
+                # try:
+                    # self.pdf_document.save(file_path)
+                    # self.pdf_path = file_path
+                    # self.status_label.config(text=f"Saved: {file_path}")
+                    # messagebox.showinfo("Success", "PDF saved successfully!")
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Failed to save PDF:\n{str(e)}")
+                    
+        # def display_page(self):
+            # if not self.pdf_document:
+                # return
+                
+            # page = self.pdf_document[self.current_page]
+            # mat = fitz.Matrix(self.zoom_level, self.zoom_level)
+            # pix = page.get_pixmap(matrix=mat)
+            
+            # img_data = pix.tobytes("ppm")
+            # img = Image.open(io.BytesIO(img_data))
+            
+            # self.photo = ImageTk.PhotoImage(img)
+            
+            # self.canvas.delete("all")
+            # self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
+            # self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL))
+            
+            # self.page_label.config(
+                # text=f"Page {self.current_page + 1} of {len(self.pdf_document)}"
+            # )
+            # self.page_entry.delete(0, tk.END)
+            # self.page_entry.insert(0, str(self.current_page + 1))
+            
+            # self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
+            
+        # def generate_thumbnails(self):
+            # if not self.pdf_document:
+                # return
+                
+            # self.thumbnail_canvas.delete("all")
+            # y_pos = 10
+            
+            # for i in range(len(self.pdf_document)):
+                # page = self.pdf_document[i]
+                # mat = fitz.Matrix(0.2, 0.2)
+                # pix = page.get_pixmap(matrix=mat)
+                # img_data = pix.tobytes("ppm")
+                # img = Image.open(io.BytesIO(img_data))
+                
+                # thumb = ImageTk.PhotoImage(img)
+                # # Store reference to prevent garbage collection
+                # if not hasattr(self, 'thumbnails'):
+                    # self.thumbnails = []
+                # self.thumbnails.append(thumb)
+                
+                # self.thumbnail_canvas.create_image(70, y_pos, image=thumb)
+                # self.thumbnail_canvas.create_text(70, y_pos + 60, text=f"Page {i+1}")
+                
+                # # Make clickable
+                # self.thumbnail_canvas.tag_bind(
+                    # self.thumbnail_canvas.create_rectangle(10, y_pos - 50, 130, y_pos + 70, outline=""),
+                    # '<Button-1>',
+                    # lambda e, page_num=i: self.jump_to_page(page_num)
+                # )
+                
+                # y_pos += 100
+                
+            # self.thumbnail_canvas.config(scrollregion=self.thumbnail_canvas.bbox(tk.ALL))
+            
+        # def jump_to_page(self, page_num):
+            # if self.pdf_document and 0 <= page_num < len(self.pdf_document):
+                # self.current_page = page_num
+                # self.display_page()
+                
+        # def goto_page(self):
+            # try:
+                # page_num = int(self.page_entry.get()) - 1
+                # self.jump_to_page(page_num)
+            # except ValueError:
+                # messagebox.showerror("Error", "Invalid page number!")
+                
+        # def first_page(self):
+            # if self.pdf_document:
+                # self.current_page = 0
+                # self.display_page()
+                
+        # def next_page(self):
+            # if self.pdf_document and self.current_page < len(self.pdf_document) - 1:
+                # self.current_page += 1
+                # self.display_page()
+                
+        # def prev_page(self):
+            # if self.pdf_document and self.current_page > 0:
+                # self.current_page -= 1
+                # self.display_page()
+                
+        # def last_page(self):
+            # if self.pdf_document:
+                # self.current_page = len(self.pdf_document) - 1
+                # self.display_page()
+                
+        # def zoom_in(self):
+            # if self.pdf_document:
+                # self.zoom_level *= 1.25
+                # self.display_page()
+                
+        # def zoom_out(self):
+            # if self.pdf_document:
+                # self.zoom_level /= 1.25
+                # self.display_page()
+                
+        # def actual_size(self):
+            # if self.pdf_document:
+                # self.zoom_level = 1.0
+                # self.display_page()
+                
+        # def fit_width(self):
+            # if self.pdf_document:
+                # page = self.pdf_document[self.current_page]
+                # canvas_width = self.canvas.winfo_width()
+                # self.zoom_level = canvas_width / page.rect.width
+                # self.display_page()
+                
+        # def fit_page(self):
+            # if self.pdf_document:
+                # page = self.pdf_document[self.current_page]
+                # canvas_width = self.canvas.winfo_width()
+                # canvas_height = self.canvas.winfo_height()
+                # zoom_w = canvas_width / page.rect.width
+                # zoom_h = canvas_height / page.rect.height
+                # self.zoom_level = min(zoom_w, zoom_h)
+                # self.display_page()
+                
+        # def choose_color(self):
+            # color = colorchooser.askcolor(title="Choose Color")
+            # if color[0]:
+                # rgb = color[0]
+                # self.current_color = (rgb[0]/255, rgb[1]/255, rgb[2]/255)
+                # self.status_label.config(text=f"Color changed")
+                
+        # def set_font_size(self):
+            # size = simpledialog.askinteger("Font Size", "Enter font size:", 
+                                           # initialvalue=self.font_size, minvalue=6, maxvalue=72)
+            # if size:
+                # self.font_size = size
+                
+        # def add_rectangle(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+            
+            # self.set_tool('rectangle')
+            # self.status_label.config(text="Click and drag to draw rectangle")
+            
+        # def add_circle(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+            
+            # self.set_tool('circle')
+            # self.status_label.config(text="Click and drag to draw circle")
+            
+        # def insert_page(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # self.pdf_document.insert_page(self.current_page + 1)
+            # self.current_page += 1
+            # self.display_page()
+            # self.generate_thumbnails()
+            # self.status_label.config(text="Blank page inserted")
+            
+        # def delete_page(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # if len(self.pdf_document) == 1:
+                # messagebox.showwarning("Warning", "Cannot delete the only page!")
+                # return
+                
+            # result = messagebox.askyesno("Confirm", 
+                                        # f"Delete page {self.current_page + 1}?")
+            # if result:
+                # self.pdf_document.delete_page(self.current_page)
+                # if self.current_page >= len(self.pdf_document):
+                    # self.current_page = len(self.pdf_document) - 1
+                # self.display_page()
+                # self.generate_thumbnails()
+                # self.status_label.config(text="Page deleted")
+                
+        # def rotate_page(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # page = self.pdf_document[self.current_page]
+            # page.set_rotation(page.rotation + 90)
+            # self.display_page()
+            # self.generate_thumbnails()
+            # self.status_label.config(text="Page rotated 90 degrees")
+            
+        # def export_page_image(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # file_path = filedialog.asksaveasfilename(
+                # title="Export Page as Image",
+                # defaultextension=".png",
+                # filetypes=[("PNG Files", "*.png"), ("JPEG Files", "*.jpg"), ("All Files", "*.*")]
+            # )
+            
+            # if file_path:
+                # try:
+                    # page = self.pdf_document[self.current_page]
+                    # mat = fitz.Matrix(2, 2)
+                    # pix = page.get_pixmap(matrix=mat)
+                    # pix.save(file_path)
+                    # self.status_label.config(text=f"Page exported: {file_path}")
+                    # messagebox.showinfo("Success", "Page exported successfully!")
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Failed to export page:\n{str(e)}")
+                    
+        # def merge_pdfs(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # file_paths = filedialog.askopenfilenames(
+                # title="Select PDFs to Merge",
+                # filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
+            # )
+            
+            # if file_paths:
+                # try:
+                    # for file_path in file_paths:
+                        # src_pdf = fitz.open(file_path)
+                        # self.pdf_document.insert_pdf(src_pdf)
+                        # src_pdf.close()
+                    # self.display_page()
+                    # self.generate_thumbnails()
+                    # self.status_label.config(text=f"Merged {len(file_paths)} PDF(s)")
+                    # messagebox.showinfo("Success", "PDFs merged successfully!")
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Failed to merge PDFs:\n{str(e)}")
+                    
+        # def extract_pages(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # # Ask for page range
+            # page_range = simpledialog.askstring("Extract Pages", 
+                                               # f"Enter page range (e.g., 1-3, 5, 7-9):\n"
+                                               # f"Total pages: {len(self.pdf_document)}")
+            # if not page_range:
+                # return
+                
+            # try:
+                # # Parse page range
+                # pages_to_extract = []
+                # parts = page_range.split(',')
+                # for part in parts:
+                    # part = part.strip()
+                    # if '-' in part:
+                        # start, end = part.split('-')
+                        # pages_to_extract.extend(range(int(start)-1, int(end)))
+                    # else:
+                        # pages_to_extract.append(int(part)-1)
+                
+                # # Create new PDF with extracted pages
+                # file_path = filedialog.asksaveasfilename(
+                    # title="Save Extracted Pages",
+                    # defaultextension=".pdf",
+                    # filetypes=[("PDF Files", "*.pdf"), ("All Files", "*.*")]
+                # )
+                
+                # if file_path:
+                    # new_pdf = fitz.open()
+                    # for page_num in pages_to_extract:
+                        # if 0 <= page_num < len(self.pdf_document):
+                            # new_pdf.insert_pdf(self.pdf_document, from_page=page_num, to_page=page_num)
+                    # new_pdf.save(file_path)
+                    # new_pdf.close()
+                    # self.status_label.config(text=f"Extracted pages saved: {file_path}")
+                    # messagebox.showinfo("Success", "Pages extracted successfully!")
+            # except Exception as e:
+                # messagebox.showerror("Error", f"Failed to extract pages:\n{str(e)}")
+                
+        # def split_document(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # # Ask for split point
+            # split_page = simpledialog.askinteger("Split Document", 
+                                                # f"Split after page number:\n"
+                                                # f"Total pages: {len(self.pdf_document)}",
+                                                # minvalue=1, maxvalue=len(self.pdf_document)-1)
+            # if not split_page:
+                # return
+                
+            # try:
+                # folder = filedialog.askdirectory(title="Select Folder to Save Split PDFs")
+                # if folder:
+                    # # Create first part
+                    # pdf1 = fitz.open()
+                    # pdf1.insert_pdf(self.pdf_document, from_page=0, to_page=split_page-1)
+                    # pdf1.save(f"{folder}/part1.pdf")
+                    # pdf1.close()
+                    
+                    # # Create second part
+                    # pdf2 = fitz.open()
+                    # pdf2.insert_pdf(self.pdf_document, from_page=split_page, to_page=len(self.pdf_document)-1)
+                    # pdf2.save(f"{folder}/part2.pdf")
+                    # pdf2.close()
+                    
+                    # self.status_label.config(text=f"Document split into 2 files")
+                    # messagebox.showinfo("Success", "Document split successfully!")
+            # except Exception as e:
+                # messagebox.showerror("Error", f"Failed to split document:\n{str(e)}")
+                
+        # def show_properties(self):
+            # if not self.pdf_document:
+                # messagebox.showwarning("Warning", "No PDF document loaded!")
+                # return
+                
+            # metadata = self.pdf_document.metadata
+            # info = f"Document Properties\n\n"
+            # info += f"Title: {metadata.get('title', 'N/A')}\n"
+            # info += f"Author: {metadata.get('author', 'N/A')}\n"
+            # info += f"Subject: {metadata.get('subject', 'N/A')}\n"
+            # info += f"Keywords: {metadata.get('keywords', 'N/A')}\n"
+            # info += f"Creator: {metadata.get('creator', 'N/A')}\n"
+            # info += f"Producer: {metadata.get('producer', 'N/A')}\n"
+            # info += f"Pages: {len(self.pdf_document)}\n"
+            # info += f"Format: {metadata.get('format', 'N/A')}\n"
+            
+            # messagebox.showinfo("Document Properties", info)
+            
+        # def show_about(self):
+            # messagebox.showinfo("About", 
+                              # "PDF Editor\n\n"
+                              # "Version 1.0\n\n"
+                              # "A simple PDF editing application\n\n"
+                              # "Features:\n"
+                              # "- Add text and annotations\n"
+                              # "- Highlight and draw\n"
+                              # "- Page management\n"
+                              # "- Merge and split PDFs\n"
+                              # "- Export pages as images")
+
+    # if __name__ == "__main__":
+        # rootacrobated = tk.Tk()
+        # app = RetroPDFEditor(rootacrobated)
+        # rootacrobated.mainloop()
         
 if pathstxtVAR == 4343434343434444444444443333333333343434356:
     import tkinter as tk
