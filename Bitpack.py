@@ -37792,136 +37792,777 @@ if replfindvar == 11:
 
             # Rularea buclei principale
             validation.mainloop()
-    
+
+    #!/usr/bin/env python3
+    # -*- coding: utf-8 -*-
+    """
+    Find & Replace 95 - Windows 95 style text find / replace (tkinter, no ttk, standard library only).
+
+    In Bitpack: replace the old ReplAndFind() function inside the `if replfindvar == 11:` block
+    with the one below (the product key block above it stays as it is). Stand-alone: run this file.
+    """
+
+
     def ReplAndFind():
-        # to create a window
-        repl = Tk()
-        repl.resizable(False, False)
-        repl.title("Find & Replace")
-        repl.config(bg="gray20")
-        #image_icon68 = PhotoImage(file = "img/complogo.png")
-        #repl.iconphoto(False, image_icon68)
-        # root window is the parent window
-        framrepl = Frame(repl, bg="gray20")
+        import os
+        import re
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from tkinter import filedialog, messagebox
 
-        # Creating Label, Entry Box, Button
-        # and packing them adding label to
-        # search box
-        Label(framrepl, text='Find', bg="gray20", fg="lime green").pack(side=LEFT)
+        IS_WINDOWS = os.name == "nt"
+        CUSTOM_TITLE_BAR = IS_WINDOWS
+        FACE, SHADOW, NAVY, WHITE, BLACK = "#c0c0c0", "#808080", "#000080", "#ffffff", "#000000"
+        FONT, FONT_BOLD = ("MS Sans Serif", 8), ("MS Sans Serif", 8, "bold")
+        TEXT_FONT = ("Courier New", 10)
+        APP = "Find & Replace"
 
-        # adding of single line text box
-        edit = Entry(framrepl, bg="#404040", bd=5, fg="white", insertbackground="white")
-        # positioning of text box
-        edit.pack(side=LEFT, fill=BOTH, expand=1)
-        # setting focus
-        edit.focus_set()
+        def w95_button(parent, text, command, width=None):
+            button = tk.Button(parent, text=text, command=command, font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
+                               relief="raised", bd=2, padx=6, pady=1, highlightthickness=0, takefocus=0)
+            if width:
+                button.config(width=width)
+            return button
 
-        # adding of search button
-        Find = Button(framrepl, text='Find', bg="gray40", fg="cyan", bd=5)
-        Find.pack(side=LEFT)
+        def w95_check(parent, text, variable, command=None):
+            return tk.Checkbutton(parent, text=text, variable=variable, command=command, font=FONT, bg=FACE,
+                                  activebackground=FACE, selectcolor=WHITE, highlightthickness=0, takefocus=0)
 
-        Label(framrepl, text="Replace With ", bg="gray20", fg="lime green", bd=1).pack(side=LEFT)
+        def w95_menu(parent):
+            return tk.Menu(parent, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                           activeforeground=WHITE, disabledforeground=SHADOW, selectcolor=BLACK)
 
-        edit2 = Entry(framrepl, bg="#404040", bd=5, fg="white", insertbackground="white")
-        edit2.pack(side=LEFT, fill=BOTH, expand=1)
-        edit2.focus_set()
+        class FindReplace95(tk.Tk):
 
-        replace = Button(framrepl, text='FindNReplace', bg="gray40", fg="cyan", bd=5)
-        replace.pack(side=LEFT)
+            def __init__(self):
+                super().__init__()
+                self.title(APP)
+                x = max(0, (self.winfo_screenwidth() - 980) // 2)
+                y = max(0, (self.winfo_screenheight() - 700) // 2)
+                self.geometry(f"980x700+{x}+{y}")
+                self.minsize(720, 420)
+                self.configure(bg=FACE)
+                if CUSTOM_TITLE_BAR:
+                    self.configure(bd=2, relief="raised")
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.path = None
+                self.encoding = "utf-8"
+                self.matches = []                    # (start, end) character offsets
+                self.current = -1
+                self.var_find = tk.StringVar()
+                self.var_replace = tk.StringVar()
+                self.var_case = tk.BooleanVar(value=False)
+                self.var_word = tk.BooleanVar(value=False)
+                self.var_regex = tk.BooleanVar(value=False)
+                self.var_wrap = tk.BooleanVar(value=False)
 
-        refresh = Button(framrepl, text='Refresh', bg="gray40", fg="cyan", bd=5)
-        refresh.pack(side=LEFT)
+                self._build_titlebar()
+                self._build_menu()
+                self._build_toolbar()
+                self._build_statusbar()
+                self._build_text()
+                self._bind_keys()
+                self._update_title()
+                self.protocol("WM_DELETE_WINDOW", self.on_close)
+                if CUSTOM_TITLE_BAR:
+                    self.after(10, self._enable_custom_frame)
+                self.find_entry.focus_set()
 
-        framrepl.pack(side=TOP)
+            # ----- Windows 95 frame ---------------------------------------------------
 
-        # text box in root window
-        textrepl = Text(repl, width=120, height=40, bg="#999999")
+            def _build_titlebar(self):
+                self.caption = tk.Frame(self, bg=NAVY, height=20)
+                self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                self.caption.pack_propagate(False)
+                icon = tk.Canvas(self.caption, width=16, height=16, bg=NAVY, bd=0, highlightthickness=0)
+                icon.create_rectangle(1, 2, 11, 14, fill=WHITE, outline=BLACK)
+                for line_y in (5, 8, 11):
+                    icon.create_line(3, line_y, 9, line_y, fill=SHADOW)
+                icon.create_oval(7, 6, 13, 12, outline=BLACK, width=2)
+                icon.create_line(12, 11, 15, 14, fill=BLACK, width=2)
+                icon.pack(side="left", padx=(2, 3))
+                self.caption_icon = icon
+                self.caption_title = tk.Label(self.caption, text=APP, font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
+                self.caption_title.pack(side="left", fill="x", expand=True)
+                marlett = "Marlett" in tkfont.families(self)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
 
-        # text input area at index 1 in text window
-        textrepl.insert('1.0', '''Type your text here''')
-        textrepl.pack(side=BOTTOM)
+                def caption_button(key, command):
+                    return tk.Button(self.caption, text=self.glyphs[key], command=command, font=glyph_font,
+                                     image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=FACE,
+                                     fg=BLACK, activebackground=FACE, relief="raised", bd=2, highlightthickness=0,
+                                     takefocus=0)
+
+                caption_button("close", self.on_close).pack(side="right", padx=(2, 2))
+                self.btn_max = caption_button("max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                caption_button("min", self.minimize).pack(side="right")
+                for widget in (self.caption, self.caption_title, icon):
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+                self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
+                self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
+                self.bind("<Map>", self._on_map)
+
+            def _set_caption_active(self, active):
+                for widget in (self.caption, self.caption_title, self.caption_icon):
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_title.config(fg=WHITE if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                if not IS_WINDOWS:
+                    return
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(self.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                self.withdraw()
+                self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+            def _on_map(self, event):
+                if event.widget is self and self.minimizing and self.state() == "normal":
+                    self.minimizing = False
+                    self.overrideredirect(True)
+                    self.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if CUSTOM_TITLE_BAR:
+                    self.minimizing = True
+                    self.overrideredirect(False)
+                self.iconify()
+
+            def toggle_maximize(self):
+                if self.maximized:
+                    self.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = self.geometry()
+                    x, y, width, height = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    self.geometry(f"{width}x{height}+{x}+{y}")
+                self.maximized = not self.maximized
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self._drag_offset = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+            def _caption_drag(self, event):
+                if CUSTOM_TITLE_BAR and not self.maximized:
+                    self.geometry(f"+{event.x_root - self._drag_offset[0]}+{event.y_root - self._drag_offset[1]}")
+
+            def _grip_press(self, event):
+                self._resize_origin = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize_origin
+                    self.geometry(f"{max(720, width + event.x_root - x0)}x{max(420, height + event.y_root - y0)}")
+
+            # ----- layout ------------------------------------------------------------------
+
+            def _build_menu(self):
+                bar = tk.Frame(self, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    button = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, activebackground=NAVY,
+                                           activeforeground=WHITE, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    button.pack(side="left")
+                    menu = w95_menu(button)
+                    button.config(menu=menu)
+                    return menu
+
+                m = menubutton("File")
+                m.add_command(label="New", accelerator="Ctrl+N", command=self.new)
+                m.add_command(label="Open...", accelerator="Ctrl+O", command=self.open)
+                m.add_command(label="Save", accelerator="Ctrl+S", command=self.save)
+                m.add_command(label="Save As...", command=self.save_as)
+                m.add_separator()
+                m.add_command(label="Exit", command=self.on_close)
+
+                m = menubutton("Edit")
+                m.add_command(label="Undo", accelerator="Ctrl+Z", command=lambda: self._edit("undo"))
+                m.add_command(label="Redo", accelerator="Ctrl+Y", command=lambda: self._edit("redo"))
+                m.add_separator()
+                m.add_command(label="Cut", accelerator="Ctrl+X", command=lambda: self.text.event_generate("<<Cut>>"))
+                m.add_command(label="Copy", accelerator="Ctrl+C", command=lambda: self.text.event_generate("<<Copy>>"))
+                m.add_command(label="Paste", accelerator="Ctrl+V", command=lambda: self.text.event_generate("<<Paste>>"))
+                m.add_command(label="Select All", accelerator="Ctrl+A", command=self.select_all)
+                m.add_separator()
+                m.add_checkbutton(label="Word Wrap", variable=self.var_wrap, command=self._apply_wrap)
+
+                m = menubutton("Search")
+                m.add_command(label="Find All (highlight)", accelerator="Enter", command=self.find_all)
+                m.add_command(label="Find Next", accelerator="F3", command=lambda: self.find_next(1))
+                m.add_command(label="Find Previous", accelerator="Shift+F3", command=lambda: self.find_next(-1))
+                m.add_separator()
+                m.add_command(label="Replace", accelerator="Ctrl+H", command=self.replace_one)
+                m.add_command(label="Replace All", accelerator="Ctrl+Shift+H", command=self.replace_all)
+                m.add_separator()
+                m.add_command(label="Clear Highlights", accelerator="Esc", command=self.clear_highlights)
+
+                m = menubutton("Help")
+                m.add_command(label="How to Use", accelerator="F1", command=self.show_help)
+
+            def _build_toolbar(self):
+                box = tk.Frame(self, bg=FACE, bd=1, relief="raised")
+                box.pack(side="top", fill="x")
+                row1 = tk.Frame(box, bg=FACE)
+                row1.pack(side="top", fill="x", padx=4, pady=(4, 2))
+                tk.Label(row1, text="Find what:", font=FONT, bg=FACE, width=11, anchor="w").pack(side="left")
+                self.find_entry = tk.Entry(row1, textvariable=self.var_find, font=FONT, relief="sunken", bd=2,
+                                           highlightthickness=0, width=40)
+                self.find_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+                w95_button(row1, "Find All", self.find_all, width=9).pack(side="left", padx=1)
+                w95_button(row1, "< Previous", lambda: self.find_next(-1), width=9).pack(side="left", padx=1)
+                w95_button(row1, "Next >", lambda: self.find_next(1), width=9).pack(side="left", padx=1)
+                row2 = tk.Frame(box, bg=FACE)
+                row2.pack(side="top", fill="x", padx=4, pady=2)
+                tk.Label(row2, text="Replace with:", font=FONT, bg=FACE, width=11, anchor="w").pack(side="left")
+                self.replace_entry = tk.Entry(row2, textvariable=self.var_replace, font=FONT, relief="sunken", bd=2,
+                                              highlightthickness=0, width=40)
+                self.replace_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+                w95_button(row2, "Replace", self.replace_one, width=9).pack(side="left", padx=1)
+                w95_button(row2, "Replace All", self.replace_all, width=9).pack(side="left", padx=1)
+                w95_button(row2, "Clear", self.clear_highlights, width=9).pack(side="left", padx=1)
+                row3 = tk.Frame(box, bg=FACE)
+                row3.pack(side="top", fill="x", padx=4, pady=(0, 4))
+                tk.Label(row3, text="", font=FONT, bg=FACE, width=11).pack(side="left")
+                for text, var in (("Match case", self.var_case), ("Whole word", self.var_word),
+                                  ("Regular expression", self.var_regex)):
+                    w95_check(row3, text, var, command=self._options_changed).pack(side="left", padx=(0, 10))
+
+            def _build_statusbar(self):
+                bar = tk.Frame(self, bg=FACE)
+                bar.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(bar, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=WHITE)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+
+                def panel(width=None, expand=False, side="right"):
+                    label = tk.Label(bar, text="", font=FONT, bg=FACE, anchor="w", bd=1, relief="sunken", padx=4)
+                    if width:
+                        label.config(width=width)
+                    label.pack(side=side, fill="x", expand=expand, padx=1)
+                    return label
+
+                self.status_encoding = panel(10)
+                self.status_pos = panel(16)
+                self.status_matches = panel(16)
+                self.status_main = panel(expand=True, side="left")
+                self.status_main.config(text="Type or paste text (or File > Open), then Find / Replace")
+
+            def _build_text(self):
+                holder = tk.Frame(self, bd=2, relief="sunken", bg=WHITE)
+                holder.pack(side="top", fill="both", expand=True, padx=4, pady=4)
+                self.text = tk.Text(holder, font=TEXT_FONT, bg=WHITE, fg=BLACK, bd=0, highlightthickness=0, undo=True,
+                                    autoseparators=True, maxundo=-1, wrap="none", insertbackground=BLACK,
+                                    selectbackground=NAVY, selectforeground=WHITE, inactiveselectbackground=NAVY)
+                vbar = tk.Scrollbar(holder, orient="vertical", command=self.text.yview)
+                hbar = tk.Scrollbar(holder, orient="horizontal", command=self.text.xview)
+                self.text.config(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+                self.text.grid(row=0, column=0, sticky="nsew")
+                vbar.grid(row=0, column=1, sticky="ns")
+                hbar.grid(row=1, column=0, sticky="ew")
+                holder.rowconfigure(0, weight=1)
+                holder.columnconfigure(0, weight=1)
+                self.text.tag_config("found", background="#ccff66", foreground=BLACK)
+                self.text.tag_config("current", background="#ff9933", foreground=BLACK)
+                self.text.tag_raise("current")
+                self.text.tag_raise("sel")
+                self.text.bind("<<Modified>>", self._modified)
+                for event in ("<KeyRelease>", "<ButtonRelease-1>"):
+                    self.text.bind(event, lambda _e: self._update_position())
+                self.context = w95_menu(self)
+                for label, action in (("Undo", lambda: self._edit("undo")), ("Redo", lambda: self._edit("redo")),
+                                      (None, None),
+                                      ("Cut", lambda: self.text.event_generate("<<Cut>>")),
+                                      ("Copy", lambda: self.text.event_generate("<<Copy>>")),
+                                      ("Paste", lambda: self.text.event_generate("<<Paste>>")), (None, None),
+                                      ("Find Selected Text", self._find_selection), ("Select All", self.select_all)):
+                    if label is None:
+                        self.context.add_separator()
+                    else:
+                        self.context.add_command(label=label, command=action)
+                self.text.bind("<Button-3>", self._popup)
+
+            def _bind_keys(self):
+                self.find_entry.bind("<Return>", lambda _e: (self.find_all(), "break")[1])
+                self.replace_entry.bind("<Return>", lambda _e: (self.replace_one(), "break")[1])
+                keys = {"<Control-n>": self.new, "<Control-o>": self.open, "<Control-s>": self.save,
+                        "<F3>": lambda: self.find_next(1), "<Shift-F3>": lambda: self.find_next(-1),
+                        "<Control-f>": lambda: (self.find_entry.focus_set(), self.find_entry.select_range(0, "end")),
+                        "<Control-h>": self.replace_one, "<Control-H>": self.replace_all,
+                        "<Escape>": self.clear_highlights, "<F1>": self.show_help}
+                for key, action in keys.items():
+                    self.bind(key, lambda _e, a=action: (a(), "break")[1])
+                self.text.bind("<Control-a>", lambda _e: (self.select_all(), "break")[1])
+                self.text.bind("<Control-y>", lambda _e: (self._edit("redo"), "break")[1])
+
+            # ----- matching --------------------------------------------------------------------
+
+            def pattern(self):
+                query = self.var_find.get()
+                if not query:
+                    return None
+                source = query if self.var_regex.get() else re.escape(query)
+                if self.var_word.get():
+                    source = rf"(?<!\w)(?:{source})(?!\w)"
+                try:
+                    return re.compile(source, 0 if self.var_case.get() else re.IGNORECASE)
+                except re.error as exc:
+                    self.status_main.config(text=f"Invalid regular expression: {exc}")
+                    self.bell()
+                    return None
+
+            def content(self):
+                return self.text.get("1.0", "end-1c")
+
+            def index(self, offset):
+                return f"1.0+{offset}c"
+
+            def find_all(self, keep_current=False):
+                self.text.tag_remove("found", "1.0", "end")
+                self.text.tag_remove("current", "1.0", "end")
+                regex = self.pattern()
+                self.matches = []
+                if regex is None:
+                    self.status_matches.config(text="")
+                    return
+                self.matches = [(m.start(), m.end()) for m in regex.finditer(self.content()) if m.end() > m.start()]
+                for start, end in self.matches:
+                    self.text.tag_add("found", self.index(start), self.index(end))
+                if not keep_current:
+                    self.current = -1
+                self.status_matches.config(text=f"{len(self.matches)} match(es)")
+                self.status_main.config(text=f"'{self.var_find.get()}': {len(self.matches)} match(es)"
+                                        if self.matches else f"'{self.var_find.get()}' was not found")
+                if not self.matches:
+                    self.bell()
+
+            def find_next(self, direction):
+                if self.pattern() is None:
+                    self.find_entry.focus_set()
+                    return
+                self.find_all(keep_current=True)
+                if not self.matches:
+                    return
+                cursor = len(self.text.get("1.0", "insert"))
+                if direction > 0:
+                    after = [i for i, (start, _end) in enumerate(self.matches) if start >= cursor]
+                    self.current = after[0] if after else 0
+                else:
+                    selection = self.text.tag_ranges("sel")
+                    limit = len(self.text.get("1.0", selection[0])) if selection else cursor
+                    before = [i for i, (start, _end) in enumerate(self.matches) if start < limit]
+                    self.current = before[-1] if before else len(self.matches) - 1
+                self._show_current()
+
+            def _show_current(self):
+                start, end = self.matches[self.current]
+                first, last = self.index(start), self.index(end)
+                self.text.tag_remove("current", "1.0", "end")
+                self.text.tag_remove("sel", "1.0", "end")
+                self.text.tag_add("current", first, last)
+                self.text.tag_add("sel", first, last)
+                self.text.mark_set("insert", last)
+                self.text.see(first)
+                self.status_matches.config(text=f"{self.current + 1} of {len(self.matches)}")
+                self._update_position()
+
+            def _options_changed(self):
+                # a ticked / unticked option applies at once: search again whenever there is something to find
+                if self.var_find.get():
+                    self.find_all()
+                    if self.matches:
+                        self.current = 0
+                        self._show_current()
+
+            def replacement(self, match):
+                text = self.var_replace.get()
+                return match.expand(text) if self.var_regex.get() else text
+
+            def replace_one(self):
+                regex = self.pattern()
+                if regex is None:
+                    self.find_entry.focus_set()
+                    return
+                selection = self.text.tag_ranges("sel")
+                if selection:
+                    start = len(self.text.get("1.0", selection[0]))
+                    selected = self.text.get(selection[0], selection[1])
+                    match = regex.fullmatch(selected)
+                    if match:
+                        try:
+                            new = self.replacement(match)
+                        except (re.error, IndexError) as exc:
+                            self.status_main.config(text=f"Invalid replacement: {exc}")
+                            return
+                        self._single_undo_step(lambda: (self.text.delete(selection[0], selection[1]),
+                                                        self.text.insert(self.index(start), new)))
+                        self.text.mark_set("insert", self.index(start + len(new)))
+                        self.status_main.config(text="Replaced 1 - press Replace again for the next one")
+                self.find_next(1)
+
+            def replace_all(self):
+                regex = self.pattern()
+                if regex is None:
+                    self.find_entry.focus_set()
+                    return
+                text = self.content()
+                try:
+                    new_text, count = regex.subn(self.replacement, text)
+                except (re.error, IndexError) as exc:
+                    self.status_main.config(text=f"Invalid replacement: {exc}")
+                    self.bell()
+                    return
+                if count == 0:
+                    self.status_main.config(text=f"'{self.var_find.get()}' was not found - nothing replaced")
+                    self.bell()
+                    return
+                position = self.text.index("insert")
+                view = self.text.yview()[0]
+                self._single_undo_step(lambda: (self.text.delete("1.0", "end-1c"),   # one Ctrl+Z undoes it all
+                                                self.text.insert("1.0", new_text)))
+                self.text.mark_set("insert", position)
+                self.text.yview_moveto(view)
+                replace = self.var_replace.get()
+                if replace:
+                    show = re.compile(re.escape(replace), 0 if self.var_case.get() else re.IGNORECASE)
+                    spans = [(m.start(), m.end()) for m in show.finditer(new_text) if m.end() > m.start()]
+                    self.text.tag_remove("found", "1.0", "end")
+                    for start, end in spans:
+                        self.text.tag_add("found", self.index(start), self.index(end))
+                self.matches, self.current = [], -1
+                self.status_matches.config(text=f"{count} replaced")
+                self.status_main.config(text=f"Replaced {count} occurrence(s) - Ctrl+Z undoes all of them")
+
+            def _single_undo_step(self, change):
+                """Tk would put an undo point between the delete and the insert: make them one step."""
+                self.text.config(autoseparators=False)
+                try:
+                    self.text.edit_separator()
+                    change()
+                    self.text.edit_separator()
+                finally:
+                    self.text.config(autoseparators=True)
+
+            def clear_highlights(self):
+                self.text.tag_remove("found", "1.0", "end")
+                self.text.tag_remove("current", "1.0", "end")
+                self.matches, self.current = [], -1
+                self.status_matches.config(text="")
+
+            def _find_selection(self):
+                selection = self.text.tag_ranges("sel")
+                if selection:
+                    self.var_find.set(self.text.get(selection[0], selection[1]).split("\n")[0])
+                    self.find_all()
+
+            # ----- editing helpers ---------------------------------------------------------------
+
+            def _edit(self, what):
+                try:
+                    self.text.edit_undo() if what == "undo" else self.text.edit_redo()
+                except tk.TclError:
+                    self.status_main.config(text=f"Nothing to {what}")
+                self.clear_highlights()
+
+            def select_all(self):
+                self.text.tag_add("sel", "1.0", "end-1c")
+                self.text.mark_set("insert", "end-1c")
+
+            def _apply_wrap(self):
+                self.text.config(wrap="word" if self.var_wrap.get() else "none")
+
+            def _update_position(self):
+                line, column = self.text.index("insert").split(".")
+                self.status_pos.config(text=f"Ln {line}, Col {int(column) + 1}")
+
+            def _modified(self, _event=None):
+                if self.text.edit_modified():
+                    self._update_title()
+
+            def _popup(self, event):
+                try:
+                    self.context.tk_popup(event.x_root, event.y_root)
+                finally:
+                    self.context.grab_release()
+
+            # ----- files ---------------------------------------------------------------------------
+
+            def _update_title(self):
+                name = os.path.basename(self.path) if self.path else "Untitled"
+                dirty = " *" if self.text.edit_modified() else ""
+                text = f"{name}{dirty} - {APP}"
+                self.title(text)
+                self.caption_title.config(text=text)
+                self.status_encoding.config(text="ANSI" if self.encoding == "cp1250" else
+                                            "UTF-8 BOM" if self.encoding == "utf-8-sig" else "UTF-8")
+
+            def _confirm_discard(self):
+                if not self.text.edit_modified() or not self.content().strip():
+                    return True
+                answer = messagebox.askyesnocancel(APP, "Save the changes?", parent=self)
+                if answer is None:
+                    return False
+                return self.save() if answer else True
+
+            def new(self):
+                if not self._confirm_discard():
+                    return
+                self.text.delete("1.0", "end")
+                self.text.edit_reset()
+                self.text.edit_modified(False)
+                self.path, self.encoding = None, "utf-8"
+                self.clear_highlights()
+                self._update_title()
+
+            def open(self):
+                if not self._confirm_discard():
+                    return
+                path = filedialog.askopenfilename(title="Open", parent=self, filetypes=[
+                    ("Text files", "*.txt *.csv *.log *.ini *.json *.xml *.sql *.py *.md *.bat"), ("All files", "*.*")])
+                if path:
+                    self.load(path)
+
+            def load(self, path):
+                try:
+                    with open(path, "rb") as handle:
+                        raw = handle.read()
+                except OSError as exc:
+                    messagebox.showerror(APP, f"Cannot open the file:\n{exc}", parent=self)
+                    return
+                for encoding in ("utf-8-sig" if raw.startswith(b"\xef\xbb\xbf") else "utf-8", "cp1250", "latin-1"):
+                    try:
+                        text = raw.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                self.text.delete("1.0", "end")
+                self.text.insert("1.0", text.replace("\r\n", "\n"))
+                self.text.edit_reset()
+                self.text.edit_modified(False)
+                self.text.mark_set("insert", "1.0")
+                self.path, self.encoding = os.path.abspath(path), encoding
+                self.clear_highlights()
+                self._update_title()
+                self.status_main.config(text=f"Opened {os.path.basename(path)} ({len(text):,} characters)")
+
+            def save(self):
+                if not self.path:
+                    return self.save_as()
+                text = self.content()
+                if IS_WINDOWS:
+                    text = text.replace("\n", "\r\n")
+                try:
+                    with open(self.path, "w", encoding=self.encoding, errors="strict", newline="") as handle:
+                        handle.write(text)
+                except UnicodeEncodeError:
+                    if messagebox.askyesno(APP, "The text has characters that ANSI cannot store.\n"
+                                                "Save it as UTF-8 instead?", parent=self):
+                        self.encoding = "utf-8"
+                        return self.save()
+                    return False
+                except OSError as exc:
+                    messagebox.showerror(APP, f"Cannot save:\n{exc}", parent=self)
+                    return False
+                self.text.edit_modified(False)
+                self._update_title()
+                self.status_main.config(text=f"Saved {os.path.basename(self.path)}")
+                return True
+
+            def save_as(self):
+                path = filedialog.asksaveasfilename(title="Save As", parent=self, defaultextension=".txt",
+                                                    initialfile=os.path.basename(self.path) if self.path else "text.txt",
+                                                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+                if not path:
+                    return False
+                self.path = os.path.abspath(path)
+                return self.save()
+
+            def show_help(self):
+                messagebox.showinfo(
+                    "How to Use",
+                    "Type or paste text, or open a file (Ctrl+O).\n\n"
+                    "Find what + Enter: highlights every match (green).\n"
+                    "Next > / F3 and < Previous / Shift+F3: go through them one by one (orange).\n"
+                    "Replace (Ctrl+H): replaces the current match and moves to the next one.\n"
+                    "Replace All: replaces everything at once; one Ctrl+Z undoes it.\n\n"
+                    "Match case: upper / lower case must match.\n"
+                    "Whole word: 'cas' does not match 'casa'.\n"
+                    "Regular expression: e.g. find (\\d+)\\.(\\d+) and replace with \\2/\\1.\n\n"
+                    "Right-click selected text > Find Selected Text. Esc clears the highlights.",
+                    parent=self)
+
+            def on_close(self):
+                if self._confirm_discard():
+                    self.destroy()
+
+        app = FindReplace95()
+        app.mainloop()
 
 
-        # function to search string in text
-        def find(*args):
-            # remove tag 'found' from index 1 to END
-            textrepl.tag_remove('found', '1.0', END)
+    if __name__ == "__main__":
+        ReplAndFind()
+    
+    # def ReplAndFind():
+        # # to create a window
+        # repl = Tk()
+        # repl.resizable(False, False)
+        # repl.title("Find & Replace")
+        # repl.config(bg="gray20")
+        # #image_icon68 = PhotoImage(file = "img/complogo.png")
+        # #repl.iconphoto(False, image_icon68)
+        # # root window is the parent window
+        # framrepl = Frame(repl, bg="gray20")
 
-            # returns to widget currently in focus
-            s = edit.get()
+        # # Creating Label, Entry Box, Button
+        # # and packing them adding label to
+        # # search box
+        # Label(framrepl, text='Find', bg="gray20", fg="lime green").pack(side=LEFT)
 
-            if (s):
-                idx = '1.0'
-                while 1:
-                    # searches for desried string from index 1
-                    idx = textrepl.search(s, idx, nocase=1,
-                                      stopindex=END)
+        # # adding of single line text box
+        # edit = Entry(framrepl, bg="#404040", bd=5, fg="white", insertbackground="white")
+        # # positioning of text box
+        # edit.pack(side=LEFT, fill=BOTH, expand=1)
+        # # setting focus
+        # edit.focus_set()
 
-                    if not idx: break
-                    # last index sum of current index and
-                    # length of text
-                    lastidx = '% s+% dc' % (idx, len(s))
-                    # overwrite 'Found' at idx
-                    textrepl.tag_add('found', idx, lastidx)
-                    idx = lastidx
+        # # adding of search button
+        # Find = Button(framrepl, text='Find', bg="gray40", fg="cyan", bd=5)
+        # Find.pack(side=LEFT)
 
-                # mark located string as green and bg = ''yellow
-                textrepl.tag_config('found', foreground='black', background='#ccff66')
-            edit.focus_set()
+        # Label(framrepl, text="Replace With ", bg="gray20", fg="lime green", bd=1).pack(side=LEFT)
+
+        # edit2 = Entry(framrepl, bg="#404040", bd=5, fg="white", insertbackground="white")
+        # edit2.pack(side=LEFT, fill=BOTH, expand=1)
+        # edit2.focus_set()
+
+        # replace = Button(framrepl, text='FindNReplace', bg="gray40", fg="cyan", bd=5)
+        # replace.pack(side=LEFT)
+
+        # refresh = Button(framrepl, text='Refresh', bg="gray40", fg="cyan", bd=5)
+        # refresh.pack(side=LEFT)
+
+        # framrepl.pack(side=TOP)
+
+        # # text box in root window
+        # textrepl = Text(repl, width=120, height=40, bg="#999999")
+
+        # # text input area at index 1 in text window
+        # textrepl.insert('1.0', '''Type your text here''')
+        # textrepl.pack(side=BOTTOM)
 
 
-        def findNreplace(*args):
-            # remove tag 'found' from index 1 to END
-            textrepl.tag_remove('found', '1.0', END)
+        # # function to search string in text
+        # def find(*args):
+            # # remove tag 'found' from index 1 to END
+            # textrepl.tag_remove('found', '1.0', END)
 
-            # returns to widget currently in focus
-            s = edit.get()
-            r = edit2.get()
+            # # returns to widget currently in focus
+            # s = edit.get()
 
-            if (s and r):
-                idx = '1.0'
-                while 1:
-                    # searches for desried string from index 1
-                    idx = textrepl.search(s, idx, nocase=1,
-                                      stopindex=END)
-                    print(idx)
-                    if not idx: break
+            # if (s):
+                # idx = '1.0'
+                # while 1:
+                    # # searches for desried string from index 1
+                    # idx = textrepl.search(s, idx, nocase=1,
+                                      # stopindex=END)
 
-                    # last index sum of current index and
-                    # length of text
-                    lastidx = '% s+% dc' % (idx, len(s))
+                    # if not idx: break
+                    # # last index sum of current index and
+                    # # length of text
+                    # lastidx = '% s+% dc' % (idx, len(s))
+                    # # overwrite 'Found' at idx
+                    # textrepl.tag_add('found', idx, lastidx)
+                    # idx = lastidx
 
-                    textrepl.delete(idx, lastidx)
-                    textrepl.insert(idx, r)
+                # # mark located string as green and bg = ''yellow
+                # textrepl.tag_config('found', foreground='black', background='#ccff66')
+            # edit.focus_set()
 
-                    lastidx = '% s+% dc' % (idx, len(r))
 
-                    # overwrite 'Found' at idx
-                    textrepl.tag_add('found', idx, lastidx)
-                    idx = lastidx
+        # def findNreplace(*args):
+            # # remove tag 'found' from index 1 to END
+            # textrepl.tag_remove('found', '1.0', END)
 
-                # mark located string as green and bg = ''yellow
-                textrepl.tag_config('found', foreground='black', background='#ccff66')
-            edit.focus_set()
+            # # returns to widget currently in focus
+            # s = edit.get()
+            # r = edit2.get()
 
-        def refresh_func():
-            textrepl.tag_delete('found')
+            # if (s and r):
+                # idx = '1.0'
+                # while 1:
+                    # # searches for desried string from index 1
+                    # idx = textrepl.search(s, idx, nocase=1,
+                                      # stopindex=END)
+                    # print(idx)
+                    # if not idx: break
 
-        # add commands to button
-        Find.config(command=find)
-        replace.config(command=findNreplace)
-        refresh.config(command=refresh_func)
-        # binding entry boxes ...
-        edit.bind('<Return>',find)
-        edit2.bind('<Return>',findNreplace)
+                    # # last index sum of current index and
+                    # # length of text
+                    # lastidx = '% s+% dc' % (idx, len(s))
 
-        # mainloop function calls the endless
-        # loop of the window, so the window will
-        # wait for any user interaction till we
-        # close it
-        repl.mainloop()
+                    # textrepl.delete(idx, lastidx)
+                    # textrepl.insert(idx, r)
 
-    ReplAndFind()
+                    # lastidx = '% s+% dc' % (idx, len(r))
+
+                    # # overwrite 'Found' at idx
+                    # textrepl.tag_add('found', idx, lastidx)
+                    # idx = lastidx
+
+                # # mark located string as green and bg = ''yellow
+                # textrepl.tag_config('found', foreground='black', background='#ccff66')
+            # edit.focus_set()
+
+        # def refresh_func():
+            # textrepl.tag_delete('found')
+
+        # # add commands to button
+        # Find.config(command=find)
+        # replace.config(command=findNreplace)
+        # refresh.config(command=refresh_func)
+        # # binding entry boxes ...
+        # edit.bind('<Return>',find)
+        # edit2.bind('<Return>',findNreplace)
+
+        # # mainloop function calls the endless
+        # # loop of the window, so the window will
+        # # wait for any user interaction till we
+        # # close it
+        # repl.mainloop()
+
+    # ReplAndFind()
 
 if testvarr == 12:
     import time
@@ -112422,471 +113063,1787 @@ if pdfviewervar == 3333444400997676:
 
             # Rularea buclei principale
             validation.mainloop()
-
-    class Win95Theme:
-        BG_COLOR = "#c0c0c0"  # Light gray background
-        BUTTON_COLOR = "#c0c0c0"  # Button background
-        BUTTON_ACTIVE = "#dfdfdf"  # Button when pressed
-        TEXT_COLOR = "#000000"  # Black text
-        DISABLED_TEXT = "#808080"  # Gray disabled text
-        HIGHLIGHT_COLOR = "#000080"  # Navy blue for selection
-        HIGHLIGHT_TEXT = "#ffffff"  # White text on selection
-        WINDOW_BG = "#c0c0c0"  # Window background
-        CANVAS_BG = "#ffffff"  # Canvas background (white for PDF)
-        MENU_BG = "#c0c0c0"  # Menu background
-        
-        @staticmethod
-        def configure_widget(widget, widget_type="default"):
-            """Apply Windows 95 styling to widgets"""
-            if widget_type == "button":
-                widget.configure(
-                    relief="raised",
-                    borderwidth=2,
-                    background=Win95Theme.BUTTON_COLOR,
-                    foreground=Win95Theme.TEXT_COLOR,
-                    font=("MS Sans Serif", 8)
-                )
-            elif widget_type == "label":
-                widget.configure(
-                    background=Win95Theme.BG_COLOR,
-                    foreground=Win95Theme.TEXT_COLOR,
-                    font=("MS Sans Serif", 8)
-                )
-            elif widget_type == "frame":
-                widget.configure(
-                    background=Win95Theme.BG_COLOR,
-                    relief="sunken",
-                    borderwidth=2
-                )
-            elif widget_type == "canvas":
-                widget.configure(
-                    background=Win95Theme.CANVAS_BG,
-                    relief="sunken",
-                    borderwidth=2,
-                    highlightthickness=0
-                )
-
-
-    class PDFMiner:
-        def __init__(self, filepath):
-            """
-            Initialize PDFMiner with a PDF file path
-            """
-            self.filepath = filepath
-            self.pdf_document = None
-            self.load_document()
-        
-        def load_document(self):
-            """
-            Load the PDF document using PyMuPDF
-            """
-            try:
-                self.pdf_document = fitz.open(self.filepath)
-            except Exception as e:
-                print(f"Error loading PDF: {e}")
-                messagebox.showerror("Error", f"Failed to load PDF: {e}")
-                self.pdf_document = None
-        
-        def get_metadata(self):
-            """
-            Extract metadata and number of pages from the PDF
-            Returns: (metadata_dict, number_of_pages)
-            """
-            if not self.pdf_document:
-                return {}, 0
             
-            try:
-                # Get metadata
-                metadata = self.pdf_document.metadata
-                
-                # Get number of pages
-                num_pages = len(self.pdf_document)
-                
-                return metadata, num_pages
-            except Exception as e:
-                print(f"Error getting metadata: {e}")
-                return {}, 0
-        
-        def get_page(self, page_number, zoom_level=1.0, rotation=0):
-            """
-            Convert a PDF page to a PhotoImage for tkinter display
-            Args:
-                page_number: Page index (0-based)
-                zoom_level: Zoom factor for the page
-                rotation: Rotation angle in degrees (0, 90, 180, 270)
-            Returns:
-                PhotoImage object for tkinter
-            """
-            if not self.pdf_document:
-                return None
-            
-            try:
-                # Get the page
-                page = self.pdf_document[page_number]
-                
-                # Create a transformation matrix with zoom and rotation
-                base_scale = 1.5
-                mat = fitz.Matrix(base_scale * zoom_level, base_scale * zoom_level)
-                
-                # Apply rotation
-                if rotation != 0:
-                    mat = mat * fitz.Matrix(rotation)
-                
-                # Render page to pixmap
-                pix = page.get_pixmap(matrix=mat)
-                
-                # Convert pixmap to PIL Image
-                img_data = pix.tobytes("ppm")
-                img = Image.open(io.BytesIO(img_data))
-                
-                # Convert PIL Image to PhotoImage
-                photo = ImageTk.PhotoImage(img)
-                
-                return photo
-                
-            except Exception as e:
-                print(f"Error rendering page {page_number}: {e}")
-                return None
-        
+    #!/usr/bin/env python3
+    # -*- coding: utf-8 -*-
+    """
+    PDF Viewer 95
+    =============
+
+    A PDF reader in Windows 95 style (tkinter, no ttk, Python 3.10+, PyMuPDF, Pillow).
+
+    * Continuous scrolling; only the visible pages are drawn, so large files open fast.
+    * Page thumbnails and the document's bookmarks (table of contents).
+    * Zoom (buttons, Ctrl+wheel, fit width / fit page), rotate the view.
+    * Find with highlighted matches, page by page, without freezing the window.
+    * Links work: internal ones jump to their page, web links open in the browser.
+    * Select Text mode: drag a rectangle to copy its text.
+    * Presentation mode (F5) on the whole screen, Night mode (inverted colours).
+    * Password protected PDFs, document properties, print (Windows).
+    * A file can be given on the command line: pdf_viewer_95.py document.pdf
+    """
+
+    import os
+    import sys
+    import tempfile
+    import webbrowser
+
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import filedialog, messagebox
+
+    import fitz  # PyMuPDF
+    from PIL import Image, ImageTk
+
+
+    # ---------------------------------------------------------------------------
+    # Constants
+    # ---------------------------------------------------------------------------
+
+    APP_NAME = "PDF Viewer"
+    APP_VERSION = "1.0"
+
+    IS_WINDOWS = os.name == "nt"
+    CUSTOM_TITLE_BAR = IS_WINDOWS
+
+    FACE = "#c0c0c0"
+    LIGHT = "#dfdfdf"
+    SHADOW = "#808080"
+    NAVY = "#000080"
+    WHITE = "#ffffff"
+    BLACK = "#000000"
+    FONT = ("MS Sans Serif", 8)
+    FONT_BOLD = ("MS Sans Serif", 8, "bold")
+
+    PAD = 14                 # space around and between pages (pixels)
+    ZOOM_STEPS = (0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0)
+    THUMB_W = 110
+    CACHE_PAGES = 14         # rendered pages kept in memory
+    MM = 72 / 25.4
+
+
+    # ---------------------------------------------------------------------------
+    # Windows 95 widgets
+    # ---------------------------------------------------------------------------
+
+    def w95_button(parent, text, command, width=None):
+        button = tk.Button(parent, text=text, command=command, font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
+                           relief="raised", bd=2, padx=6, pady=1, highlightthickness=0, takefocus=0)
+        if width:
+            button.config(width=width)
+        return button
+
+
+    def w95_separator(parent):
+        return tk.Frame(parent, width=2, height=22, bd=1, relief="sunken", bg=FACE)
+
+
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                       activeforeground=WHITE, disabledforeground=SHADOW, selectcolor=BLACK)
+
+
+    def ask_password(master, name):
+        """Small Win95 password box; returns the text or None."""
+        dialog = tk.Toplevel(master)
+        dialog.title("Password")
+        dialog.configure(bg=FACE)
+        dialog.resizable(False, False)
+        dialog.transient(master)
+        result = {"value": None}
+        tk.Label(dialog, text=f"{name} is protected.\nEnter the password to open it:", font=FONT, bg=FACE,
+                 justify="left").pack(side="top", anchor="w", padx=10, pady=(10, 4))
+        var = tk.StringVar()
+        entry = tk.Entry(dialog, textvariable=var, show="*", width=32, font=FONT, relief="sunken", bd=2,
+                         highlightthickness=0)
+        entry.pack(side="top", padx=10)
+
+        def ok(_event=None):
+            result["value"] = var.get()
+            dialog.destroy()
+
+        buttons = tk.Frame(dialog, bg=FACE)
+        buttons.pack(side="bottom", fill="x", padx=10, pady=10)
+        w95_button(buttons, "Cancel", dialog.destroy, width=9).pack(side="right")
+        w95_button(buttons, "OK", ok, width=9).pack(side="right", padx=4)
+        dialog.bind("<Return>", ok)
+        dialog.bind("<Escape>", lambda _e: dialog.destroy())
+        dialog.update_idletasks()
+        dialog.geometry(f"+{master.winfo_rootx() + 300}+{master.winfo_rooty() + 200}")
+        entry.focus_set()
+        dialog.grab_set()
+        master.wait_window(dialog)
+        return result["value"]
+
+
+    # ---------------------------------------------------------------------------
+    # Presentation mode
+    # ---------------------------------------------------------------------------
+
+    class Presentation(tk.Toplevel):
+        def __init__(self, viewer, start):
+            super().__init__(viewer)
+            self.viewer, self.index = viewer, start
+            self.configure(bg=BLACK, cursor="none")
+            self.overrideredirect(True)
+            self.geometry(f"{self.winfo_screenwidth()}x{self.winfo_screenheight()}+0+0")
+            self.attributes("-topmost", True)
+            self.canvas = tk.Canvas(self, bg=BLACK, highlightthickness=0, bd=0)
+            self.canvas.pack(fill="both", expand=True)
+            self.photo = None
+            for key in ("<Right>", "<Down>", "<Next>", "<space>", "<Button-1>"):
+                self.bind(key, lambda _e: self.go(self.index + 1))
+            for key in ("<Left>", "<Up>", "<Prior>", "<BackSpace>", "<Button-3>"):
+                self.bind(key, lambda _e: self.go(self.index - 1))
+            self.bind("<Home>", lambda _e: self.go(0))
+            self.bind("<End>", lambda _e: self.go(len(self.viewer.doc) - 1))
+            self.bind("<Escape>", lambda _e: self.close())
+            self.bind("<Motion>", self._show_cursor)
+            self.after(50, self.show)
+            self.focus_force()
+
+        def _show_cursor(self, _event):
+            self.canvas.config(cursor="arrow")
+            if hasattr(self, "_hide_job"):
+                self.after_cancel(self._hide_job)
+            self._hide_job = self.after(1500, lambda: self.canvas.config(cursor="none"))
+
+        def go(self, index):
+            index = max(0, min(len(self.viewer.doc) - 1, index))
+            if index != self.index:
+                self.index = index
+                self.show()
+
+        def show(self):
+            width, height = self.winfo_width(), self.winfo_height()
+            page = self.viewer.doc[self.index]
+            rect = page.rect
+            rotation = self.viewer.view_rotation
+            page_w, page_h = (rect.height, rect.width) if rotation % 180 else (rect.width, rect.height)
+            zoom = min(width / page_w, height / page_h)
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom).prerotate(rotation), alpha=False)
+            if self.viewer.night.get():
+                pix.invert_irect(pix.irect)
+            self.photo = ImageTk.PhotoImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples), master=self)
+            self.canvas.delete("all")
+            self.canvas.create_image(width // 2, height // 2, image=self.photo)
+            self.canvas.create_text(width - 12, height - 10, text=f"{self.index + 1} / {len(self.viewer.doc)}",
+                                    anchor="se", fill="#606060", font=FONT)
+
         def close(self):
-            """
-            Close the PDF document
-            """
-            if self.pdf_document:
-                self.pdf_document.close()
-        
-        def __del__(self):
-            """
-            Cleanup when object is destroyed
-            """
-            self.close()
+            self.viewer.go(self.index)
+            self.destroy()
 
 
-    class PDFViewer:
-        def __init__(self, master):
-            # path for the pdf doc
+    # ---------------------------------------------------------------------------
+    # Main window
+    # ---------------------------------------------------------------------------
+
+    class PDFViewer(tk.Tk):
+
+        def __init__(self, open_path=None):
+            super().__init__()
+            self.title(APP_NAME)
+            x = max(0, (self.winfo_screenwidth() - 1180) // 2)
+            y = max(0, (self.winfo_screenheight() - 860) // 2)
+            self.geometry(f"1180x860+{x}+{y}")
+            self.minsize(760, 520)
+            self.configure(bg=FACE)
+            if CUSTOM_TITLE_BAR:
+                self.configure(bd=2, relief="raised")
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
+
+            self.doc = None
             self.path = None
-            # state of the pdf doc, open or closed
-            self.fileisopen = None
-            # author of the pdf doc
-            self.author = None
-            # name for the pdf doc
-            self.name = None
-            # the current page for the pdf
-            self.current_page = 0
-            # total number of pages for the pdf doc
-            self.numPages = None    
-            # creating the window
-            self.master = master
-            # Apply Windows 95 theme to main window
-            self.master.configure(bg=Win95Theme.WINDOW_BG)
-            # gives title to the main window
-            self.master.title('PDF Viewer')
-            # gives dimensions to main window
-            self.master.geometry('800x700+150+40')
-            # enable window resizing
-            self.master.resizable(width = 1, height = 1)
-            # set minimum window size
-            self.master.minsize(600, 500)
-            
-            # Try to load icon, but continue if file not found
-            try:
-                self.master.iconbitmap('pdf_file_icon.ico')
-            except:
-                pass  # Icon file not found, continue without it
-            
-            # creating the menu
-            self.menu = Menu(self.master)
-            # adding it to the main window
-            self.master.config(menu=self.menu)
-            # creating a sub menu
-            self.filemenu = Menu(self.menu)
-            # giving the sub menu a label
-            self.menu.add_cascade(label="File", menu=self.filemenu)
-            # adding a two buttons to the sub menus
-            self.filemenu.add_command(label="Open File", command=self.open_file)
-            self.filemenu.add_command(label="Exit", command=self.master.destroy)
-            
-            # Configure grid weights for resizing
-            self.master.grid_rowconfigure(0, weight=1)
-            self.master.grid_columnconfigure(0, weight=1)
-            
-            # creating the top frame
-            self.top_frame = ttk.Frame(self.master)
-            # placing the frame using inside main window using grid()
-            self.top_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
-            # Configure grid weights for top frame
-            self.top_frame.grid_rowconfigure(0, weight=1)
-            self.top_frame.grid_columnconfigure(0, weight=1)
-            
-            # creating the bottom frame
-            self.bottom_frame = ttk.Frame(self.master, height=60)
-            # placing the frame using inside main window using grid()
-            self.bottom_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
-            # Configure grid weights for bottom frame
-            self.bottom_frame.grid_columnconfigure(0, weight=1)
-            self.bottom_frame.grid_columnconfigure(8, weight=1)
-            
-            # creating a vertical scrollbar
-            self.scrolly = Scrollbar(self.top_frame, orient=VERTICAL)
-            # adding the scrollbar
-            self.scrolly.grid(row=0, column=1, sticky="ns")
-            
-            # creating a horizontal scrollbar
-            self.scrollx = Scrollbar(self.top_frame, orient=HORIZONTAL)
-            # adding the scrollbar
-            self.scrollx.grid(row=1, column=0, sticky="ew")
-            
-            # creating the canvas for display the PDF pages
-            self.output = Canvas(self.top_frame, bg='#ECE8F3')
-            # inserting both vertical and horizontal scrollbars to the canvas
-            self.output.configure(yscrollcommand=self.scrolly.set, xscrollcommand=self.scrollx.set)
-            # adding the canvas
-            self.output.grid(row=0, column=0, sticky="nsew")
-            # configuring the scrollbars to the canvas
-            self.scrolly.configure(command=self.output.yview)
-            self.scrollx.configure(command=self.output.xview)
-            
-            # Bind mouse wheel to canvas for scrolling
-            self.output.bind("<MouseWheel>", self.on_mousewheel)
-            self.output.bind("<Button-4>", self.on_mousewheel)  # Linux
-            self.output.bind("<Button-5>", self.on_mousewheel)  # Linux
-            self.output.bind("<Shift-MouseWheel>", self.on_horizontal_mousewheel)
-            
-            # Bind canvas resize event
-            self.output.bind("<Configure>", self.on_canvas_configure)
-            
-            # Try to load button icons, create text buttons if images not found
-            try:
-                self.uparrow_icon = PhotoImage(file='uparrow.png')
-                self.downarrow_icon = PhotoImage(file='downarrow.png')
-                # resizing the icons to fit on buttons
-                self.uparrow = self.uparrow_icon.subsample(3, 3)
-                self.downarrow = self.downarrow_icon.subsample(3, 3)
-                # creating buttons with icons
-                self.upbutton = ttk.Button(self.bottom_frame, image=self.uparrow, command=self.previous_page)
-                self.downbutton = ttk.Button(self.bottom_frame, image=self.downarrow, command=self.next_page)
-            except:
-                # If image files not found, create text buttons
-                self.upbutton = ttk.Button(self.bottom_frame, text="↑ Prev", command=self.previous_page)
-                self.downbutton = ttk.Button(self.bottom_frame, text="Next ↓", command=self.next_page)
-            
-            # adding the buttons with better positioning
-            self.upbutton.grid(row=0, column=1, padx=5, pady=8)
-            self.downbutton.grid(row=0, column=2, padx=5, pady=8)
-            
-            # label for displaying page numbers
-            self.page_label = ttk.Label(self.bottom_frame, text='No PDF loaded')
-            # adding the label
-            self.page_label.grid(row=0, column=3, padx=10, pady=8)
-            
-            # Add zoom controls
-            self.zoom_in_button = ttk.Button(self.bottom_frame, text="Zoom +", command=self.zoom_in)
-            self.zoom_in_button.grid(row=0, column=4, padx=2, pady=8)
-            
-            self.zoom_out_button = ttk.Button(self.bottom_frame, text="Zoom -", command=self.zoom_out)
-            self.zoom_out_button.grid(row=0, column=5, padx=2, pady=8)
-            
-            # Zoom level
-            self.zoom_level = 1.0
-            self.zoom_label = ttk.Label(self.bottom_frame, text="100%")
-            self.zoom_label.grid(row=0, column=6, padx=5, pady=8)
-            
-            # Add rotation controls
-            self.rotate_left_button = ttk.Button(self.bottom_frame, text="↻ Rotate L", command=self.rotate_left)
-            self.rotate_left_button.grid(row=0, column=8, padx=2, pady=8)
-            
-            self.rotate_right_button = ttk.Button(self.bottom_frame, text="Rotate R ↺", command=self.rotate_right)
-            self.rotate_right_button.grid(row=0, column=9, padx=2, pady=8)
-            
-            # Rotation angle (0, 90, 180, 270 degrees)
-            self.rotation = 0
-            
-            # Add welcome message to canvas
-            self.output.create_text(400, 300, text="PDF Viewer\n\nClick File > Open File to load a PDF", 
-                                   font=("Arial", 16), fill="gray", justify=CENTER)
-        
-        def on_mousewheel(self, event):
-            """Handle mouse wheel scrolling"""
-            if self.fileisopen:
-                # Windows and MacOS
-                if event.delta:
-                    delta = -1 * (event.delta / 120)
-                # Linux
-                else:
-                    if event.num == 4:
-                        delta = -1
-                    else:
-                        delta = 1
-                
-                self.output.yview_scroll(int(delta), "units")
-        
-        def on_horizontal_mousewheel(self, event):
-            """Handle horizontal mouse wheel scrolling"""
-            if self.fileisopen:
-                if event.delta:
-                    delta = -1 * (event.delta / 120)
-                else:
-                    if event.num == 4:
-                        delta = -1
-                    else:
-                        delta = 1
-                
-                self.output.xview_scroll(int(delta), "units")
-        
-        def on_canvas_configure(self, event):
-            """Handle canvas resize"""
-            if self.fileisopen:
-                # Update scroll region when canvas is resized
-                self.output.configure(scrollregion=self.output.bbox("all"))
-        
-        def zoom_in(self):
-            """Increase zoom level"""
-            if self.fileisopen:
-                self.zoom_level *= 1.2
-                self.update_zoom()
-        
-        def zoom_out(self):
-            """Decrease zoom level"""
-            if self.fileisopen:
-                self.zoom_level /= 1.2
-                if self.zoom_level < 0.1:
-                    self.zoom_level = 0.1
-                self.update_zoom()
-        
-        def update_zoom(self):
-            """Update the display with new zoom level"""
-            if self.fileisopen:
-                self.display_page()
-                self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
-        
-        def rotate_left(self):
-            """Rotate page 90 degrees counter-clockwise"""
-            if self.fileisopen:
-                self.rotation = (self.rotation - 90) % 360
-                self.display_page()
-        
-        def rotate_right(self):
-            """Rotate page 90 degrees clockwise"""
-            if self.fileisopen:
-                self.rotation = (self.rotation + 90) % 360
-                self.display_page()
-            
-        # function for opening pdf files
-        def open_file(self):
-            # open the file dialog
-            filepath = fd.askopenfilename(
-                title='Select a PDF file', 
-                initialdir=os.getcwd(), 
-                filetypes=(('PDF', '*.pdf'), ('All files', '*.*'))
-            )
-            # checking if the file exists
-            if filepath:
-                try:
-                    # declaring the path
-                    self.path = filepath
-                    # extracting the pdf file from the path
-                    filename = os.path.basename(self.path)
-                    # passing the path to PDFMiner 
-                    self.miner = PDFMiner(self.path)
-                    # getting data and numPages
-                    data, numPages = self.miner.get_metadata()
-                    # setting the current page to 0
-                    self.current_page = 0
-                    # reset rotation when opening new file
-                    self.rotation = 0
-                    # checking if numPages exists
-                    if numPages:
-                        # getting the title
-                        self.name = data.get('title', filename[:-4])
-                        # getting the author
-                        self.author = data.get('author', None)
-                        self.numPages = numPages
-                        # setting fileopen to True
-                        self.fileisopen = True
-                        # calling the display_page() function
-                        self.display_page()
-                        # replacing the window title with the PDF document name
-                        self.master.title(f"PDF Viewer - {self.name}")
-                    else:
-                        messagebox.showerror("Error", "Could not load PDF file. Please check if the file is valid.")
-                except Exception as e:
-                    messagebox.showerror("Error", f"Failed to open PDF file:\n{str(e)}")
-        
-        # the function to display the page  
-        def display_page(self):
-            # checking if numPages is less than current_page and if current_page is less than
-            # or equal to 0
-            if 0 <= self.current_page < self.numPages:
-                try:
-                    # Clear the canvas
-                    self.output.delete("all")
-                    # getting the page using get_page() function from miner with zoom and rotation
-                    self.img_file = self.miner.get_page(self.current_page, self.zoom_level, self.rotation)
-                    if self.img_file:
-                        # inserting the page image inside the Canvas
-                        self.output.create_image(0, 0, anchor='nw', image=self.img_file)
-                        # the variable to be stringified
-                        self.stringified_current_page = self.current_page + 1
-                        # updating the page label with number of pages 
-                        self.page_label['text'] = str(self.stringified_current_page) + ' of ' + str(self.numPages)
-                        # creating a region for inserting the page inside the Canvas
-                        self.output.configure(scrollregion=self.output.bbox("all"))
-                    else:
-                        self.output.create_text(400, 300, text="Error loading page", 
-                                              font=("Arial", 16), fill="red", justify=CENTER)
-                except Exception as e:
-                    print(f"Error displaying page: {e}")
-                    self.output.create_text(400, 300, text="Error displaying page", 
-                                          font=("Arial", 16), fill="red", justify=CENTER)
+            self.password = None
+            self.zoom = 1.0
+            self.fit_mode = "width"
+            self.view_rotation = 0
+            self.layout = []                 # per page: (x, y, width, height) in canvas pixels
+            self.rendered = {}               # page -> (key, PhotoImage)
+            self.render_job = None
+            self.current = 0
+            self.mode = "hand"
+            self.drag = None
+            self.links = {}
+            self.search = {"query": "", "hits": {}, "order": [], "index": -1, "job": None}
+            self.thumb_photos = {}
+            self.thumb_job = None
+            self.thumb_generation = 0
+            self.night = tk.BooleanVar(value=False)
+            self.show_sidebar = tk.BooleanVar(value=True)
 
-        # function for displaying next page
-        def next_page(self):
-            # checking if file is open
-            if self.fileisopen:
-                # checking if current_page is less than numPages-1
-                if self.current_page < self.numPages - 1:
-                    # updating the page with value 1
-                    self.current_page += 1
-                    # displaying the new page
-                    self.display_page()
-                                
-        # function for displaying the previous page        
-        def previous_page(self):
-            # checking if fileisopen
-            if self.fileisopen:
-                # checking if current_page is greater than 0
-                if self.current_page > 0:
-                    # decrementing the current_page by 1
-                    self.current_page -= 1
-                    # displaying the previous page
-                    self.display_page()
+            self._build_titlebar()
+            self._build_menu()
+            self._build_toolbar()
+            self._build_statusbar()
+            self._build_body()
+            self._bind_keys()
+            self.set_mode("hand")
+            self.relayout()
+            self._update_title()
+            self.protocol("WM_DELETE_WINDOW", self.destroy)
+            if CUSTOM_TITLE_BAR:
+                self.after(10, self._enable_custom_frame)
+            if open_path:
+                self.after(80, lambda: self.open_file(open_path))
 
-        def __del__(self):
-            """
-            Cleanup when the viewer is destroyed
-            """
-            if hasattr(self, 'miner') and self.miner:
-                self.miner.close()
+        # ----- Windows 95 frame ---------------------------------------------------
+
+        def _build_titlebar(self):
+            self.caption = tk.Frame(self, bg=NAVY, height=20)
+            self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self.caption.pack_propagate(False)
+            icon = tk.Canvas(self.caption, width=16, height=16, bg=NAVY, bd=0, highlightthickness=0)
+            icon.create_polygon(2, 1, 10, 1, 14, 5, 14, 15, 2, 15, fill=WHITE, outline=BLACK)
+            for y in (6, 9, 12):
+                icon.create_line(4, y, 12, y, fill=SHADOW)
+            icon.create_oval(7, 7, 15, 15, outline=BLACK, width=2)
+            icon.pack(side="left", padx=(2, 3))
+            self.caption_icon = icon
+            self.caption_title = tk.Label(self.caption, text=APP_NAME, font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
+            self.caption_title.pack(side="left", fill="x", expand=True)
+            marlett = "Marlett" in tkfont.families(self)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+
+            def caption_button(key, command):
+                return tk.Button(self.caption, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", self.destroy).pack(side="right", padx=(2, 2))
+            self.btn_max = caption_button("max", self.toggle_maximize)
+            self.btn_max.pack(side="right")
+            caption_button("min", self.minimize).pack(side="right")
+            for widget in (self.caption, self.caption_title, icon):
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+            self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
+            self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
+            self.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=NAVY if active else SHADOW)
+            self.caption_title.config(fg=WHITE if active else FACE)
+
+        def _enable_custom_frame(self):
+            self.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            if not IS_WINDOWS:
+                return
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            self.withdraw()
+            self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+        def _on_map(self, event):
+            if event.widget is self and self.minimizing and self.state() == "normal":
+                self.minimizing = False
+                self.overrideredirect(True)
+                self.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if CUSTOM_TITLE_BAR:
+                self.minimizing = True
+                self.overrideredirect(False)
+            self.iconify()
+
+        def toggle_maximize(self):
+            if self.maximized:
+                self.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = self.geometry()
+                x, y, width, height = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                if IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                self.geometry(f"{width}x{height}+{x}+{y}")
+            self.maximized = not self.maximized
+            self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            self._drag_offset = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _caption_drag(self, event):
+            if CUSTOM_TITLE_BAR and not self.maximized:
+                self.geometry(f"+{event.x_root - self._drag_offset[0]}+{event.y_root - self._drag_offset[1]}")
+
+        def _grip_press(self, event):
+            self._resize_origin = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize_origin
+                self.geometry(f"{max(760, width + event.x_root - x0)}x{max(520, height + event.y_root - y0)}")
+
+        # ----- layout ------------------------------------------------------------------
+
+        def _build_menu(self):
+            bar = tk.Frame(self, bg=FACE)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, activebackground=NAVY, activeforeground=WHITE,
+                                       relief="flat", bd=0, padx=6, pady=2, underline=0, takefocus=0,
+                                       highlightthickness=0)
+                button.pack(side="left")
+                menu = w95_menu(button)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Open...", accelerator="Ctrl+O", command=self.open_dialog)
+            m.add_command(label="Close", accelerator="Ctrl+W", command=self.close_document)
+            m.add_separator()
+            if IS_WINDOWS:
+                m.add_command(label="Print...", accelerator="Ctrl+P", command=self.print_document)
+            m.add_command(label="Copy Page Text", command=self.copy_page_text)
+            m.add_command(label="Save Page as Picture...", command=self.save_page_picture)
+            m.add_command(label="Properties...", accelerator="Ctrl+D", command=self.properties)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.destroy)
+
+            m = menubutton("View")
+            m.add_command(label="Zoom In", accelerator="Ctrl++", command=lambda: self.zoom_step(1))
+            m.add_command(label="Zoom Out", accelerator="Ctrl+-", command=lambda: self.zoom_step(-1))
+            m.add_command(label="Actual Size", accelerator="Ctrl+0", command=lambda: self.set_zoom(1.0))
+            m.add_command(label="Fit Width", accelerator="Ctrl+1", command=lambda: self.set_fit("width"))
+            m.add_command(label="Fit Page", accelerator="Ctrl+2", command=lambda: self.set_fit("page"))
+            m.add_separator()
+            m.add_command(label="Rotate Right", accelerator="Ctrl+R", command=lambda: self.rotate(90))
+            m.add_command(label="Rotate Left", accelerator="Ctrl+L", command=lambda: self.rotate(-90))
+            m.add_separator()
+            m.add_checkbutton(label="Side Panel", accelerator="F4", variable=self.show_sidebar,
+                              command=self._toggle_sidebar)
+            m.add_checkbutton(label="Night Mode", accelerator="Ctrl+N", variable=self.night, command=self.redraw_pages)
+            m.add_command(label="Presentation", accelerator="F5", command=self.presentation)
+
+            m = menubutton("Go")
+            m.add_command(label="First Page", accelerator="Home", command=lambda: self.go(0))
+            m.add_command(label="Previous Page", accelerator="PgUp", command=lambda: self.go(self.current - 1))
+            m.add_command(label="Next Page", accelerator="PgDn", command=lambda: self.go(self.current + 1))
+            m.add_command(label="Last Page", accelerator="End", command=lambda: self.go(10 ** 6))
+            m.add_command(label="Go to Page...", accelerator="Ctrl+G", command=self._focus_page_entry)
+
+            m = menubutton("Tools")
+            m.add_radiobutton(label="Hand (scroll, follow links)", accelerator="H", value="hand",
+                              command=lambda: self.set_mode("hand"))
+            m.add_radiobutton(label="Select Text (drag to copy)", accelerator="T", value="text",
+                              command=lambda: self.set_mode("text"))
+            m.add_separator()
+            m.add_command(label="Find...", accelerator="Ctrl+F", command=self._focus_find)
+            m.add_command(label="Find Next", accelerator="F3", command=lambda: self.find(1))
+            m.add_command(label="Find Previous", accelerator="Shift+F3", command=lambda: self.find(-1))
+
+            m = menubutton("Help")
+            m.add_command(label="Keyboard and Mouse", accelerator="F1", command=self.show_help)
+            m.add_command(label="About PDF Viewer", command=lambda: messagebox.showinfo(
+                "About", f"{APP_NAME} {APP_VERSION}\n\nReads PDF files: continuous pages, bookmarks, links,\n"
+                         "search, text copy, presentation and night mode.", parent=self))
+
+        def _build_toolbar(self):
+            bar = tk.Frame(self, bg=FACE, bd=1, relief="raised")
+            bar.pack(side="top", fill="x")
+            inner = tk.Frame(bar, bg=FACE)
+            inner.pack(side="left", padx=3, pady=3)
+            w95_button(inner, "Open", self.open_dialog).pack(side="left", padx=1)
+            if IS_WINDOWS:
+                w95_button(inner, "Print", self.print_document).pack(side="left", padx=1)
+            w95_separator(inner).pack(side="left", padx=4)
+            for text, command in (("|<", lambda: self.go(0)), ("<", lambda: self.go(self.current - 1))):
+                w95_button(inner, text, command).pack(side="left", padx=1)
+            self.var_page = tk.StringVar()
+            self.page_entry = tk.Entry(inner, textvariable=self.var_page, width=5, justify="center", font=FONT,
+                                       relief="sunken", bd=2, highlightthickness=0)
+            self.page_entry.pack(side="left", padx=2)
+            self.page_entry.bind("<Return>", self._goto_entry)
+            self.page_total = tk.Label(inner, text="/ 0", font=FONT, bg=FACE)
+            self.page_total.pack(side="left")
+            for text, command in ((">", lambda: self.go(self.current + 1)), (">|", lambda: self.go(10 ** 6))):
+                w95_button(inner, text, command).pack(side="left", padx=1)
+            w95_separator(inner).pack(side="left", padx=4)
+            w95_button(inner, "-", lambda: self.zoom_step(-1)).pack(side="left", padx=1)
+            self.zoom_label = tk.Label(inner, text="", font=FONT, bg=WHITE, width=6, bd=1, relief="sunken")
+            self.zoom_label.pack(side="left", padx=2)
+            w95_button(inner, "+", lambda: self.zoom_step(1)).pack(side="left", padx=1)
+            w95_button(inner, "Width", lambda: self.set_fit("width")).pack(side="left", padx=1)
+            w95_button(inner, "Page", lambda: self.set_fit("page")).pack(side="left", padx=1)
+            w95_separator(inner).pack(side="left", padx=4)
+            w95_button(inner, "Rotate", lambda: self.rotate(90)).pack(side="left", padx=1)
+            self.btn_hand = w95_button(inner, "Hand", lambda: self.set_mode("hand"))
+            self.btn_hand.pack(side="left", padx=1)
+            self.btn_text = w95_button(inner, "Select Text", lambda: self.set_mode("text"))
+            self.btn_text.pack(side="left", padx=1)
+            w95_button(inner, "Present", self.presentation).pack(side="left", padx=1)
+            w95_separator(inner).pack(side="left", padx=4)
+            tk.Label(inner, text="Find:", font=FONT, bg=FACE).pack(side="left")
+            self.var_find = tk.StringVar()
+            self.find_entry = tk.Entry(inner, textvariable=self.var_find, width=18, font=FONT, relief="sunken", bd=2,
+                                       highlightthickness=0)
+            self.find_entry.pack(side="left", padx=2)
+            self.find_entry.bind("<Return>", lambda _e: self.find(1))
+            self.find_entry.bind("<Shift-Return>", lambda _e: self.find(-1))
+            w95_button(inner, "<", lambda: self.find(-1)).pack(side="left", padx=1)
+            w95_button(inner, ">", lambda: self.find(1)).pack(side="left", padx=1)
+
+        def _build_statusbar(self):
+            bar = tk.Frame(self, bg=FACE)
+            bar.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+            grip = tk.Canvas(bar, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=WHITE)
+                grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+
+            def panel(width=None, expand=False, side="right"):
+                label = tk.Label(bar, text="", font=FONT, bg=FACE, anchor="w", bd=1, relief="sunken", padx=4)
+                if width:
+                    label.config(width=width)
+                label.pack(side=side, fill="x", expand=expand, padx=1)
+                return label
+
+            self.status_file = panel(14)
+            self.status_size = panel(16)
+            self.status_page = panel(14)
+            self.status_main = panel(expand=True, side="left")
+
+        def _build_body(self):
+            body = tk.Frame(self, bg=FACE)
+            body.pack(side="top", fill="both", expand=True, padx=4, pady=4)
+            self.sidebar = tk.Frame(body, bg=FACE, width=THUMB_W + 52)
+            self.sidebar.pack(side="left", fill="y", padx=(0, 4))
+            self.sidebar.pack_propagate(False)
+            tabs = tk.Frame(self.sidebar, bg=FACE)
+            tabs.pack(side="top", fill="x")
+            self.tab_pages = tk.Label(tabs, text="Pages", font=FONT, bg=FACE, bd=2, relief="raised", padx=6, cursor="hand2")
+            self.tab_pages.pack(side="left")
+            self.tab_marks = tk.Label(tabs, text="Bookmarks", font=FONT, bg=FACE, bd=2, relief="raised", padx=6,
+                                      cursor="hand2")
+            self.tab_marks.pack(side="left")
+            self.tab_pages.bind("<Button-1>", lambda _e: self._show_tab("pages"))
+            self.tab_marks.bind("<Button-1>", lambda _e: self._show_tab("marks"))
+            self.panel_holder = tk.Frame(self.sidebar, bd=2, relief="sunken", bg=SHADOW)
+            self.panel_holder.pack(side="top", fill="both", expand=True)
+
+            self.pages_panel = tk.Frame(self.panel_holder, bg=SHADOW)
+            self.thumbs = tk.Canvas(self.pages_panel, width=THUMB_W + 28, bg=SHADOW, highlightthickness=0, bd=0)
+            scroll = tk.Scrollbar(self.pages_panel, orient="vertical", command=self.thumbs.yview)
+            self.thumbs.config(yscrollcommand=scroll.set)
+            scroll.pack(side="right", fill="y")
+            self.thumbs.pack(side="left", fill="both", expand=True)
+            self.thumbs.bind("<Button-1>", self._thumb_click)
+            self.thumbs.bind("<MouseWheel>", lambda e: self.thumbs.yview_scroll(-1 * (e.delta // 120), "units"))
+            self.thumbs.bind("<Button-4>", lambda _e: self.thumbs.yview_scroll(-3, "units"))
+            self.thumbs.bind("<Button-5>", lambda _e: self.thumbs.yview_scroll(3, "units"))
+
+            self.marks_panel = tk.Frame(self.panel_holder, bg=WHITE)
+            self.marks = tk.Listbox(self.marks_panel, font=FONT, bd=0, highlightthickness=0, activestyle="none",
+                                    selectbackground=NAVY, selectforeground=WHITE, exportselection=False)
+            mscroll = tk.Scrollbar(self.marks_panel, orient="vertical", command=self.marks.yview)
+            self.marks.config(yscrollcommand=mscroll.set)
+            mscroll.pack(side="right", fill="y")
+            self.marks.pack(side="left", fill="both", expand=True)
+            self.marks.bind("<<ListboxSelect>>", self._mark_selected)
+            self.toc = []
+            self._show_tab("pages")
+
+            holder = tk.Frame(body, bd=2, relief="sunken", bg=SHADOW)
+            holder.pack(side="left", fill="both", expand=True)
+            self.canvas = tk.Canvas(holder, bg=SHADOW, highlightthickness=0, bd=0, yscrollincrement=24,
+                                    xscrollincrement=24)
+            vbar = tk.Scrollbar(holder, orient="vertical", command=self._yview)
+            hbar = tk.Scrollbar(holder, orient="horizontal", command=self._xview)
+            self.canvas.config(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+            self.canvas.grid(row=0, column=0, sticky="nsew")
+            vbar.grid(row=0, column=1, sticky="ns")
+            hbar.grid(row=1, column=0, sticky="ew")
+            holder.rowconfigure(0, weight=1)
+            holder.columnconfigure(0, weight=1)
+            self.canvas.bind("<Configure>", self._on_resize)
+            self.canvas.bind("<MouseWheel>", self._wheel)
+            self.canvas.bind("<Button-4>", lambda e: self._wheel(e, 120))
+            self.canvas.bind("<Button-5>", lambda e: self._wheel(e, -120))
+            self.canvas.bind("<Control-MouseWheel>", self._ctrl_wheel)
+            self.canvas.bind("<ButtonPress-1>", self._press)
+            self.canvas.bind("<B1-Motion>", self._motion)
+            self.canvas.bind("<ButtonRelease-1>", self._release)
+            self.canvas.bind("<Motion>", self._hover)
+            self.canvas.bind("<Button-3>", self._context_menu)
+
+        def _bind_keys(self):
+            keys = {"<Control-o>": self.open_dialog, "<Control-w>": self.close_document, "<Control-d>": self.properties,
+                    "<Control-plus>": lambda: self.zoom_step(1), "<Control-equal>": lambda: self.zoom_step(1),
+                    "<Control-minus>": lambda: self.zoom_step(-1), "<Control-Key-0>": lambda: self.set_zoom(1.0),
+                    "<Control-Key-1>": lambda: self.set_fit("width"), "<Control-Key-2>": lambda: self.set_fit("page"),
+                    "<Control-r>": lambda: self.rotate(90), "<Control-l>": lambda: self.rotate(-90),
+                    "<Control-n>": lambda: (self.night.set(not self.night.get()), self.redraw_pages()),
+                    "<Control-f>": self._focus_find, "<Control-g>": self._focus_page_entry,
+                    "<F3>": lambda: self.find(1), "<Shift-F3>": lambda: self.find(-1), "<F4>": self._flip_sidebar,
+                    "<F5>": self.presentation, "<F1>": self.show_help,
+                    "<Prior>": lambda: self.go(self.current - 1), "<Next>": lambda: self.go(self.current + 1),
+                    "<Home>": lambda: self.go(0), "<End>": lambda: self.go(10 ** 6),
+                    "<Down>": lambda: self._yview("scroll", 2, "units"), "<Up>": lambda: self._yview("scroll", -2, "units"),
+                    "<space>": lambda: self._yview("scroll", 1, "pages"),
+                    "<Shift-space>": lambda: self._yview("scroll", -1, "pages"),
+                    "<Key-h>": lambda: self.set_mode("hand"), "<Key-t>": lambda: self.set_mode("text"),
+                    "<Escape>": lambda: self.canvas.focus_set()}
+            if IS_WINDOWS:
+                keys["<Control-p>"] = self.print_document
+            for key, action in keys.items():
+                self.bind(key, lambda e, a=action, k=key: None if self._typing(e, k) else (a(), "break")[1])
+
+        def _typing(self, _event, key):
+            widget = self.focus_get()
+            if isinstance(widget, tk.Entry):
+                return not key.startswith(("<Control", "<F", "<Shift-F")) or key in ("<Control-minus>",)
+            return False
+
+        # ----- opening and closing -------------------------------------------------------
+
+        def open_dialog(self):
+            path = filedialog.askopenfilename(title="Open PDF", parent=self,
+                                              filetypes=[("PDF documents", "*.pdf"), ("All files", "*.*")])
+            if path:
+                self.open_file(path)
+
+        def open_file(self, path):
+            try:
+                doc = fitz.open(path)
+            except Exception as exc:
+                messagebox.showerror(APP_NAME, f"Cannot open the file:\n{exc}", parent=self)
+                return
+            if not doc.is_pdf and doc.page_count == 0:
+                messagebox.showerror(APP_NAME, "This file has no pages.", parent=self)
+                return
+            password = None
+            if doc.needs_pass:
+                for _attempt in range(3):
+                    password = ask_password(self, os.path.basename(path))
+                    if password is None:
+                        doc.close()
+                        return
+                    if doc.authenticate(password):
+                        break
+                    messagebox.showerror(APP_NAME, "Wrong password.", parent=self)
+                else:
+                    doc.close()
+                    return
+            if self.doc is not None:
+                self.doc.close()
+            self.doc, self.path, self.password = doc, os.path.abspath(path), password
+            self.view_rotation = 0
+            self.fit_mode = "width"
+            self.current = 0
+            self.rendered.clear()
+            self.links.clear()
+            self.search = {"query": "", "hits": {}, "order": [], "index": -1, "job": None}
+            self.canvas.xview_moveto(0)
+            self.canvas.yview_moveto(0)
+            self.relayout()
+            self.start_thumbnails()
+            self.load_bookmarks()
+            self._update_title()
+            size = os.path.getsize(self.path)
+            self.status_file.config(text=f"{size / 1024:,.0f} KB" if size < 10 * 1024 * 1024 else
+                                    f"{size / 1024 / 1024:,.1f} MB")
+            self.status_main.config(text=f"{os.path.basename(path)}: {len(doc)} page(s)"
+                                         + ("  [password protected]" if password else ""))
+            self.canvas.focus_set()
+
+        def close_document(self):
+            if self.doc is not None:
+                self.doc.close()
+            self.doc, self.path = None, None
+            self.rendered.clear()
+            self.links.clear()
+            self.relayout()
+            self.start_thumbnails()
+            self.load_bookmarks()
+            self._update_title()
+            self.status_file.config(text="")
+            self.status_main.config(text="")
+
+        def _update_title(self):
+            text = f"{os.path.basename(self.path)} - {APP_NAME}" if self.path else APP_NAME
+            meta_title = (self.doc.metadata or {}).get("title") if self.doc else ""
+            if meta_title:
+                text = f"{meta_title} ({os.path.basename(self.path)}) - {APP_NAME}"
+            self.title(text)
+            self.caption_title.config(text=text)
+
+        # ----- geometry: zoom, layout, coordinates ---------------------------------------------
+
+        def page_size(self, index):
+            rect = self.doc[index].rect
+            return (rect.height, rect.width) if self.view_rotation % 180 else (rect.width, rect.height)
+
+        def _apply_fit(self):
+            if not self.doc or not self.fit_mode:
+                return
+            width = max(100, self.canvas.winfo_width() - 2 * PAD - 4)
+            height = max(100, self.canvas.winfo_height() - 2 * PAD - 4)
+            page_w, page_h = self.page_size(self.current)
+            zoom = width / page_w
+            if self.fit_mode == "page":
+                zoom = min(zoom, height / page_h)
+            self.zoom = max(0.1, min(6.0, zoom))
+
+        def relayout(self, keep=True):
+            """Place every page in the canvas; only placeholders here, pictures come later."""
+            anchor = self._anchor() if keep and self.layout else None
+            canvas = self.canvas
+            canvas.delete("all")
+            self.rendered.clear()
+            self.layout = []
+            if self.doc is None:
+                canvas.config(scrollregion=(0, 0, 1, 1))
+                canvas.create_text(max(200, canvas.winfo_width() // 2), max(120, canvas.winfo_height() // 2),
+                                   text="Open a PDF with Ctrl+O\n(or File > Open)", fill=WHITE, font=FONT_BOLD,
+                                   justify="center")
+                self.page_total.config(text="/ 0")
+                self.var_page.set("")
+                self.zoom_label.config(text="")
+                self.status_page.config(text="")
+                self.status_size.config(text="")
+                return
+            self._apply_fit()
+            sizes = [self.page_size(i) for i in range(len(self.doc))]
+            widest = max(int(w * self.zoom) for w, _h in sizes)
+            total_w = max(canvas.winfo_width(), widest + 2 * PAD)
+            y = PAD
+            visible_w = max(canvas.winfo_width(), 100)
+            for index, (w, h) in enumerate(sizes):
+                pw, ph = int(w * self.zoom), int(h * self.zoom)
+                x = max(PAD, (visible_w - pw) // 2)        # centred in the window; wider pages scroll sideways
+                self.layout.append((x, y, pw, ph))
+                canvas.create_rectangle(x + 3, y + 3, x + pw + 3, y + ph + 3, fill=BLACK, outline="", tags="shadow")
+                canvas.create_rectangle(x, y, x + pw, y + ph, fill=WHITE if not self.night.get() else BLACK,
+                                        outline=BLACK, tags=("blank", f"blank{index}"))
+                y += ph + PAD
+            canvas.config(scrollregion=(0, 0, total_w, y))
+            self.zoom_label.config(text=f"{round(self.zoom * 100)}%")
+            self.page_total.config(text=f"/ {len(self.doc)}")
+            if anchor:
+                self._restore_anchor(anchor)
+            self.schedule_render()
+
+        def _anchor(self):
+            """Current page and the relative position inside it, to keep the place across zoom changes."""
+            top = self.canvas.canvasy(0)
+            index = self.page_at_y(top + 1)
+            x, y, w, h = self.layout[index]
+            return index, (top - y) / h if h else 0
+
+        def _restore_anchor(self, anchor):
+            index, fraction = anchor
+            index = min(index, len(self.layout) - 1)
+            _x, y, _w, h = self.layout[index]
+            total = float(self.canvas.cget("scrollregion").split()[3])
+            self.canvas.yview_moveto(max(0, (y + fraction * h) / total))
+
+        def page_at_y(self, y):
+            low, high = 0, len(self.layout) - 1
+            while low < high:
+                middle = (low + high + 1) // 2
+                if self.layout[middle][1] - PAD / 2 <= y:
+                    low = middle
+                else:
+                    high = middle - 1
+            return low
+
+        def page_matrix(self, index):
+            """Matrix used to draw a page, and the offset that puts its picture at (0, 0)."""
+            page = self.doc[index]
+            matrix = fitz.Matrix(self.zoom, self.zoom).prerotate(self.view_rotation)
+            box = page.rect * matrix
+            return page, matrix, (-box.x0, -box.y0)
+
+        def to_page(self, index, canvas_x, canvas_y):
+            """Canvas point -> unrotated PDF coordinates of page `index`."""
+            page, matrix, (ox, oy) = self.page_matrix(index)
+            x, y, _w, _h = self.layout[index]
+            full = page.rotation_matrix * matrix * fitz.Matrix(1, 0, 0, 1, ox, oy)
+            return fitz.Point(canvas_x - x, canvas_y - y) * ~full
+
+        def to_canvas(self, index, rect):
+            """Unrotated PDF rectangle of page `index` -> canvas rectangle."""
+            page, matrix, (ox, oy) = self.page_matrix(index)
+            x, y, _w, _h = self.layout[index]
+            box = rect * page.rotation_matrix * matrix
+            return box.x0 + ox + x, box.y0 + oy + y, box.x1 + ox + x, box.y1 + oy + y
+
+        def set_zoom(self, zoom):
+            self.fit_mode = None
+            self.zoom = max(0.1, min(6.0, zoom))
+            self.relayout()
+
+        def set_fit(self, mode):
+            self.fit_mode = mode
+            self.relayout()
+
+        def zoom_step(self, direction):
+            if self.doc is None:
+                return
+            if direction > 0:
+                zoom = next((z for z in ZOOM_STEPS if z > self.zoom + 0.01), ZOOM_STEPS[-1])
+            else:
+                zoom = next((z for z in reversed(ZOOM_STEPS) if z < self.zoom - 0.01), ZOOM_STEPS[0])
+            self.set_zoom(zoom)
+
+        def rotate(self, degrees):
+            if self.doc is None:
+                return
+            self.view_rotation = (self.view_rotation + degrees) % 360
+            self.relayout()
+            self.start_thumbnails()
+            self.status_main.config(text=f"View rotated {self.view_rotation} degrees (the file is not changed)")
+
+        def _on_resize(self, _event=None):
+            if self.fit_mode and self.doc is not None:
+                self.relayout()
+            else:
+                self.schedule_render()
+
+        # ----- drawing the visible pages -----------------------------------------------------------
+
+        def schedule_render(self):
+            if self.render_job is not None:
+                self.after_cancel(self.render_job)
+            self.render_job = self.after(15, self.render_visible)
+
+        def visible_pages(self):
+            if not self.layout:
+                return range(0)
+            top = self.canvas.canvasy(0)
+            bottom = top + self.canvas.winfo_height()
+            first = self.page_at_y(top)
+            last = self.page_at_y(bottom)
+            return range(max(0, first - 1), min(len(self.layout), last + 2))
+
+        def render_visible(self):
+            self.render_job = None
+            if self.doc is None or not self.layout:
+                return
+            wanted = self.visible_pages()
+            key = (self.zoom, self.view_rotation, self.night.get())
+            for index in wanted:
+                if index in self.rendered and self.rendered[index][0] == key:
+                    continue
+                page, matrix, _offset = self.page_matrix(index)
+                try:
+                    pix = page.get_pixmap(matrix=matrix, alpha=False)
+                except Exception as exc:
+                    self.status_main.config(text=f"Page {index + 1} could not be drawn: {exc}")
+                    continue
+                if self.night.get():
+                    pix.invert_irect(pix.irect)
+                photo = ImageTk.PhotoImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples),
+                                           master=self.canvas)
+                x, y, _w, _h = self.layout[index]
+                self.canvas.delete(f"page{index}")
+                self.canvas.create_image(x, y, image=photo, anchor="nw", tags=("page", f"page{index}"))
+                self.rendered[index] = (key, photo)
+            for index in [i for i in self.rendered if i not in wanted]:
+                if len(self.rendered) <= CACHE_PAGES:
+                    break
+                self.canvas.delete(f"page{index}")
+                del self.rendered[index]
+            self.canvas.tag_raise("page")
+            self._draw_search_marks()
+            self._update_current()
+
+        def redraw_pages(self):
+            self.rendered.clear()
+            self.canvas.delete("page")
+            self.canvas.itemconfig("blank", fill=BLACK if self.night.get() else WHITE)
+            self.schedule_render()
+
+        def _update_current(self):
+            if not self.layout:
+                return
+            top = self.canvas.canvasy(0)
+            middle = top + self.canvas.winfo_height() / 3
+            index = self.page_at_y(middle)
+            if index != self.current or self.var_page.get() != str(index + 1):
+                self.current = index
+                if self.focus_get() is not self.page_entry:
+                    self.var_page.set(str(index + 1))
+                self._mark_thumb()
+            width, height = self.doc[index].rect.width, self.doc[index].rect.height
+            self.status_page.config(text=f"Page {index + 1} of {len(self.doc)}")
+            self.status_size.config(text=f"{width / MM:.0f} x {height / MM:.0f} mm")
+
+        # ----- scrolling and navigation --------------------------------------------------------------
+
+        def _yview(self, *args):
+            self.canvas.yview(*args)
+            self.schedule_render()
+
+        def _xview(self, *args):
+            self.canvas.xview(*args)
+
+        def _wheel(self, event, delta=None):
+            delta = event.delta if delta is None else delta
+            if event.state & 0x0004:
+                self.zoom_step(1 if delta > 0 else -1)
+                return "break"
+            if event.state & 0x0001:
+                self.canvas.xview_scroll(-3 if delta > 0 else 3, "units")
+            else:
+                self._yview("scroll", -3 if delta > 0 else 3, "units")
+            return "break"
+
+        def _ctrl_wheel(self, event):
+            self.zoom_step(1 if event.delta > 0 else -1)
+            return "break"
+
+        def go(self, index, y_in_page=None):
+            if self.doc is None:
+                return
+            index = max(0, min(len(self.doc) - 1, index))
+            _x, y, _w, _h = self.layout[index]
+            total = float(self.canvas.cget("scrollregion").split()[3])
+            target = y - PAD / 2 + (y_in_page or 0)
+            self.canvas.yview_moveto(max(0, target / total))
+            self.current = index
+            self.var_page.set(str(index + 1))
+            self._mark_thumb()
+            self.schedule_render()
+
+        def _goto_entry(self, _event=None):
+            try:
+                self.go(int(self.var_page.get()) - 1)
+            except ValueError:
+                self.var_page.set(str(self.current + 1))
+            self.canvas.focus_set()
+            return "break"
+
+        def _focus_page_entry(self):
+            self.page_entry.focus_set()
+            self.page_entry.select_range(0, "end")
+
+        # ----- thumbnails and bookmarks --------------------------------------------------------------
+
+        def _show_tab(self, name):
+            for tab, panel, key in ((self.tab_pages, self.pages_panel, "pages"), (self.tab_marks, self.marks_panel, "marks")):
+                if key == name:
+                    tab.config(relief="sunken", bg=LIGHT)
+                    panel.pack(fill="both", expand=True)
+                else:
+                    tab.config(relief="raised", bg=FACE)
+                    panel.pack_forget()
+
+        def _toggle_sidebar(self):
+            if self.show_sidebar.get():
+                self.sidebar.pack(side="left", fill="y", padx=(0, 4), before=self.canvas.master)
+            else:
+                self.sidebar.pack_forget()
+            self.after(50, self._on_resize)
+
+        def _flip_sidebar(self):
+            self.show_sidebar.set(not self.show_sidebar.get())
+            self._toggle_sidebar()
+
+        def start_thumbnails(self):
+            if self.thumb_job is not None:
+                self.after_cancel(self.thumb_job)
+                self.thumb_job = None
+            self.thumb_generation += 1
+            self.thumb_photos = {}
+            self.thumbs.delete("all")
+            self.thumb_positions = []
+            if self.doc is None:
+                return
+            y = 8
+            for index in range(len(self.doc)):
+                w, h = self.page_size(index)
+                height = int(THUMB_W * h / w)
+                self.thumb_positions.append((y, height))
+                self.thumbs.create_rectangle(12, y, 12 + THUMB_W, y + height, fill=WHITE, outline=BLACK)
+                self.thumbs.create_text(12 + THUMB_W // 2, y + height + 9, text=str(index + 1), font=FONT, fill=WHITE)
+                y += height + 24
+            self.thumbs.config(scrollregion=(0, 0, THUMB_W + 24, y))
+            self._mark_thumb()
+            self._thumb_batch(0, self.thumb_generation)
+
+        def _thumb_batch(self, start, generation):
+            if generation != self.thumb_generation or self.doc is None:
+                return
+            end = min(len(self.doc), start + 5)
+            for index in range(start, end):
+                page = self.doc[index]
+                w, _h = self.page_size(index)
+                scale = THUMB_W / w
+                try:
+                    pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale).prerotate(self.view_rotation), alpha=False)
+                except Exception:
+                    continue
+                photo = ImageTk.PhotoImage(Image.frombytes("RGB", (pix.width, pix.height), pix.samples),
+                                           master=self.thumbs)
+                self.thumb_photos[index] = photo
+                y, _height = self.thumb_positions[index]
+                self.thumbs.create_image(12, y, image=photo, anchor="nw")
+            self._mark_thumb()
+            if end < len(self.doc):
+                self.thumb_job = self.after(20, lambda: self._thumb_batch(end, generation))
+            else:
+                self.thumb_job = None
+
+        def _mark_thumb(self):
+            self.thumbs.delete("mark")
+            positions = getattr(self, "thumb_positions", [])
+            if self.doc is None or self.current >= len(positions):
+                return
+            y, height = positions[self.current]
+            self.thumbs.create_rectangle(8, y - 4, 16 + THUMB_W, y + height + 4, outline="#ffff00", width=3, tags="mark")
+            first, last = self.thumbs.yview()
+            total = positions[-1][0] + positions[-1][1] + 24
+            if not (first * total <= y and y + height <= last * total):
+                self.thumbs.yview_moveto(max(0, (y - 40) / total))
+
+        def _thumb_click(self, event):
+            y = self.thumbs.canvasy(event.y)
+            for index, (top, height) in enumerate(getattr(self, "thumb_positions", [])):
+                if top - 6 <= y <= top + height + 20:
+                    self.go(index)
+                    return
+
+        def load_bookmarks(self):
+            self.marks.delete(0, "end")
+            self.toc = []
+            if self.doc is None:
+                return
+            try:
+                self.toc = self.doc.get_toc(simple=False)
+            except Exception:
+                self.toc = []
+            for level, title, page, *_rest in self.toc:
+                self.marks.insert("end", "   " * (level - 1) + ("- " if level > 1 else "") + title.strip())
+            if not self.toc:
+                self.marks.insert("end", "(this document has no bookmarks)")
+            else:
+                self._show_tab("marks")
+
+        def _mark_selected(self, _event=None):
+            selection = self.marks.curselection()
+            if not selection or selection[0] >= len(self.toc):
+                return
+            _level, _title, page, *rest = self.toc[selection[0]]
+            if page < 1:
+                return
+            y_in_page = None
+            destination = rest[0] if rest else {}
+            point = destination.get("to") if isinstance(destination, dict) else None
+            if point is not None and 0 <= page - 1 < len(self.layout):
+                # PyMuPDF gives the destination in page coordinates (top-left origin): show it near the top
+                index = page - 1
+                target = fitz.Point(point)
+                _x0, top, _x1, _y1 = self.to_canvas(index, fitz.Rect(target, target))
+                y_in_page = max(0, top - self.layout[index][1] - 40)
+            self.go(page - 1, y_in_page)
+
+        # ----- search ------------------------------------------------------------------------------
+
+        def _focus_find(self):
+            self.find_entry.focus_set()
+            self.find_entry.select_range(0, "end")
+
+        def find(self, direction):
+            if self.doc is None:
+                return
+            query = self.var_find.get().strip()
+            if not query:
+                self._focus_find()
+                return
+            state = self.search
+            if query != state["query"]:
+                if state["job"] is not None:
+                    self.after_cancel(state["job"])
+                self.search = state = {"query": query, "hits": {}, "order": [], "index": -1, "job": None}
+                self.canvas.delete("hit")
+            position = state["order"][state["index"]] if 0 <= state["index"] < len(state["order"]) else None
+            if position is not None and position[0] in self.visible_pages():
+                # continue from the match on screen: next one on the same page, or the next pages
+                page, number = position
+                if 0 <= number + direction < len(state["hits"].get(page, [])):
+                    self._goto_hit(page, number + direction)
+                    return
+                start = page + direction
+            else:
+                start = self.current                      # the user moved elsewhere: search from here
+            self._scan(start, direction, 0, query)
+
+        def _scan(self, index, direction, scanned, query):
+            """Look for the next page with matches, a few pages per step (the window stays responsive)."""
+            state = self.search
+            count = len(self.doc)
+            for _step in range(15):
+                if scanned >= count:
+                    self.status_main.config(text=f"'{query}' was not found")
+                    self.bell()
+                    state["job"] = None
+                    return
+                index %= count
+                if index not in state["hits"]:
+                    try:
+                        state["hits"][index] = self.doc[index].search_for(query)
+                    except Exception:
+                        state["hits"][index] = []
+                hits = state["hits"][index]
+                if hits:
+                    self._goto_hit(index, 0 if direction > 0 else len(hits) - 1)
+                    state["job"] = None
+                    return
+                index += direction
+                scanned += 1
+            self.status_main.config(text=f"Searching... page {index % count + 1} of {count}")
+            state["job"] = self.after(1, lambda: self._scan(index, direction, scanned, query))
+
+        def _goto_hit(self, page, number):
+            state = self.search
+            if (page, number) not in state["order"]:
+                state["order"].append((page, number))
+            state["index"] = state["order"].index((page, number))
+            rect = state["hits"][page][number]
+            _x0, y0, _x1, _y1 = self.to_canvas(page, rect)
+            total = float(self.canvas.cget("scrollregion").split()[3])
+            self.canvas.yview_moveto(max(0, (y0 - self.canvas.winfo_height() / 3) / total))
+            x0, _y0, x1, _y1 = self.to_canvas(page, rect)
+            width = float(self.canvas.cget("scrollregion").split()[2])
+            if x1 > self.canvas.canvasx(self.canvas.winfo_width()) or x0 < self.canvas.canvasx(0):
+                self.canvas.xview_moveto(max(0, (x0 - 60) / width))
+            self.current_hit = (page, number)
+            self.status_main.config(text=f"'{state['query']}': match {number + 1} of {len(state['hits'][page])} "
+                                         f"on page {page + 1}")
+            self.schedule_render()
+
+        def _draw_search_marks(self):
+            self.canvas.delete("hit")
+            state = self.search
+            if not state["query"]:
+                return
+            current = getattr(self, "current_hit", None)
+            for page in self.visible_pages():
+                for number, rect in enumerate(state["hits"].get(page, [])):
+                    x0, y0, x1, y1 = self.to_canvas(page, rect)
+                    active = current == (page, number)
+                    self.canvas.create_rectangle(x0 - 1, y0 - 1, x1 + 1, y1 + 1, outline="#ff6000" if active else "#e0b000",
+                                                 width=2 if active else 1, fill="#ffff00" if active else "",
+                                                 stipple="gray25" if active else "", tags="hit")
+
+        # ----- mouse: hand, links, text selection ---------------------------------------------------------
+
+        def set_mode(self, mode):
+            self.mode = mode
+            self.btn_hand.config(relief="sunken" if mode == "hand" else "raised", bg=LIGHT if mode == "hand" else FACE)
+            self.btn_text.config(relief="sunken" if mode == "text" else "raised", bg=LIGHT if mode == "text" else FACE)
+            self.canvas.config(cursor="fleur" if mode == "hand" else "xterm")
+            self.status_main.config(text="Hand: drag to scroll, click links" if mode == "hand" else
+                                    "Select Text: drag a rectangle over the text to copy it")
+
+        def page_under(self, event):
+            if not self.layout:
+                return None, None
+            cx, cy = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+            index = self.page_at_y(cy)
+            x, y, w, h = self.layout[index]
+            if x <= cx <= x + w and y <= cy <= y + h:
+                return index, self.to_page(index, cx, cy)
+            return None, None
+
+        def link_at(self, index, point):
+            if index not in self.links:
+                try:
+                    self.links[index] = self.doc[index].get_links()
+                except Exception:
+                    self.links[index] = []
+            for link in self.links[index]:
+                if point in fitz.Rect(link["from"]):
+                    return link
+            return None
+
+        def _hover(self, event):
+            if self.doc is None or self.drag:
+                return
+            index, point = self.page_under(event)
+            if index is None:
+                self.canvas.config(cursor="fleur" if self.mode == "hand" else "xterm")
+                return
+            link = self.link_at(index, point) if self.mode == "hand" else None
+            self.canvas.config(cursor="hand2" if link else ("fleur" if self.mode == "hand" else "xterm"))
+            if link:
+                target = link.get("uri") or (f"Go to page {link['page'] + 1}" if link.get("page", -1) >= 0 else "")
+                self.status_main.config(text=target)
+
+        def _press(self, event):
+            self.canvas.focus_set()
+            if self.doc is None:
+                return
+            if self.mode == "hand":
+                self.canvas.scan_mark(event.x, event.y)
+                self.drag = {"mode": "pan", "x": event.x, "y": event.y, "moved": False}
+            else:
+                self.drag = {"mode": "select", "start": (self.canvas.canvasx(event.x), self.canvas.canvasy(event.y))}
+
+        def _motion(self, event):
+            drag = self.drag
+            if not drag:
+                return
+            if drag["mode"] == "pan":
+                if abs(event.x - drag["x"]) + abs(event.y - drag["y"]) > 3:
+                    drag["moved"] = True
+                self.canvas.scan_dragto(event.x, event.y, gain=1)
+                self.schedule_render()
+            else:
+                x0, y0 = drag["start"]
+                self.canvas.delete("selection")
+                self.canvas.create_rectangle(x0, y0, self.canvas.canvasx(event.x), self.canvas.canvasy(event.y),
+                                             outline=NAVY, dash=(3, 2), fill="#3060ff", stipple="gray12", tags="selection")
+
+        def _release(self, event):
+            drag, self.drag = self.drag, None
+            if not drag or self.doc is None:
+                return
+            if drag["mode"] == "pan":
+                if not drag["moved"]:
+                    index, point = self.page_under(event)
+                    link = self.link_at(index, point) if index is not None else None
+                    if link:
+                        self.follow_link(link)
+                return
+            self.canvas.delete("selection")
+            x0, y0 = drag["start"]
+            x1, y1 = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+            if abs(x1 - x0) < 4 or abs(y1 - y0) < 4:
+                return
+            index = self.page_at_y((y0 + y1) / 2)
+            a, b = self.to_page(index, x0, y0), self.to_page(index, x1, y1)
+            rect = fitz.Rect(a, b)
+            rect.normalize()
+            text = self.doc[index].get_textbox(rect).strip()
+            if not text:
+                self.status_main.config(text="No text in that area (scanned pages are pictures)")
+                return
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            preview = text.replace("\n", " ")
+            self.status_main.config(text=f"Copied {len(text)} characters: {preview[:70]}{'...' if len(preview) > 70 else ''}")
+
+        def follow_link(self, link):
+            kind = link.get("kind")
+            if kind == fitz.LINK_URI and link.get("uri"):
+                if messagebox.askyesno("Open Link", f"Open this address in the browser?\n\n{link['uri']}", parent=self):
+                    webbrowser.open(link["uri"])
+            elif kind in (fitz.LINK_GOTO, fitz.LINK_NAMED) and link.get("page", -1) >= 0:
+                self.go(link["page"])
+            elif kind == fitz.LINK_LAUNCH and link.get("file"):
+                self.status_main.config(text=f"Link to a file: {link['file']} (not opened for safety)")
+
+        def _context_menu(self, event):
+            if self.doc is None:
+                return
+            index, _point = self.page_under(event)
+            menu = w95_menu(self)
+            if index is not None:
+                menu.add_command(label=f"Copy Text of Page {index + 1}", command=lambda: self.copy_page_text(index))
+                menu.add_command(label="Save This Page as Picture...", command=lambda: self.save_page_picture(index))
+                menu.add_separator()
+            menu.add_command(label="Hand", command=lambda: self.set_mode("hand"))
+            menu.add_command(label="Select Text", command=lambda: self.set_mode("text"))
+            menu.add_separator()
+            menu.add_command(label="Fit Width", command=lambda: self.set_fit("width"))
+            menu.add_command(label="Fit Page", command=lambda: self.set_fit("page"))
+            menu.add_command(label="Rotate Right", command=lambda: self.rotate(90))
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        # ----- other actions ---------------------------------------------------------------------------
+
+        def copy_page_text(self, index=None):
+            if self.doc is None:
+                return
+            index = self.current if index is None else index
+            text = self.doc[index].get_text()
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.status_main.config(text=f"Text of page {index + 1} copied ({len(text)} characters)"
+                                    if text.strip() else f"Page {index + 1} has no text (it may be a scanned picture)")
+
+        def save_page_picture(self, index=None):
+            if self.doc is None:
+                return
+            index = self.current if index is None else index
+            stem = os.path.splitext(os.path.basename(self.path))[0]
+            path = filedialog.asksaveasfilename(title="Save Page as Picture", parent=self, defaultextension=".png",
+                                                initialfile=f"{stem}_p{index + 1}.png",
+                                                filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg")])
+            if path:
+                pix = self.doc[index].get_pixmap(dpi=150, alpha=False)
+                if path.lower().endswith((".jpg", ".jpeg")):
+                    Image.frombytes("RGB", (pix.width, pix.height), pix.samples).save(path, quality=92)
+                else:
+                    pix.save(path)
+                self.status_main.config(text=f"Page {index + 1} saved: {path}")
+
+        def properties(self):
+            if self.doc is None:
+                return
+            meta = self.doc.metadata or {}
+            page = self.doc[self.current].rect
+            lines = [f"File:      {self.path}", f"Size:      {os.path.getsize(self.path) / 1024:,.0f} KB",
+                     f"Pages:     {len(self.doc)}", f"Page {self.current + 1}:    {page.width / MM:.0f} x "
+                     f"{page.height / MM:.0f} mm", "", f"Title:     {meta.get('title', '')}",
+                     f"Author:    {meta.get('author', '')}", f"Subject:   {meta.get('subject', '')}",
+                     f"Keywords:  {meta.get('keywords', '')}", f"Creator:   {meta.get('creator', '')}",
+                     f"Producer:  {meta.get('producer', '')}", f"Created:   {self._pdf_date(meta.get('creationDate'))}",
+                     f"Modified:  {self._pdf_date(meta.get('modDate'))}", f"Format:    {meta.get('format', '')}",
+                     f"Encrypted: {'yes' if self.password or meta.get('encryption') else 'no'}",
+                     f"Bookmarks: {len(self.toc)}"]
+            messagebox.showinfo("Document Properties", "\n".join(lines), parent=self)
+
+        @staticmethod
+        def _pdf_date(value):
+            if not value or len(value) < 10:
+                return value or ""
+            text = value[2:] if value.startswith("D:") else value
+            try:
+                return f"{text[6:8]}.{text[4:6]}.{text[0:4]} {text[8:10]}:{text[10:12]}"
+            except IndexError:
+                return value
+
+        def print_document(self):
+            pass
+            # if not IS_WINDOWS or self.doc is None:
+                # return
+            # source = self.path
+            # if self.password:
+                # source = os.path.join(tempfile.gettempdir(), "pdf_viewer_95_print.pdf")
+                # self.doc.save(source)
+            # try:
+                # os.startfile(source, "print")
+                # self.status_main.config(text="Sent to the default printer")
+            # except Exception as exc:
+                # messagebox.showerror(APP_NAME, f"Cannot print:\n{exc}", parent=self)
+
+        def presentation(self):
+            if self.doc is not None:
+                Presentation(self, self.current)
+
+        def show_help(self):
+            messagebox.showinfo(
+                "Keyboard and Mouse",
+                "Open: Ctrl+O        Close: Ctrl+W        Properties: Ctrl+D\n\n"
+                "Pages: wheel or arrows scroll, PgUp / PgDn jump a page, Home / End,\n"
+                "Ctrl+G go to page; click a thumbnail or a bookmark.\n\n"
+                "Zoom: Ctrl+wheel, Ctrl+ +/-, Ctrl+0 actual size, Ctrl+1 fit width, Ctrl+2 fit page.\n"
+                "Rotate the view: Ctrl+R / Ctrl+L (the file is not changed).\n\n"
+                "Hand (H): drag to scroll; click a link to follow it.\n"
+                "Select Text (T): drag a rectangle to copy its text.\n"
+                "Find: Ctrl+F, then Enter / F3 next, Shift+F3 previous.\n\n"
+                "F4 side panel, Ctrl+N night mode, F5 presentation (Esc to leave).",
+                parent=self)
+
+
+    def main():
+        path = sys.argv[1] if len(sys.argv) > 1 and os.path.isfile(sys.argv[1]) else None
+        PDFViewer(path).mainloop()
 
 
     if __name__ == "__main__":
-        try:
-            import fitz
-            from PIL import Image, ImageTk
-        except ImportError as e:
-            messagebox.showerror("Missing Dependencies", 
-                               "Please install required packages:\n\n"
-                               "pip install PyMuPDF Pillow\n\n"
-                               f"Error: {e}")
-            exit(1)
+        main()
+
+    # class Win95Theme:
+        # BG_COLOR = "#c0c0c0"  # Light gray background
+        # BUTTON_COLOR = "#c0c0c0"  # Button background
+        # BUTTON_ACTIVE = "#dfdfdf"  # Button when pressed
+        # TEXT_COLOR = "#000000"  # Black text
+        # DISABLED_TEXT = "#808080"  # Gray disabled text
+        # HIGHLIGHT_COLOR = "#000080"  # Navy blue for selection
+        # HIGHLIGHT_TEXT = "#ffffff"  # White text on selection
+        # WINDOW_BG = "#c0c0c0"  # Window background
+        # CANVAS_BG = "#ffffff"  # Canvas background (white for PDF)
+        # MENU_BG = "#c0c0c0"  # Menu background
         
-        # creating the rootpdfreaderroot window using Tk() class
-        rootpdfreaderroot = Tk()
-        # instantiating/creating object app for class PDFViewer
-        app = PDFViewer(rootpdfreaderroot)
-        # calling the mainloop to run the app infinitely until user closes it
-        rootpdfreaderroot.mainloop()
+        # @staticmethod
+        # def configure_widget(widget, widget_type="default"):
+            # """Apply Windows 95 styling to widgets"""
+            # if widget_type == "button":
+                # widget.configure(
+                    # relief="raised",
+                    # borderwidth=2,
+                    # background=Win95Theme.BUTTON_COLOR,
+                    # foreground=Win95Theme.TEXT_COLOR,
+                    # font=("MS Sans Serif", 8)
+                # )
+            # elif widget_type == "label":
+                # widget.configure(
+                    # background=Win95Theme.BG_COLOR,
+                    # foreground=Win95Theme.TEXT_COLOR,
+                    # font=("MS Sans Serif", 8)
+                # )
+            # elif widget_type == "frame":
+                # widget.configure(
+                    # background=Win95Theme.BG_COLOR,
+                    # relief="sunken",
+                    # borderwidth=2
+                # )
+            # elif widget_type == "canvas":
+                # widget.configure(
+                    # background=Win95Theme.CANVAS_BG,
+                    # relief="sunken",
+                    # borderwidth=2,
+                    # highlightthickness=0
+                # )
+
+
+    # class PDFMiner:
+        # def __init__(self, filepath):
+            # """
+            # Initialize PDFMiner with a PDF file path
+            # """
+            # self.filepath = filepath
+            # self.pdf_document = None
+            # self.load_document()
+        
+        # def load_document(self):
+            # """
+            # Load the PDF document using PyMuPDF
+            # """
+            # try:
+                # self.pdf_document = fitz.open(self.filepath)
+            # except Exception as e:
+                # print(f"Error loading PDF: {e}")
+                # messagebox.showerror("Error", f"Failed to load PDF: {e}")
+                # self.pdf_document = None
+        
+        # def get_metadata(self):
+            # """
+            # Extract metadata and number of pages from the PDF
+            # Returns: (metadata_dict, number_of_pages)
+            # """
+            # if not self.pdf_document:
+                # return {}, 0
+            
+            # try:
+                # # Get metadata
+                # metadata = self.pdf_document.metadata
+                
+                # # Get number of pages
+                # num_pages = len(self.pdf_document)
+                
+                # return metadata, num_pages
+            # except Exception as e:
+                # print(f"Error getting metadata: {e}")
+                # return {}, 0
+        
+        # def get_page(self, page_number, zoom_level=1.0, rotation=0):
+            # """
+            # Convert a PDF page to a PhotoImage for tkinter display
+            # Args:
+                # page_number: Page index (0-based)
+                # zoom_level: Zoom factor for the page
+                # rotation: Rotation angle in degrees (0, 90, 180, 270)
+            # Returns:
+                # PhotoImage object for tkinter
+            # """
+            # if not self.pdf_document:
+                # return None
+            
+            # try:
+                # # Get the page
+                # page = self.pdf_document[page_number]
+                
+                # # Create a transformation matrix with zoom and rotation
+                # base_scale = 1.5
+                # mat = fitz.Matrix(base_scale * zoom_level, base_scale * zoom_level)
+                
+                # # Apply rotation
+                # if rotation != 0:
+                    # mat = mat * fitz.Matrix(rotation)
+                
+                # # Render page to pixmap
+                # pix = page.get_pixmap(matrix=mat)
+                
+                # # Convert pixmap to PIL Image
+                # img_data = pix.tobytes("ppm")
+                # img = Image.open(io.BytesIO(img_data))
+                
+                # # Convert PIL Image to PhotoImage
+                # photo = ImageTk.PhotoImage(img)
+                
+                # return photo
+                
+            # except Exception as e:
+                # print(f"Error rendering page {page_number}: {e}")
+                # return None
+        
+        # def close(self):
+            # """
+            # Close the PDF document
+            # """
+            # if self.pdf_document:
+                # self.pdf_document.close()
+        
+        # def __del__(self):
+            # """
+            # Cleanup when object is destroyed
+            # """
+            # self.close()
+
+
+    # class PDFViewer:
+        # def __init__(self, master):
+            # # path for the pdf doc
+            # self.path = None
+            # # state of the pdf doc, open or closed
+            # self.fileisopen = None
+            # # author of the pdf doc
+            # self.author = None
+            # # name for the pdf doc
+            # self.name = None
+            # # the current page for the pdf
+            # self.current_page = 0
+            # # total number of pages for the pdf doc
+            # self.numPages = None    
+            # # creating the window
+            # self.master = master
+            # # Apply Windows 95 theme to main window
+            # self.master.configure(bg=Win95Theme.WINDOW_BG)
+            # # gives title to the main window
+            # self.master.title('PDF Viewer')
+            # # gives dimensions to main window
+            # self.master.geometry('800x700+150+40')
+            # # enable window resizing
+            # self.master.resizable(width = 1, height = 1)
+            # # set minimum window size
+            # self.master.minsize(600, 500)
+            
+            # # Try to load icon, but continue if file not found
+            # try:
+                # self.master.iconbitmap('pdf_file_icon.ico')
+            # except:
+                # pass  # Icon file not found, continue without it
+            
+            # # creating the menu
+            # self.menu = Menu(self.master)
+            # # adding it to the main window
+            # self.master.config(menu=self.menu)
+            # # creating a sub menu
+            # self.filemenu = Menu(self.menu)
+            # # giving the sub menu a label
+            # self.menu.add_cascade(label="File", menu=self.filemenu)
+            # # adding a two buttons to the sub menus
+            # self.filemenu.add_command(label="Open File", command=self.open_file)
+            # self.filemenu.add_command(label="Exit", command=self.master.destroy)
+            
+            # # Configure grid weights for resizing
+            # self.master.grid_rowconfigure(0, weight=1)
+            # self.master.grid_columnconfigure(0, weight=1)
+            
+            # # creating the top frame
+            # self.top_frame = ttk.Frame(self.master)
+            # # placing the frame using inside main window using grid()
+            # self.top_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+            # # Configure grid weights for top frame
+            # self.top_frame.grid_rowconfigure(0, weight=1)
+            # self.top_frame.grid_columnconfigure(0, weight=1)
+            
+            # # creating the bottom frame
+            # self.bottom_frame = ttk.Frame(self.master, height=60)
+            # # placing the frame using inside main window using grid()
+            # self.bottom_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
+            # # Configure grid weights for bottom frame
+            # self.bottom_frame.grid_columnconfigure(0, weight=1)
+            # self.bottom_frame.grid_columnconfigure(8, weight=1)
+            
+            # # creating a vertical scrollbar
+            # self.scrolly = Scrollbar(self.top_frame, orient=VERTICAL)
+            # # adding the scrollbar
+            # self.scrolly.grid(row=0, column=1, sticky="ns")
+            
+            # # creating a horizontal scrollbar
+            # self.scrollx = Scrollbar(self.top_frame, orient=HORIZONTAL)
+            # # adding the scrollbar
+            # self.scrollx.grid(row=1, column=0, sticky="ew")
+            
+            # # creating the canvas for display the PDF pages
+            # self.output = Canvas(self.top_frame, bg='#ECE8F3')
+            # # inserting both vertical and horizontal scrollbars to the canvas
+            # self.output.configure(yscrollcommand=self.scrolly.set, xscrollcommand=self.scrollx.set)
+            # # adding the canvas
+            # self.output.grid(row=0, column=0, sticky="nsew")
+            # # configuring the scrollbars to the canvas
+            # self.scrolly.configure(command=self.output.yview)
+            # self.scrollx.configure(command=self.output.xview)
+            
+            # # Bind mouse wheel to canvas for scrolling
+            # self.output.bind("<MouseWheel>", self.on_mousewheel)
+            # self.output.bind("<Button-4>", self.on_mousewheel)  # Linux
+            # self.output.bind("<Button-5>", self.on_mousewheel)  # Linux
+            # self.output.bind("<Shift-MouseWheel>", self.on_horizontal_mousewheel)
+            
+            # # Bind canvas resize event
+            # self.output.bind("<Configure>", self.on_canvas_configure)
+            
+            # # Try to load button icons, create text buttons if images not found
+            # try:
+                # self.uparrow_icon = PhotoImage(file='uparrow.png')
+                # self.downarrow_icon = PhotoImage(file='downarrow.png')
+                # # resizing the icons to fit on buttons
+                # self.uparrow = self.uparrow_icon.subsample(3, 3)
+                # self.downarrow = self.downarrow_icon.subsample(3, 3)
+                # # creating buttons with icons
+                # self.upbutton = ttk.Button(self.bottom_frame, image=self.uparrow, command=self.previous_page)
+                # self.downbutton = ttk.Button(self.bottom_frame, image=self.downarrow, command=self.next_page)
+            # except:
+                # # If image files not found, create text buttons
+                # self.upbutton = ttk.Button(self.bottom_frame, text="↑ Prev", command=self.previous_page)
+                # self.downbutton = ttk.Button(self.bottom_frame, text="Next ↓", command=self.next_page)
+            
+            # # adding the buttons with better positioning
+            # self.upbutton.grid(row=0, column=1, padx=5, pady=8)
+            # self.downbutton.grid(row=0, column=2, padx=5, pady=8)
+            
+            # # label for displaying page numbers
+            # self.page_label = ttk.Label(self.bottom_frame, text='No PDF loaded')
+            # # adding the label
+            # self.page_label.grid(row=0, column=3, padx=10, pady=8)
+            
+            # # Add zoom controls
+            # self.zoom_in_button = ttk.Button(self.bottom_frame, text="Zoom +", command=self.zoom_in)
+            # self.zoom_in_button.grid(row=0, column=4, padx=2, pady=8)
+            
+            # self.zoom_out_button = ttk.Button(self.bottom_frame, text="Zoom -", command=self.zoom_out)
+            # self.zoom_out_button.grid(row=0, column=5, padx=2, pady=8)
+            
+            # # Zoom level
+            # self.zoom_level = 1.0
+            # self.zoom_label = ttk.Label(self.bottom_frame, text="100%")
+            # self.zoom_label.grid(row=0, column=6, padx=5, pady=8)
+            
+            # # Add rotation controls
+            # self.rotate_left_button = ttk.Button(self.bottom_frame, text="↻ Rotate L", command=self.rotate_left)
+            # self.rotate_left_button.grid(row=0, column=8, padx=2, pady=8)
+            
+            # self.rotate_right_button = ttk.Button(self.bottom_frame, text="Rotate R ↺", command=self.rotate_right)
+            # self.rotate_right_button.grid(row=0, column=9, padx=2, pady=8)
+            
+            # # Rotation angle (0, 90, 180, 270 degrees)
+            # self.rotation = 0
+            
+            # # Add welcome message to canvas
+            # self.output.create_text(400, 300, text="PDF Viewer\n\nClick File > Open File to load a PDF", 
+                                   # font=("Arial", 16), fill="gray", justify=CENTER)
+        
+        # def on_mousewheel(self, event):
+            # """Handle mouse wheel scrolling"""
+            # if self.fileisopen:
+                # # Windows and MacOS
+                # if event.delta:
+                    # delta = -1 * (event.delta / 120)
+                # # Linux
+                # else:
+                    # if event.num == 4:
+                        # delta = -1
+                    # else:
+                        # delta = 1
+                
+                # self.output.yview_scroll(int(delta), "units")
+        
+        # def on_horizontal_mousewheel(self, event):
+            # """Handle horizontal mouse wheel scrolling"""
+            # if self.fileisopen:
+                # if event.delta:
+                    # delta = -1 * (event.delta / 120)
+                # else:
+                    # if event.num == 4:
+                        # delta = -1
+                    # else:
+                        # delta = 1
+                
+                # self.output.xview_scroll(int(delta), "units")
+        
+        # def on_canvas_configure(self, event):
+            # """Handle canvas resize"""
+            # if self.fileisopen:
+                # # Update scroll region when canvas is resized
+                # self.output.configure(scrollregion=self.output.bbox("all"))
+        
+        # def zoom_in(self):
+            # """Increase zoom level"""
+            # if self.fileisopen:
+                # self.zoom_level *= 1.2
+                # self.update_zoom()
+        
+        # def zoom_out(self):
+            # """Decrease zoom level"""
+            # if self.fileisopen:
+                # self.zoom_level /= 1.2
+                # if self.zoom_level < 0.1:
+                    # self.zoom_level = 0.1
+                # self.update_zoom()
+        
+        # def update_zoom(self):
+            # """Update the display with new zoom level"""
+            # if self.fileisopen:
+                # self.display_page()
+                # self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
+        
+        # def rotate_left(self):
+            # """Rotate page 90 degrees counter-clockwise"""
+            # if self.fileisopen:
+                # self.rotation = (self.rotation - 90) % 360
+                # self.display_page()
+        
+        # def rotate_right(self):
+            # """Rotate page 90 degrees clockwise"""
+            # if self.fileisopen:
+                # self.rotation = (self.rotation + 90) % 360
+                # self.display_page()
+            
+        # # function for opening pdf files
+        # def open_file(self):
+            # # open the file dialog
+            # filepath = fd.askopenfilename(
+                # title='Select a PDF file', 
+                # initialdir=os.getcwd(), 
+                # filetypes=(('PDF', '*.pdf'), ('All files', '*.*'))
+            # )
+            # # checking if the file exists
+            # if filepath:
+                # try:
+                    # # declaring the path
+                    # self.path = filepath
+                    # # extracting the pdf file from the path
+                    # filename = os.path.basename(self.path)
+                    # # passing the path to PDFMiner 
+                    # self.miner = PDFMiner(self.path)
+                    # # getting data and numPages
+                    # data, numPages = self.miner.get_metadata()
+                    # # setting the current page to 0
+                    # self.current_page = 0
+                    # # reset rotation when opening new file
+                    # self.rotation = 0
+                    # # checking if numPages exists
+                    # if numPages:
+                        # # getting the title
+                        # self.name = data.get('title', filename[:-4])
+                        # # getting the author
+                        # self.author = data.get('author', None)
+                        # self.numPages = numPages
+                        # # setting fileopen to True
+                        # self.fileisopen = True
+                        # # calling the display_page() function
+                        # self.display_page()
+                        # # replacing the window title with the PDF document name
+                        # self.master.title(f"PDF Viewer - {self.name}")
+                    # else:
+                        # messagebox.showerror("Error", "Could not load PDF file. Please check if the file is valid.")
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Failed to open PDF file:\n{str(e)}")
+        
+        # # the function to display the page  
+        # def display_page(self):
+            # # checking if numPages is less than current_page and if current_page is less than
+            # # or equal to 0
+            # if 0 <= self.current_page < self.numPages:
+                # try:
+                    # # Clear the canvas
+                    # self.output.delete("all")
+                    # # getting the page using get_page() function from miner with zoom and rotation
+                    # self.img_file = self.miner.get_page(self.current_page, self.zoom_level, self.rotation)
+                    # if self.img_file:
+                        # # inserting the page image inside the Canvas
+                        # self.output.create_image(0, 0, anchor='nw', image=self.img_file)
+                        # # the variable to be stringified
+                        # self.stringified_current_page = self.current_page + 1
+                        # # updating the page label with number of pages 
+                        # self.page_label['text'] = str(self.stringified_current_page) + ' of ' + str(self.numPages)
+                        # # creating a region for inserting the page inside the Canvas
+                        # self.output.configure(scrollregion=self.output.bbox("all"))
+                    # else:
+                        # self.output.create_text(400, 300, text="Error loading page", 
+                                              # font=("Arial", 16), fill="red", justify=CENTER)
+                # except Exception as e:
+                    # print(f"Error displaying page: {e}")
+                    # self.output.create_text(400, 300, text="Error displaying page", 
+                                          # font=("Arial", 16), fill="red", justify=CENTER)
+
+        # # function for displaying next page
+        # def next_page(self):
+            # # checking if file is open
+            # if self.fileisopen:
+                # # checking if current_page is less than numPages-1
+                # if self.current_page < self.numPages - 1:
+                    # # updating the page with value 1
+                    # self.current_page += 1
+                    # # displaying the new page
+                    # self.display_page()
+                                
+        # # function for displaying the previous page        
+        # def previous_page(self):
+            # # checking if fileisopen
+            # if self.fileisopen:
+                # # checking if current_page is greater than 0
+                # if self.current_page > 0:
+                    # # decrementing the current_page by 1
+                    # self.current_page -= 1
+                    # # displaying the previous page
+                    # self.display_page()
+
+        # def __del__(self):
+            # """
+            # Cleanup when the viewer is destroyed
+            # """
+            # if hasattr(self, 'miner') and self.miner:
+                # self.miner.close()
+
+
+    # if __name__ == "__main__":
+        # try:
+            # import fitz
+            # from PIL import Image, ImageTk
+        # except ImportError as e:
+            # messagebox.showerror("Missing Dependencies", 
+                               # "Please install required packages:\n\n"
+                               # "pip install PyMuPDF Pillow\n\n"
+                               # f"Error: {e}")
+            # exit(1)
+        
+        # # creating the rootpdfreaderroot window using Tk() class
+        # rootpdfreaderroot = Tk()
+        # # instantiating/creating object app for class PDFViewer
+        # app = PDFViewer(rootpdfreaderroot)
+        # # calling the mainloop to run the app infinitely until user closes it
+        # rootpdfreaderroot.mainloop()
         
 if clipboardVAR == 333344440099767667:
     import pyperclip
