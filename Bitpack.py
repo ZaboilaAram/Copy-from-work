@@ -68,7 +68,33 @@
     # thread = threading.Thread(target=run_sequence, daemon=True)
     # thread.start()
     # done_event.wait()  # așteaptă să se termine complet splash-ul
+# --- DPI: keep every Bitpack window at the size it was designed for (Windows scales it) ---
+import os as _dpi_os
+if _dpi_os.name == "nt":
+    try:
+        import ctypes as _dpi_ctypes
+        _dpi_ctypes.windll.shcore.SetProcessDpiAwareness(0)      # 0 = PROCESS_DPI_UNAWARE
+    except Exception:
+        pass
 
+def dpi_report(where):
+    """Temporary: writes the DPI state of the process to dpi_check.txt."""
+    import ctypes, os
+    if os.name != "nt":
+        return
+    names = {0: "UNAWARE (normal size)", 1: "SYSTEM AWARE (small)", 2: "PER-MONITOR AWARE (small)"}
+    try:
+        user32 = ctypes.windll.user32
+        user32.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        user32.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        state = user32.GetAwarenessFromDpiAwarenessContext(user32.GetThreadDpiAwarenessContext())
+        text = names.get(state, f"unknown ({state})")
+    except Exception as exc:
+        text = f"cannot read ({exc})"
+    with open("dpi_check.txt", "a", encoding="utf-8") as handle:
+        handle.write(f"{where}: {text}\n")
+
+#dpi_report("1. start")
 #from __future__ import annotations
 import zipfile
 import json
@@ -11846,6 +11872,7 @@ def checking_bitpack_mngr():
     import threading
     import time
     import sys
+    #dpi_report("1.0 Bitpack Manager")
 
     class BitpackManagerSetup:
         def __init__(self, rootRFSsetup):
@@ -13421,6 +13448,7 @@ class Windows95Installer:
             btn.pack(side=btn_config.get('side', 'right'), padx=5)
     
     def show_welcome_screen(self):
+       #dpi_report("2. welcome")
        self.clear_frame()
        self.create_header("Bitpack Setup", "Welcome to Setup")
        
@@ -13561,7 +13589,7 @@ class Windows95Installer:
 BITPACK SOFTWARE LICENSE TERMS
 
 Version: 0.95.0
-Date: 24.10.2026
+Date: 28.10.2026
 
 IMPORTANT — READ CAREFULLY
 
@@ -13631,7 +13659,7 @@ All rights reserved.
 
 # Version: 0.95.0
 
-# Date: 24.10.2026
+# Date: 28.10.2026
 
 # 1. Introduction
     # • This license sets forth the terms and conditions for the use of Bitpack (hereinafter referred to as "the Software"), which is developed for exclusive personal use within the IT department of any company (hereinafter referred to as "the Company"). The software will not be distributed or used outside of this department or by anyone other than the buyer.
@@ -13672,7 +13700,7 @@ All rights reserved.
 # By using the Software, the Licensee agrees to the terms and conditions of this license.
 
 # Tudor Marmureanu
-# 24.10.2026
+# 28.10.2026
         # """
         license_text.insert('1.0', license_content)
         license_text.config(state='disabled')
@@ -24227,7 +24255,7 @@ def check_01():
 
 if check_01():
     create_w95_popup()
-
+#dpi_report("3. login window")
 windowlogin.mainloop()
 
 
@@ -26360,187 +26388,187 @@ def main1():
     scrrec_button = tk.Button(main_frame, text="Screen Events", command=ScreenRec, bg="gray40", fg="white", bd=5) #black
     scrrec_button.place(x=1, y=420)
 
-    def ZIPF():
-        import os
-        import subprocess
-        import tkinter as tk
-        from tkinter import filedialog, messagebox, ttk
-        import zipfile
-        from tkinter import simpledialog
+    # def ZIPF():
+        # import os
+        # import subprocess
+        # import tkinter as tk
+        # from tkinter import filedialog, messagebox, ttk
+        # import zipfile
+        # from tkinter import simpledialog
 
 
 
-        class Window:
-            def __init__(self, master):
-                self.file_sel = ""
-                master.title("Create/Extract ZIP files")
-                master.resizable(False, False)
-                #image_icon13 = PhotoImage(file = "img/complogo.png")
-                #master.iconphoto(False, image_icon13)
-                self.frame1 = ttk.LabelFrame(master, height=100, width=400, text="Actions")
-                self.frame1.pack(padx=10, pady=10)
-                self.frame2 = ttk.LabelFrame(master, height=100, width=400, text="Information about zip file")
-                self.frame2.pack(padx=10, pady=10)
-                self.frame3 = ttk.LabelFrame(master, height=100, width=400, text="List of files and folders inside zip file")
-                self.frame3.pack(padx=10, pady=10)
+        # class Window:
+            # def __init__(self, master):
+                # self.file_sel = ""
+                # master.title("Create/Extract ZIP files")
+                # master.resizable(False, False)
+                # #image_icon13 = PhotoImage(file = "img/complogo.png")
+                # #master.iconphoto(False, image_icon13)
+                # self.frame1 = ttk.LabelFrame(master, height=100, width=400, text="Actions")
+                # self.frame1.pack(padx=10, pady=10)
+                # self.frame2 = ttk.LabelFrame(master, height=100, width=400, text="Information about zip file")
+                # self.frame2.pack(padx=10, pady=10)
+                # self.frame3 = ttk.LabelFrame(master, height=100, width=400, text="List of files and folders inside zip file")
+                # self.frame3.pack(padx=10, pady=10)
 
-                self.button1 = ttk.Button(self.frame1, text="Browse zip file", command=self.button_file)
-                self.button1.pack(side=tk.LEFT, padx=10, pady=10)
+                # self.button1 = ttk.Button(self.frame1, text="Browse zip file", command=self.button_file)
+                # self.button1.pack(side=tk.LEFT, padx=10, pady=10)
 
-                self.button2 = ttk.Button(self.frame1, text="Unzip directory", command=self.change_dir)
-                self.button2.pack(side=tk.LEFT, padx=10, pady=10)
+                # self.button2 = ttk.Button(self.frame1, text="Unzip directory", command=self.change_dir)
+                # self.button2.pack(side=tk.LEFT, padx=10, pady=10)
 
-                self.button3 = ttk.Button(self.frame1, text="Extract All", command=self.button_extract_all)
-                self.button3.pack(side=tk.LEFT, padx=10, pady=10)
+                # self.button3 = ttk.Button(self.frame1, text="Extract All", command=self.button_extract_all)
+                # self.button3.pack(side=tk.LEFT, padx=10, pady=10)
 
-                self.button4 = ttk.Button(self.frame1, text="Extract Selection", command=self.button_extract_sel)
-                self.button4.pack(side=tk.LEFT, padx=10, pady=10)
+                # self.button4 = ttk.Button(self.frame1, text="Extract Selection", command=self.button_extract_sel)
+                # self.button4.pack(side=tk.LEFT, padx=10, pady=10)
                 
-                self.button5 = ttk.Button(self.frame1, text="Create ZIP", command=self.button_create_zip)
-                self.button5.pack(side=tk.LEFT, padx=10, pady=10)
+                # self.button5 = ttk.Button(self.frame1, text="Create ZIP", command=self.button_create_zip)
+                # self.button5.pack(side=tk.LEFT, padx=10, pady=10)
 
-                self.label_frame_2 = ttk.Label(self.frame2, text="Select a zip file", width=100)
-                self.label_frame_2.pack(padx=10, pady=10)
+                # self.label_frame_2 = ttk.Label(self.frame2, text="Select a zip file", width=100)
+                # self.label_frame_2.pack(padx=10, pady=10)
 
-                self.treeview = ttk.Treeview(self.frame3, show="tree", selectmode="extended")
-                self.treeview.pack(padx=10, pady=10)
-                self.treeview["column"] = ("one")
-                self.treeview.column("one", width=400)
-                self.treeview.bind("<<TreeviewSelect>>", self.callback)
+                # self.treeview = ttk.Treeview(self.frame3, show="tree", selectmode="extended")
+                # self.treeview.pack(padx=10, pady=10)
+                # self.treeview["column"] = ("one")
+                # self.treeview.column("one", width=400)
+                # self.treeview.bind("<<TreeviewSelect>>", self.callback)
 
-                self.label1 = ttk.Label(master)
-                self.label1.pack()
+                # self.label1 = ttk.Label(master)
+                # self.label1.pack()
                 
-            def button_create_zip(self):
-                dir_path = filedialog.askdirectory()
-                if dir_path:
-                    zip_file_path = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("ZIP files", "*.zip")])
-                    if zip_file_path:
-                        with zipfile.ZipFile(zip_file_path, 'w') as z:
-                            for root, _, files in os.walk(dir_path):
-                                for file in files:
-                                    file_path = os.path.join(root, file)
-                                    rel_path = os.path.relpath(file_path, dir_path)
-                                    z.write(file_path, rel_path)
-                        messagebox.showinfo("Success", "ZIP archive created successfully.")
+            # def button_create_zip(self):
+                # dir_path = filedialog.askdirectory()
+                # if dir_path:
+                    # zip_file_path = filedialog.asksaveasfilename(defaultextension=".zip", filetypes=[("ZIP files", "*.zip")])
+                    # if zip_file_path:
+                        # with zipfile.ZipFile(zip_file_path, 'w') as z:
+                            # for root, _, files in os.walk(dir_path):
+                                # for file in files:
+                                    # file_path = os.path.join(root, file)
+                                    # rel_path = os.path.relpath(file_path, dir_path)
+                                    # z.write(file_path, rel_path)
+                        # messagebox.showinfo("Success", "ZIP archive created successfully.")
 
 
 
-            def callback(self, event):
-                self.button4.config(state="enabled")
-                print(self.treeview.selection())
+            # def callback(self, event):
+                # self.button4.config(state="enabled")
+                # print(self.treeview.selection())
 
-            def button_file(self):
-                self.file_sel = self.find_file("file")
-                if self.is_zip(self.file_sel):
-                    zip1 = ZipData(self.file_sel)
-                    self.update_label(1)
-                    self.label_frame_2.config(text="You have selected the zip file " + self.file_sel + "\n" + str(zip1.len_zip()) + " items found in the zip file")
-                    self.button3.config(state="enabled")
-                    for elt in zip1.info():
-                        elt_split = elt.split("/")
-                        if "" in elt_split:
-                            elt_split.remove("")
-                        if len(elt_split) == 1:
-                            parent = ""
-                        else:
-                            parent = "/".join(elt_split[:-1])
+            # def button_file(self):
+                # self.file_sel = self.find_file("file")
+                # if self.is_zip(self.file_sel):
+                    # zip1 = ZipData(self.file_sel)
+                    # self.update_label(1)
+                    # self.label_frame_2.config(text="You have selected the zip file " + self.file_sel + "\n" + str(zip1.len_zip()) + " items found in the zip file")
+                    # self.button3.config(state="enabled")
+                    # for elt in zip1.info():
+                        # elt_split = elt.split("/")
+                        # if "" in elt_split:
+                            # elt_split.remove("")
+                        # if len(elt_split) == 1:
+                            # parent = ""
+                        # else:
+                            # parent = "/".join(elt_split[:-1])
 
-                        if not self.treeview.exists(parent):
-                            self.treeview.insert("", "end", parent, text=elt_split[0])
+                        # if not self.treeview.exists(parent):
+                            # self.treeview.insert("", "end", parent, text=elt_split[0])
 
-                        self.treeview.insert(parent, "end", "/".join(elt_split), text=elt_split[-1])
+                        # self.treeview.insert(parent, "end", "/".join(elt_split), text=elt_split[-1])
 
-            def button_extract_all(self):
-                if self.file_sel != "":
-                    zip1 = ZipData(self.file_sel)
-                    zip1.extract_all()
-                    self.clean_window()
-                else:
-                    messagebox.showerror("Zip file missing", "You need to select a zip file")
+            # def button_extract_all(self):
+                # if self.file_sel != "":
+                    # zip1 = ZipData(self.file_sel)
+                    # zip1.extract_all()
+                    # self.clean_window()
+                # else:
+                    # messagebox.showerror("Zip file missing", "You need to select a zip file")
 
-            def button_extract_sel(self):
-                if self.file_sel != "":
-                    zip1 = ZipData(self.file_sel)
-                    zip1.extract_sel(self.treeview.selection())
-                    self.clean_window()
-                else:
-                    messagebox.showerror("Zip file missing", "You need to select a zip file")
+            # def button_extract_sel(self):
+                # if self.file_sel != "":
+                    # zip1 = ZipData(self.file_sel)
+                    # zip1.extract_sel(self.treeview.selection())
+                    # self.clean_window()
+                # else:
+                    # messagebox.showerror("Zip file missing", "You need to select a zip file")
 
-            def clean_window(self):
-                self.update_label(2)
-                self.label_frame_2.config(text="")
-                for i in self.treeview.get_children():
-                    self.treeview.delete(i)
-                subprocess.Popen("explorer " + os.getcwd())
+            # def clean_window(self):
+                # self.update_label(2)
+                # self.label_frame_2.config(text="")
+                # for i in self.treeview.get_children():
+                    # self.treeview.delete(i)
+                # subprocess.Popen("explorer " + os.getcwd())
 
-            @staticmethod
-            def find_file(f_type):
-                f_name = ""
-                if f_type == "file":
-                    file_name = filedialog.askopenfile()
-                    if file_name:
-                        f_name = file_name.name
-                return f_name
+            # @staticmethod
+            # def find_file(f_type):
+                # f_name = ""
+                # if f_type == "file":
+                    # file_name = filedialog.askopenfile()
+                    # if file_name:
+                        # f_name = file_name.name
+                # return f_name
 
-            @staticmethod
-            def is_zip(zip_path):
-                if zip_path[-4:] != ".zip":
-                    messagebox.showerror("Type file error", "You need to select a zip file")
-                    return False
-                else:
-                    return True
+            # @staticmethod
+            # def is_zip(zip_path):
+                # if zip_path[-4:] != ".zip":
+                    # messagebox.showerror("Type file error", "You need to select a zip file")
+                    # return False
+                # else:
+                    # return True
 
-            def change_dir(self):
-                """ Change the current directory """
-                dir_path = filedialog.askdirectory()
-                if dir_path:
-                    os.chdir(dir_path)
-                    self.update_label(1)
-
-
-            def update_label(self, val):
-                if val == 1:
-                    self.label1.config(text="The zip file will be extracted in the directory " + self.find_dir())
-                if val == 2:
-                    self.label1.config(text="Zip file successfully extracted")
-
-            @staticmethod
-            def find_dir():
-                cwd = os.getcwd()
-                return cwd
+            # def change_dir(self):
+                # """ Change the current directory """
+                # dir_path = filedialog.askdirectory()
+                # if dir_path:
+                    # os.chdir(dir_path)
+                    # self.update_label(1)
 
 
-        class ZipData:
-            def __init__(self, file):
-                self.file = file
+            # def update_label(self, val):
+                # if val == 1:
+                    # self.label1.config(text="The zip file will be extracted in the directory " + self.find_dir())
+                # if val == 2:
+                    # self.label1.config(text="Zip file successfully extracted")
 
-            def extract_all(self):
-                with zipfile.ZipFile(self.file, 'r') as z:
-                    z.extractall()
-
-            def extract_sel(self, file_name):
-                with zipfile.ZipFile(self.file, 'r') as z:
-                    for f_name in file_name:
-                        z.extract(f_name)
-
-            def len_zip(self):
-                with zipfile.ZipFile(self.file, 'r') as z:
-                    nb_items = len(z.namelist())
-                    return nb_items
-
-            def info(self):
-                with zipfile.ZipFile(self.file, 'r') as z:
-                    return z.namelist()
+            # @staticmethod
+            # def find_dir():
+                # cwd = os.getcwd()
+                # return cwd
 
 
-        if __name__ == "__main__":
-            ziproot = tk.Tk()
-            win = Window(ziproot)
-            ziproot.mainloop()
+        # class ZipData:
+            # def __init__(self, file):
+                # self.file = file
 
-    button_zip = tk.Button(main_frame, text="Create/Extract ZIP", command=ZIPF, bg="gray40", fg="white", bd=5) #black
-    button_zip.place(x=1, y=480)
+            # def extract_all(self):
+                # with zipfile.ZipFile(self.file, 'r') as z:
+                    # z.extractall()
+
+            # def extract_sel(self, file_name):
+                # with zipfile.ZipFile(self.file, 'r') as z:
+                    # for f_name in file_name:
+                        # z.extract(f_name)
+
+            # def len_zip(self):
+                # with zipfile.ZipFile(self.file, 'r') as z:
+                    # nb_items = len(z.namelist())
+                    # return nb_items
+
+            # def info(self):
+                # with zipfile.ZipFile(self.file, 'r') as z:
+                    # return z.namelist()
+
+
+        # if __name__ == "__main__":
+            # ziproot = tk.Tk()
+            # win = Window(ziproot)
+            # ziproot.mainloop()
+
+    # button_zip = tk.Button(main_frame, text="Create/Extract ZIP", command=ZIPF, bg="gray40", fg="white", bd=5) #black
+    # button_zip.place(x=1, y=480)
     '''
     def PassGen():
         def low():
@@ -26685,7 +26713,7 @@ def main1():
                 # Afisăm combobox-ul
                 sheet_option.pack(pady=10)
                 # Creating a button to display the table
-                display_button = tk.Button(selection_window, text="Arata tabelul", command=lambda: display_table(wb, sheet_option.get()), bg="gray40", fg="white", bd=1)
+                display_button = tk.Button(selection_window, text="Show table", command=lambda: display_table(wb, sheet_option.get()), bg="gray40", fg="white", bd=1)
                 display_button.pack(pady=5)
      
             except Exception as e:
@@ -27007,111 +27035,111 @@ def main1():
     open_notepad_button = tk.Button(main_frame, text="Text Editor", command=OpenNotepad, bg="gray40", fg="white", bd=5) #black
     open_notepad_button.place(x=170,y=360)
     
-    def OpenPaint():
-        from tkinter import filedialog, messagebox, colorchooser
-        import PIL.ImageGrab as ImageGrab
-        from PIL import Image, ImageDraw
-        import PIL
-        global color, image, draw  # adăugăm variabilele globale pentru imagine și obiectul draw
-        color = 'black'
-        Width = 600
-        Height = 440
+    # def OpenPaint():
+        # from tkinter import filedialog, messagebox, colorchooser
+        # import PIL.ImageGrab as ImageGrab
+        # from PIL import Image, ImageDraw
+        # import PIL
+        # global color, image, draw  # adăugăm variabilele globale pentru imagine și obiectul draw
+        # color = 'black'
+        # Width = 600
+        # Height = 440
 
-        rootpnt = Tk()
+        # rootpnt = Tk()
 
-        def save():
-            filename = filedialog.asksaveasfilename(initialfile="untitled.png", defaultextension=".png",
-                                                    filetypes=[("PNG files", "*.png"), ("All files", "*.*")])
-            if filename:
-                image.save(filename)
+        # def save():
+            # filename = filedialog.asksaveasfilename(initialfile="untitled.png", defaultextension=".png",
+                                                    # filetypes=[("PNG files", "*.png"), ("All files", "*.*")])
+            # if filename:
+                # image.save(filename)
 
-        def change_color(c):
-            global color
-            color = c
+        # def change_color(c):
+            # global color
+            # color = c
 
-        def pick_color():
-            global color
-            picked = colorchooser.askcolor()
-            if picked[1]:
-                color = picked[1]
+        # def pick_color():
+            # global color
+            # picked = colorchooser.askcolor()
+            # if picked[1]:
+                # color = picked[1]
 
-        def drawing(event):
-            x1, y1 = (event.x - 1), (event.y - 1)
-            x2, y2 = (event.x + 1), (event.y + 1)
-            canvas.create_oval((x1, y1, x2, y2), fill=color, outline=color, width=vertical.get())
-            draw.ellipse([x1, y1, x2 + vertical.get(), y2 + vertical.get()], outline=color, fill=color)
+        # def drawing(event):
+            # x1, y1 = (event.x - 1), (event.y - 1)
+            # x2, y2 = (event.x + 1), (event.y + 1)
+            # canvas.create_oval((x1, y1, x2, y2), fill=color, outline=color, width=vertical.get())
+            # draw.ellipse([x1, y1, x2 + vertical.get(), y2 + vertical.get()], outline=color, fill=color)
 
-        def on_closing():
-            answer = messagebox.askyesnocancel("QUIT", "DO YOU WANT TO SAVE YOUR WORK?", parent=rootpnt)
-            if answer is not None:
-                if answer:
-                    save()
-                rootpnt.destroy()
+        # def on_closing():
+            # answer = messagebox.askyesnocancel("QUIT", "DO YOU WANT TO SAVE YOUR WORK?", parent=rootpnt)
+            # if answer is not None:
+                # if answer:
+                    # save()
+                # rootpnt.destroy()
 
-        def new_canvas():
-            canvas.delete('all')
-            draw.rectangle([0, 0, Width, Height], fill='white')
+        # def new_canvas():
+            # canvas.delete('all')
+            # draw.rectangle([0, 0, Width, Height], fill='white')
 
-        rootpnt.title("Paint")
-        rootpnt.geometry('600x550')
-        rootpnt.resizable(False, False)
-        rootpnt.configure(bg='black')
-        rootpnt.protocol("WM_DELETE_WINDOW", on_closing)
+        # rootpnt.title("Paint")
+        # rootpnt.geometry('600x550')
+        # rootpnt.resizable(False, False)
+        # rootpnt.configure(bg='black')
+        # rootpnt.protocol("WM_DELETE_WINDOW", on_closing)
 
-        frame = Frame(rootpnt, bg='white')
-        color_frame = Frame(frame, bg='black', borderwidth=10)
+        # frame = Frame(rootpnt, bg='white')
+        # color_frame = Frame(frame, bg='black', borderwidth=10)
 
-        menu_bar = Menu(rootpnt)
-        rootpnt.config(menu=menu_bar)
-        submenu = Menu(menu_bar, tearoff=0)
+        # menu_bar = Menu(rootpnt)
+        # rootpnt.config(menu=menu_bar)
+        # submenu = Menu(menu_bar, tearoff=0)
 
-        menu_bar.add_cascade(label='File', menu=submenu)
-        submenu.add_command(label='New Canvas', command=new_canvas)
-        submenu.add_command(label='Save', command=save)
+        # menu_bar.add_cascade(label='File', menu=submenu)
+        # submenu.add_command(label='New Canvas', command=new_canvas)
+        # submenu.add_command(label='Save', command=save)
 
-        colors = ['black', 'grey', 'brown', 'orange', 'yellow', 'red', 'green', 'turquoise', 'indigo', 'purple', 'blue',
-                  'white', 'lime', 'pink', 'gold', 'cyan']
-        buttons = []
+        # colors = ['black', 'grey', 'brown', 'orange', 'yellow', 'red', 'green', 'turquoise', 'indigo', 'purple', 'blue',
+                  # 'white', 'lime', 'pink', 'gold', 'cyan']
+        # buttons = []
 
-        for i, col in enumerate(colors):
-            button = Button(color_frame, bg=col, width=1, command=lambda col=col: change_color(col))
-            buttons.append(button)
-            button.grid(row=i // 11, column=i % 11)
+        # for i, col in enumerate(colors):
+            # button = Button(color_frame, bg=col, width=1, command=lambda col=col: change_color(col))
+            # buttons.append(button)
+            # button.grid(row=i // 11, column=i % 11)
 
-        vertical = Scale(frame, from_=1, to=25, label='Size')
-        vertical.set(3)
+        # vertical = Scale(frame, from_=1, to=25, label='Size')
+        # vertical.set(3)
 
-        erase_but = Button(frame, text='Erase', command=lambda: change_color('white'))
-        color_but = Button(frame, text='Color', command=pick_color)
+        # erase_but = Button(frame, text='Erase', command=lambda: change_color('white'))
+        # color_but = Button(frame, text='Color', command=pick_color)
 
-        canvas = Canvas(rootpnt, bg='white', width=Width, height=Height)
-        canvas.bind('<B1-Motion>', drawing)
+        # canvas = Canvas(rootpnt, bg='white', width=Width, height=Height)
+        # canvas.bind('<B1-Motion>', drawing)
 
-        image = Image.new("RGB", (Width, Height), 'white')  # Inițializăm imaginea cu fundal alb
-        draw = ImageDraw.Draw(image)
+        # image = Image.new("RGB", (Width, Height), 'white')  # Inițializăm imaginea cu fundal alb
+        # draw = ImageDraw.Draw(image)
 
-        frame.grid(row=0, column=0, sticky='nsew')
-        color_frame.grid(row=0, column=0, padx=20)
-        vertical.grid(row=0, column=1)
-        erase_but.grid(row=0, column=2, padx=20)
-        color_but.grid(row=0, column=3)
+        # frame.grid(row=0, column=0, sticky='nsew')
+        # color_frame.grid(row=0, column=0, padx=20)
+        # vertical.grid(row=0, column=1)
+        # erase_but.grid(row=0, column=2, padx=20)
+        # color_but.grid(row=0, column=3)
 
-        canvas.grid(row=1, column=0)
+        # canvas.grid(row=1, column=0)
 
-        # Centralize Window
-        rootpnt.update()
-        window_width = rootpnt.winfo_width()
-        window_height = rootpnt.winfo_height()
-        screen_width = rootpnt.winfo_screenwidth()
-        screen_height = rootpnt.winfo_screenheight()
-        x = int((screen_width / 2) - (window_width / 2))
-        y = int((screen_height / 2) - (window_height / 2))
-        rootpnt.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        # # Centralize Window
+        # rootpnt.update()
+        # window_width = rootpnt.winfo_width()
+        # window_height = rootpnt.winfo_height()
+        # screen_width = rootpnt.winfo_screenwidth()
+        # screen_height = rootpnt.winfo_screenheight()
+        # x = int((screen_width / 2) - (window_width / 2))
+        # y = int((screen_height / 2) - (window_height / 2))
+        # rootpnt.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
-        rootpnt.mainloop()
+        # rootpnt.mainloop()
     
-    open_paint_button = Button(main_frame, text="Whiteboard", command=OpenPaint, bg="gray40", fg="white", bd=5)
-    open_paint_button.place(x=170, y=480)
+    # open_paint_button = Button(main_frame, text="Whiteboard", command=OpenPaint, bg="gray40", fg="white", bd=5)
+    # open_paint_button.place(x=170, y=480)
      
     # def PDFToWordConv():
         # gpath = ""
@@ -29597,7 +29625,7 @@ def main1():
         text1.insert(tk.END, "- Find & Replace: Search for a character sequence in a text and replace the text sequence with the string entered in the respective field.\n")
         text1.insert(tk.END, "- Open the Equipment Sheet: The Excel file can be opened using the application interface, and any sheet from that file can be accessed.\n")
         text1.insert(tk.END, "- Text Editor: Advanced Notepad.\n")
-        text1.insert(tk.END, "- Whiteboard: Mini Paint tool.\n")
+        #text1.insert(tk.END, "- Whiteboard: Mini Paint tool.\n")
         text1.insert(tk.END, "- PDF to Word: Convert a .pdf file to .docx, and the images from its content can be saved in a folder named Imagini.\n")
         text1.insert(tk.END, "- PDF Tools: Various tools for manipulating a PDF.")
         text1.insert(tk.END, "- Backup Utility: Perform a backup of data that is sensitive or might undergo major changes; the user should consider why it is important to create a backup.\n")
@@ -30757,11 +30785,11 @@ def main2():
     scrrec_button = tk.Button(main_frame, text="Screen Events", command=ScreenRec, bg="black", fg="white", bd=1, state="disabled") #black
     scrrec_button.pack(padx=10, pady=5)
 
-    def ZIPF():
-        pass
+    # def ZIPF():
+        # pass
 
-    button_zip = tk.Button(main_frame, text="Create/Extract ZIP", command=ZIPF, bg="black", fg="white", bd=1, state="disabled") #black
-    button_zip.pack(padx=10, pady=5)
+    # button_zip = tk.Button(main_frame, text="Create/Extract ZIP", command=ZIPF, bg="black", fg="white", bd=1, state="disabled") #black
+    # button_zip.pack(padx=10, pady=5)
      
     def open_excel_and_display_table():
         pass
@@ -30780,11 +30808,11 @@ def main2():
     open_notepad_button = tk.Button(main_frame, text="Text Editor", command=OpenNotepad, bg="black", fg="white", bd=1, state="disabled") #gray40
     open_notepad_button.pack(pady=5)
     
-    def OpenPaint():
-        pass
+    # def OpenPaint():
+        # pass
     
-    open_paint_button = Button(main_frame, text="Whiteboard", command=OpenPaint, bg="black", fg="white", bd=1, state="disabled") #gray40
-    open_paint_button.pack(pady=5)    
+    # open_paint_button = Button(main_frame, text="Whiteboard", command=OpenPaint, bg="black", fg="white", bd=1, state="disabled") #gray40
+    # open_paint_button.pack(pady=5)    
     
     def PDFToWordConv():
         pass
@@ -81070,525 +81098,1068 @@ if fetchervar == 1995:
 
             # # Rularea buclei principale
             # validation.mainloop()
-     
-    class SetupWizard(tk.Tk):
-        def __init__(self):
-            super().__init__()
-     
-            self.title("Repair Setup - Fetcher")
-            self.geometry("500x400")
-            self.resizable(False, False)
-     
-            self.steps = []
-            self.current_step = 0
-     
-            self.container = ttk.Frame(self)
-            self.container.pack(fill="both", expand=True)
-     
-            self.create_steps()
-            self.show_step(0)
-     
-            self.navigation_frame = ttk.Frame(self)
-            self.navigation_frame.pack(side="bottom", fill="x")
-     
-            self.back_button = ttk.Button(self.navigation_frame, text="Back", command=self.back)
-            self.next_button = ttk.Button(self.navigation_frame, text="Next", command=self.next)
-            self.finish_button = ttk.Button(self.navigation_frame, text="Finish", command=self.finish, state="disabled")
-     
-            self.back_button.pack(side="left", padx=(10, 0), pady=10)
-            self.finish_button.pack(side="right", padx=(0, 10), pady=10)
-            self.next_button.pack(side="right", padx=(0, 10), pady=10)
-     
-            self.update_buttons()
-     
-        def create_steps(self):
-            # Step 1: Welcome
-            frame1 = ttk.Frame(self.container)
-            label1 = ttk.Label(frame1, text="Welcome to the Repair Setup for Bitpack", font=("Arial", 14))
-            label1.pack(pady=20)
-            self.steps.append(frame1)
-     
-            # Step 2: Accept Terms and Conditions
-            frame2 = ttk.Frame(self.container)
-            label2 = ttk.Label(frame2, text="Please read and accept the terms and conditions to continue.", font=("Arial", 12))
-            label2.pack(pady=10)
-     
-            terms_frame = ttk.Frame(frame2)
-            terms_frame.pack(fill="both", expand=True, pady=(0, 10))
-     
-            self.terms_text = tk.Text(terms_frame, wrap="word", width=60, height=10)
-            self.terms_text.insert("1.0", "End-User License Agreement (EULA) for Fetcher - Repair Kit for Bitpack\n\n"
-                                          "This End-User License Agreement (EULA) is a legal agreement "
-                                          "between you and Tudor Marmureanu.\n\n"
-                                          "This software repair program is provided 'as-is' and without "
-                                          "warranty of any kind. By using this software, you agree to the "
-                                          "terms and conditions outlined in this agreement.\n\n"
-                                          "1. GRANT OF LICENSE. This EULA grants you the following rights: "
-                                          "You may use this software to repair the Bitpack program.\n"
-                                          "2. DESCRIPTION OF OTHER RIGHTS AND LIMITATIONS.\n"
-                                          "   - Maintenance of Copyright Notices. You must not remove or alter any copyright "
-                                          "notices on any copies of the software.\n"
-                                          "   - Distribution. You may not distribute copies of the software to third parties.\n"
-                                          "   - Prohibition on Reverse Engineering, Decompilation, and Disassembly. You may not "
-                                          "reverse engineer, decompile, or disassemble the software.\n\n"
-                                          "Tudor Marmureanu reserves all rights not expressly granted to you in this EULA.\n\n"
-                                          "If you do not agree to these terms, do not use this software.")
-            self.terms_text.config(state="disabled")  # Make the text read-only
-            self.terms_text.pack(side="left", fill="both", expand=True)
-     
-            scrollbar = ttk.Scrollbar(terms_frame, command=self.terms_text.yview)
-            scrollbar.pack(side="right", fill="y")
-            self.terms_text.config(yscrollcommand=scrollbar.set)
-     
-            self.terms_var = tk.BooleanVar()
-            terms_check = ttk.Checkbutton(frame2, text="I accept the terms and conditions", variable=self.terms_var)
-            terms_check.pack(pady=10)
-            self.steps.append(frame2)
-     
-            # Step 3: Choose Installation Directory
-            frame3 = ttk.Frame(self.container)
-            label3 = ttk.Label(frame3, text="Current directory:", font=("Arial", 12))
-            label3.pack(pady=20)
-            self.directory_var = tk.StringVar(value=os.getcwd())  # Setează folderul curent
-            directory_entry = ttk.Entry(frame3, textvariable=self.directory_var, width=75, state='readonly')
-            directory_entry.pack(pady=5)
-            # Butonul Browse este comentat
-            # browse_button = ttk.Button(frame3, text="Browse...", command=self.browse_directory)
-            # browse_button.pack(pady=5)
-            self.steps.append(frame3)
- 
-            # Step 4: Validation Window
-            try:
-                should_skip = False
-                
-                # Verifica has_key din BD pentru fetcher
-                try:
-                    import sqlite3 as _sq
-                    _conn = _sq.connect("Config/dbo_bitpack.db")
-                    _cursor = _conn.cursor()
-                    _cursor.execute("SELECT has_key FROM accounts WHERE var_value='1995'")
-                    _r = _cursor.fetchone()
-                    _conn.close()
-                    if _r is not None and not bool(_r[0]):
-                        should_skip = True
-                except:
-                    pass
-                
-                if os.path.exists("Serial") and os.path.isdir("Serial"):
-                    product_key_file = os.path.join("Serial", "product_key.lic95")
-                    if os.path.exists(product_key_file):
-                        with open(product_key_file, 'r', encoding='utf-8') as file:
-                            first_line = file.readline().strip()
-                            if first_line == "R46BX-JHR2J-PG7ER-24QFG-MWKVR":
-                                should_skip = True
-                
-                if not should_skip:
-                    frame4 = ttk.Frame(self.container)
-                    label4 = ttk.Label(frame4, text="Product Key Validation", font=("Arial", 18, "bold"))
-                    label4.pack(pady=20)
-             
-                    validation_frame = ttk.Frame(frame4)
-                    validation_frame.pack(expand=True)
-             
-                    self.entry_vars = [tk.StringVar() for _ in range(5)]
-                    self.entries = []
-                    for i in range(5):
-                        entry = ttk.Entry(validation_frame, textvariable=self.entry_vars[i], width=8)
-                        entry.grid(row=0, column=2 * i)
-                        self.entries.append(entry)
-                        if i < 4:
-                            dash_label = ttk.Label(validation_frame, text="-")
-                            dash_label.grid(row=0, column=2 * i + 1)
-             
-                    self.steps.append(frame4)
-            except Exception as e:
-                pass
-     
-            # Step 5: Installation Progress
-            frame5 = ttk.Frame(self.container)
-            label5 = ttk.Label(frame5, text="Running Driver...", font=("Arial", 14))
-            label5.pack(pady=20)
-            self.progress = ttk.Progressbar(frame5, orient="horizontal", length=300, mode="determinate")
-            self.progress.pack(pady=10)
-            self.steps.append(frame5)
-     
-        def show_step(self, step):
-            for frame in self.steps:
-                frame.pack_forget()
-            self.steps[step].pack(fill="both", expand=True)
-     
-        def next(self):
-            if self.current_step == 1 and not self.terms_var.get():
-                messagebox.showwarning("Warning", "You must accept the terms and conditions to continue.")
-                return
-            if self.current_step == 2 and not self.directory_var.get():
-                messagebox.showwarning("Warning", "Please choose an installation directory.")
-                return
-            if self.current_step == 3 and not self.validate_entries():
-                messagebox.showwarning("Warning", "Validation failed. Please enter valid serial number.")
-                return
-     
-            if self.current_step < len(self.steps) - 1:
-                self.current_step += 1
-                self.show_step(self.current_step)
-                self.update_buttons()
-     
-        def back(self):
-            if self.current_step > 0:
-                self.current_step -= 1
-                self.show_step(self.current_step)
-                self.update_buttons()
 
-        def create_accounts_file(self):
-            installation_directory = self.directory_var.get()
-            if not installation_directory:
-                return
-            
-            accounts_file_path = os.path.join(installation_directory, "Accounts.txt")
-            
-            accounts_data = """|___user___|            |___password___|
+    #!/usr/bin/env python3
+    # -*- coding: utf-8 -*-
+    """
+    Fetcher - Repair Setup 95: the Bitpack repair wizard as a Windows 95 InstallShield-style wizard
+    (tkinter, no ttk). Same steps and logic as before: Welcome, EULA, current directory, product-key
+    validation (skipped when the key is already valid or has_key is off for 1995), and the repair progress
+    that writes the repair_log, mopad.ini and Serial/product_key.lic95.
 
-user                        nopass
-it                          copy (+- product_key)
-passgen                     passgen
-quiz                        test
-pausemanager                pauze (+- product_key)
-taskmanager                 terminator
-launcher                    launcher
-hardware                    lite
-eventviewer                 eventviewer
-config                      editor
-calculator	                calculator
-pathstxt                    pathstxt
-profilesjson                profilesjson
-ChooseLocationForPausetxt   ChooseLocationForPausetxt
+    In Bitpack, inside the `if fetchervar == 1995:` block, keep the commented key part and replace the
+    SetupWizard class, check_internet_connection and the __main__ block with the function below and the call:
 
---------------------------------------------
-terminal                    terminal (+ product_key)
-passgenV2     	            passgenV2 (+ product_key)
-system         	            realtime (+ product_key)
-screenrec      	            screenrec (+ product_key)
-zipmanager     	            zipmngr (+ product_key)
-comparator     	            comparator (+ product_key)
-convertorpdf   	            toword (+ product_key)
-textreplace    	            textfind (+ product_key)
-pdftools      	            enjoyit (+ product_key)
-pdfviewer                   pdfviewer (+ product_key)
-bandmonitoring 	            networking (+ product_key)
-cryptoV2      	            security (+ product_key)
-chatbot        	            aichatbot (+ product_key)
-notepad        	            notepad (+ product_key)
-paint          	            paint (+ product_key)
-zippass        	            wordsmith (+ product_key)
-backupmanager               backupmngr (+ product_key)
-renamemanager  	            renamer (+ product_key)
-kbmanager      	            knowladgebase (+ product_key)
-kbretro                     kbretro (+ product_key)
-password       	            manager (+ product_key)
-junk           	            manager (+ product_key)
-whiteboard     	            presentation (+ product_key)
-contact        	            manager (+ product_key)
-check          	            devices (+ product_key)
-excel                       lite (+ product_key)
-excel                       litev2 (+ product_key)
-reader                      office (+ product_key)
-fetcher                     repair (+ product_key)
-shell                       integrator (+ product_key)
-sql                         explorer (+ product_key)
-ide                         pycharm (+ product_key)
-ide                         vscode (+ produce_key)
-diagram                     beta (+ product_key)
-mindmap                     diagram (+ product_key)
-commander		            total (+ product_key)
-calendar                    calendar (+ product_key)
-alert                       monitor (+ product_key)
-process                     viewer (+ produck_key)
-md		                    mdviewer (+ product_key)
-history                     files (+ product_key)
-expense	                    tracker (+ product_key)
-script	                    agent (+ product_key)
-recovery	                tunnel (+ product_key)
-fisher	                    file (+ product_key)
-multifile                   editor (+ product_key)
-safe                        checker (+ product_key)
-traffic                     network (+ product_key)
-clipboard                   history (+ product_key)
-quickfinder	                file (+ product_key)
-topology 	                network (+ product_key)
-disktool                    utility (+ product_key)
-device                      manager (+ product_key)
-todo                        manager (+ product_key)
-pdfto                       excelcsv (+ product_key)
-csv		                    reader (+ product_key)
-document	                topdftext (+ product_key)
-extensions	                manager (+ product_key)
-colorpicker                 colorpicker (+ product_key)
-winreg	                    reg (+ product_key)
-universal                   converter (+ product_key)
-calculator                  programmer (+ product_key)
-projectmanager              projectmanager (+ product_key)
-regextest                   regextest (+ product_key)
-calculator                  graphing (+ product_key)
-codemerger                  codemerger (+ product_key)
-sql                         sql (+ product_key)
-pythonlogic	                visualizer (+ product_key)
-pdfeditor	                pdfeditor (+ product_key)
-convertorword               topdf (+ product_key)
-timeline                    file (+ product_key)
-forensic	                timeline (+ product_key)
-timetracker	                timetracker (+ product_key)
-sql		                    comp (+ product_key)
-decisiontree                decisiontree (+ product_key)
-bo95                        bo95 (+ product_key)
-versioncontrol              versioncontrol (+ product_key)
-dataplotter                 dataplotter (+ product_key)
-sql                         diagram (+ product_key)
-sql                         executor (+ product_key)
-ico                         converter (+ product_key)
-px95                        px95 (+ product_key)
-imgeditor                   imgeditor (+ product_key)
-api                         api (+ product_key)
-sql                         querycreator (+ product_key)
-sqlmanagementstudio         sqlmanagementstudio (+ product_key)
-sql                         designer (+ product_key)
-personalstorage             personalstorage (+ product_key)
-activity                    monitor (+ product_key)
-binhex                      binhex (+ product_key)
-password                    checker (+ product_key)
-dbobitpackdash              dbobitpackdash (+ product_key)
-whoisonmynetwork            whoisonmynetwork (+ product_key)
-planogram                   studio (+ product_key)
-code                        beautify (+ product_key)
-imgres                      imgres (+ product_key)
-batchfileeditor             batchfileeditor (+ product_key)
-pdfcnvbulk                  pdfcnvbulk (+ product_key)
-fldrcp                      fldrcp (+ product_key)
-arcbr                       arcbr (+ product_key)
-fldpck                      fldpck (+ product_key)
-docmrg                      docmrg (+ product_key)
-iconed                      iconed (+ product_key)
-chartbld                    chartbld (+ product_key)
-exccmp                      exccmp (+ product_key)
-sticky                      notes (+ product_key)
-repbld                      repbld (+ product_key)
-stprcd                      stprcd (+ product_key)
+        FetcherRepair95(logged_username)
+
+    logged_username is only used so a missing repair_log table can note who ran the repair in RepairLog.txt;
+    it can be left out. repair_log is created by setup_database_ALL(); this tool never creates tables.
     """
 
-            with open(accounts_file_path, "w") as accounts_file:
-                accounts_file.write(accounts_data.strip())  # Scrie datele în fișier
+
+    def FetcherRepair95(user=None):
+        import configparser
+        import os
+        import socket
+        import sqlite3
+        import sys
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from datetime import datetime
+        from tkinter import messagebox
+
+        IS_WINDOWS = os.name == "nt"
+        CUSTOM_TITLE_BAR = IS_WINDOWS
+        FACE, SHADOW, NAVY, WHITE, BLACK = "#c0c0c0", "#808080", "#000080", "#ffffff", "#000000"
+        PANEL = "#1084d0"                                        # the blue wizard side panel
+        FONT, FONT_BOLD = ("MS Sans Serif", 8), ("MS Sans Serif", 8, "bold")
+        TITLE_FONT = ("MS Sans Serif", 12, "bold")
+        APP = "Repair Setup - Fetcher"
+        KEY = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
+        SERIAL_FOLDER, LICENSE_FILE = "Serial", "product_key.lic95"
+
+        def app_dir():
+            return os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0]))
+
+        def db_path():
+            for candidate in (os.path.join("Config", "dbo_bitpack.db"),
+                              os.path.join(app_dir(), "Config", "dbo_bitpack.db")):
+                if os.path.isfile(candidate):
+                    return candidate
+            return os.path.join("Config", "dbo_bitpack.db")
+
+        def key_already_valid():
+            """The validation step is skipped when has_key is off for 1995, or the licence file already holds the key."""
+            try:
+                conn = sqlite3.connect(db_path(), timeout=3)
+                try:
+                    row = conn.execute("SELECT has_key FROM accounts WHERE var_value='1995'").fetchone()
+                finally:
+                    conn.close()
+                if row is not None and not bool(row[0]):
+                    return True
+            except sqlite3.Error:
+                pass
+            path = os.path.join(SERIAL_FOLDER, LICENSE_FILE)
+            try:
+                if os.path.isfile(path):
+                    with open(path, encoding="utf-8") as handle:
+                        return handle.readline().strip() == KEY
+            except OSError:
+                pass
+            return False
+
+        # ----- widgets -------------------------------------------------------------------------------------
+
+        def w95_button(parent, text, command, width=11, default=False):
+            button = tk.Button(parent, text=text, command=command, font=FONT_BOLD if default else FONT, bg=FACE,
+                               fg=BLACK, activebackground=FACE, disabledforeground=SHADOW, relief="raised", bd=2,
+                               width=width, padx=4, pady=2, highlightthickness=1 if default else 0,
+                               highlightbackground=BLACK, takefocus=1)
+            return button
+
+        def w95_check(parent, text, variable, command=None):
+            return tk.Checkbutton(parent, text=text, variable=variable, command=command, font=FONT, bg=FACE,
+                                  activebackground=FACE, selectcolor=WHITE, anchor="w", highlightthickness=0,
+                                  takefocus=1)
+
+        class Wizard(tk.Tk):
+
+            def __init__(self):
+                super().__init__()
+                self.title(APP)
+                x = max(0, (self.winfo_screenwidth() - 520) // 2)
+                y = max(0, (self.winfo_screenheight() - 400) // 2)
+                self.geometry(f"520x400+{x}+{y}")
+                self.resizable(False, False)
+                self.configure(bg=FACE)
+                if CUSTOM_TITLE_BAR:
+                    self.configure(bd=2, relief="raised")
+                self.minimizing = False
+                self.index = 0
+                self.progress_value = 0
+                self.installing = False
+                self.finished = False
+                self.terms_var = tk.BooleanVar(value=False)
+                self.directory_var = tk.StringVar(value=os.getcwd())
+                self.entry_vars = [tk.StringVar() for _ in range(5)]
+
+                self._build_titlebar()
+                self._build_body()
+                self._build_buttons()
+                self._build_steps()
+                self.show_step(0)
+                self.protocol("WM_DELETE_WINDOW", self.cancel)
+                if CUSTOM_TITLE_BAR:
+                    self.after(10, self._enable_custom_frame)
+
+            # ----- Windows 95 frame -----------------------------------------------------------------------
+
+            def _build_titlebar(self):
+                self.caption = tk.Frame(self, bg=NAVY, height=20)
+                self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                self.caption.pack_propagate(False)
+                icon = tk.Canvas(self.caption, width=16, height=16, bg=NAVY, bd=0, highlightthickness=0)
+                icon.create_rectangle(2, 3, 13, 13, fill="#ffe0a0", outline=BLACK)      # a small toolbox / repair icon
+                icon.create_rectangle(2, 3, 13, 6, fill=SHADOW, outline=BLACK)
+                icon.create_rectangle(6, 1, 9, 3, fill="#ffe0a0", outline=BLACK)
+                icon.pack(side="left", padx=(2, 3))
+                self.caption_icon = icon
+                self.caption_title = tk.Label(self.caption, text=APP, font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
+                self.caption_title.pack(side="left", fill="x", expand=True)
+                marlett = "Marlett" in tkfont.families(self)
+                glyphs = {"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"}
+                glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+
+                def caption_button(key, command):
+                    return tk.Button(self.caption, text=glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                     compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                     activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+                caption_button("close", self.cancel).pack(side="right", padx=(2, 2))
+                caption_button("min", self.minimize).pack(side="right")
+                for widget in (self.caption, self.caption_title, icon):
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
+                self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
+                self.bind("<Map>", self._on_map)
+
+            def _set_caption_active(self, active):
+                for widget in (self.caption, self.caption_title, self.caption_icon):
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_title.config(fg=WHITE if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                if not IS_WINDOWS:
+                    return
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(self.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                self.withdraw()
+                self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+            def _on_map(self, event):
+                if event.widget is self and self.minimizing and self.state() == "normal":
+                    self.minimizing = False
+                    self.overrideredirect(True)
+                    self.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if CUSTOM_TITLE_BAR:
+                    self.minimizing = True
+                    self.overrideredirect(False)
+                self.iconify()
+
+            def _caption_press(self, event):
+                self._drag = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+            def _caption_drag(self, event):
+                if CUSTOM_TITLE_BAR:
+                    self.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
+
+            # ----- layout ---------------------------------------------------------------------------------
+
+            def _build_body(self):
+                outer = tk.Frame(self, bg=FACE)
+                outer.pack(side="top", fill="both", expand=True, padx=1, pady=1)
+                self.panel = tk.Frame(outer, bg=PANEL, width=160)                       # blue side panel
+                self.panel.pack(side="left", fill="y")
+                self.panel.pack_propagate(False)
+                tk.Frame(self.panel, bg=WHITE, width=2).pack(side="right", fill="y")
+                self.panel_title = tk.Label(self.panel, text="Repair\nSetup", font=("MS Sans Serif", 16, "bold"),
+                                            bg=PANEL, fg=WHITE, justify="left", anchor="sw")
+                self.panel_title.pack(side="bottom", anchor="w", padx=12, pady=16)
+                self.panel_logo = tk.Label(self.panel, text="Bitpack", font=("MS Sans Serif", 11, "bold"),
+                                           bg=PANEL, fg="#aaccee", anchor="nw")
+                self.panel_logo.pack(side="top", anchor="w", padx=12, pady=14)
+
+                self.page = tk.Frame(outer, bg=FACE)
+                self.page.pack(side="right", fill="both", expand=True)
+                self.holder = tk.Frame(self.page, bg=FACE)
+                self.holder.pack(side="top", fill="both", expand=True, padx=14, pady=14)
+                self.status = tk.Label(self.page, text="", font=FONT, bg=FACE, fg=SHADOW, anchor="w")
+                self.status.pack(side="bottom", fill="x", padx=14, pady=(0, 2))
+
+            def _build_buttons(self):
+                line = tk.Frame(self, bg=SHADOW, height=1)
+                line.pack(side="bottom", fill="x")
+                bar = tk.Frame(self, bg=FACE)
+                bar.pack(side="bottom", fill="x", padx=6, pady=6)
+                self.btn_cancel = w95_button(bar, "Cancel", self.cancel)
+                self.btn_cancel.pack(side="right", padx=(6, 2))
+                self.btn_next = w95_button(bar, "Next >", self.next, default=True)
+                self.btn_next.pack(side="right")
+                self.btn_finish = w95_button(bar, "Finish", self.finish, default=True)
+                self.btn_back = w95_button(bar, "< Back", self.back)
+                self.btn_back.pack(side="right", padx=(0, 0))
+                self.bind("<Return>", lambda _e: self._on_enter())
+                self.bind("<Escape>", lambda _e: self.cancel())
+
+            # ----- steps ----------------------------------------------------------------------------------
+
+            def _build_steps(self):
+                self.steps = [self._step_welcome(), self._step_terms(), self._step_directory()]
+                self.has_validation = not key_already_valid()
+                if self.has_validation:
+                    self.steps.append(self._step_validation())
+                self.steps.append(self._step_progress())
+                for frame in self.steps:
+                    frame.place(in_=self.holder, x=0, y=0, relwidth=1, relheight=1)
+
+            def _step_welcome(self):
+                frame = tk.Frame(self.holder, bg=FACE)
+                tk.Label(frame, text="Welcome to the Repair Setup for Bitpack", font=TITLE_FONT, bg=FACE, fg=BLACK,
+                         wraplength=300, justify="left", anchor="w").pack(anchor="w", pady=(10, 14))
+                tk.Label(frame, text="This wizard checks the Bitpack installation and restores the files it needs.\n\n"
+                                     "Close the other Bitpack tools before you continue, then click Next.",
+                         font=FONT, bg=FACE, fg=BLACK, wraplength=320, justify="left", anchor="w").pack(anchor="w")
+                return frame
+
+            def _step_terms(self):
+                frame = tk.Frame(self.holder, bg=FACE)
+                tk.Label(frame, text="License Agreement", font=FONT_BOLD, bg=FACE, fg=BLACK, anchor="w").pack(anchor="w")
+                tk.Label(frame, text="Please read and accept the terms to continue.", font=FONT, bg=FACE, fg=BLACK,
+                         anchor="w").pack(anchor="w", pady=(0, 6))
+                # the checkbox is packed first, at the bottom, so the agreement text can never push it out of view
+                w95_check(frame, "I accept the terms and conditions", self.terms_var,
+                          self._update_buttons).pack(side="bottom", anchor="w", pady=(8, 0))
+                box = tk.Frame(frame, bd=2, relief="sunken", bg=WHITE)
+                box.pack(side="top", fill="both", expand=True)
+                text = tk.Text(box, wrap="word", font=FONT, bg=WHITE, fg=BLACK, bd=0, highlightthickness=0, padx=4,
+                               pady=2, height=6, width=30)
+                scroll = tk.Scrollbar(box, orient="vertical", command=text.yview)
+                text.config(yscrollcommand=scroll.set)
+                scroll.pack(side="right", fill="y")
+                text.pack(side="left", fill="both", expand=True)
+                text.insert("1.0",
+                            "End-User License Agreement (EULA) for Fetcher - Repair Kit for Bitpack\n\n"
+                            "This End-User License Agreement (EULA) is a legal agreement between you and "
+                            "Tudor Marmureanu.\n\n"
+                            "This software repair program is provided 'as-is' and without warranty of any kind. "
+                            "By using this software, you agree to the terms and conditions outlined in this "
+                            "agreement.\n\n"
+                            "1. GRANT OF LICENSE. This EULA grants you the following rights: You may use this "
+                            "software to repair the Bitpack program.\n"
+                            "2. DESCRIPTION OF OTHER RIGHTS AND LIMITATIONS.\n"
+                            "   - Maintenance of Copyright Notices. You must not remove or alter any copyright "
+                            "notices on any copies of the software.\n"
+                            "   - Distribution. You may not distribute copies of the software to third parties.\n"
+                            "   - Prohibition on Reverse Engineering, Decompilation, and Disassembly. You may not "
+                            "reverse engineer, decompile, or disassemble the software.\n\n"
+                            "Tudor Marmureanu reserves all rights not expressly granted to you in this EULA.\n\n"
+                            "If you do not agree to these terms, do not use this software.")
+                text.config(state="disabled")
+                return frame
+
+            def _step_directory(self):
+                frame = tk.Frame(self.holder, bg=FACE)
+                tk.Label(frame, text="Installation Folder", font=FONT_BOLD, bg=FACE, fg=BLACK, anchor="w").pack(anchor="w")
+                tk.Label(frame, text="The repair will run for the Bitpack installation in this folder:", font=FONT,
+                         bg=FACE, fg=BLACK, wraplength=320, justify="left", anchor="w").pack(anchor="w", pady=(0, 10))
+                entry = tk.Entry(frame, textvariable=self.directory_var, font=FONT, bg=FACE, fg=BLACK, relief="sunken",
+                                 bd=2, readonlybackground=FACE, state="readonly", highlightthickness=0)
+                entry.pack(fill="x")
+                return frame
+
+            def _step_validation(self):
+                frame = tk.Frame(self.holder, bg=FACE)
+                tk.Label(frame, text="Product Key Validation", font=TITLE_FONT, bg=FACE, fg=BLACK,
+                         anchor="w").pack(anchor="w", pady=(10, 6))
+                tk.Label(frame, text="Enter your 25-character product key:", font=FONT, bg=FACE, fg=BLACK,
+                         anchor="w").pack(anchor="w", pady=(0, 14))
+                # The 5 boxes share the page width equally (uniform columns), so they always fit,
+                # whatever the font width or the Windows display scaling.
+                row = tk.Frame(frame, bg=FACE)
+                row.pack(fill="x")
+                self.entries = []
+                for i in range(5):
+                    entry = tk.Entry(row, textvariable=self.entry_vars[i], width=1, font=("Courier New", 9),
+                                     bg=WHITE, fg=BLACK, relief="sunken", bd=2, justify="center", highlightthickness=0)
+                    entry.grid(row=0, column=2 * i, sticky="ew", pady=2, ipady=1)
+                    row.grid_columnconfigure(2 * i, weight=1, uniform="key")
+                    entry.bind("<KeyRelease>", lambda e, n=i: self._key_typed(n, e))
+                    self.entries.append(entry)
+                    if i < 4:
+                        tk.Label(row, text="-", font=FONT_BOLD, bg=FACE,
+                                 fg=BLACK).grid(row=0, column=2 * i + 1, padx=1)
+                self.validation_msg = tk.Label(frame, text="", font=FONT, bg=FACE, fg="#a00000", anchor="w")
+                self.validation_msg.pack(anchor="w", pady=(14, 0))
+                return frame
+
+            def _step_progress(self):
+                frame = tk.Frame(self.holder, bg=FACE)
+                self.progress_label = tk.Label(frame, text="Running Driver...", font=TITLE_FONT, bg=FACE, fg=BLACK,
+                                               anchor="w")
+                self.progress_label.pack(anchor="w", pady=(10, 16))
+                holder = tk.Frame(frame, bd=2, relief="sunken", bg=WHITE, height=22)
+                holder.pack(fill="x")
+                holder.pack_propagate(False)
+                self.progress_canvas = tk.Canvas(holder, bg=WHITE, bd=0, highlightthickness=0, height=18)
+                self.progress_canvas.pack(fill="both", expand=True, padx=2, pady=2)
+                self.progress_percent = tk.Label(frame, text="0%", font=FONT, bg=FACE, fg=BLACK, anchor="w")
+                self.progress_percent.pack(anchor="w", pady=(6, 0))
+                return frame
+
+            # ----- navigation -----------------------------------------------------------------------------
+
+            def show_step(self, index):
+                self.index = index
+                self.steps[index].lift()
+                self.panel_title.config(text="Repair\nComplete" if self.on_progress() and self.finished else "Repair\nSetup")
+                self._update_buttons()
+                if self.on_progress():
+                    self.after(300, self.start_progress)
+                else:
+                    self.focus_set()
+
+            def on_validation(self):
+                return self.has_validation and self.index == 3
+
+            def on_progress(self):
+                return self.index == len(self.steps) - 1
+
+            def _update_buttons(self):
+                last = self.on_progress()
+                self.btn_back.config(state="disabled" if self.index == 0 or (last and not self.finished) else "normal")
+                self.btn_next.pack_forget()
+                self.btn_finish.pack_forget()
+                if last:
+                    self.btn_finish.pack(side="right", before=self.btn_cancel, padx=(0, 6))
+                    self.btn_finish.config(state="normal" if self.finished else "disabled")
+                else:
+                    self.btn_next.pack(side="right", before=self.btn_cancel, padx=(0, 6))
+                    ready = True
+                    if self.steps[self.index] is self.steps[1]:                 # terms step
+                        ready = self.terms_var.get()
+                    self.btn_next.config(state="normal" if ready else "disabled")
+                self.btn_cancel.config(text="Cancel", state="disabled" if (last and self.finished) else "normal")
+
+            def _on_enter(self):
+                if self.on_progress():
+                    if self.finished:
+                        self.finish()
+                elif str(self.btn_next["state"]) == "normal":
+                    self.next()
+
+            def next(self):
+                if self.steps[self.index] is self.steps[1] and not self.terms_var.get():
+                    messagebox.showwarning(APP, "You must accept the terms and conditions to continue.", parent=self)
+                    return
+                if self.on_validation() and not self.validate_entries():
+                    self.validation_msg.config(text="That product key is not valid. Please check it and try again.")
+                    self.bell()
+                    return
+                if self.index < len(self.steps) - 1:
+                    self.show_step(self.index + 1)
+
+            def back(self):
+                if self.index > 0 and not self.installing:
+                    self.show_step(self.index - 1)
+
+            def cancel(self):
+                if self.finished or self.index == 0:
+                    self.destroy()
+                    return
+                if messagebox.askyesno(APP, "Cancel the repair?", parent=self):
+                    self.destroy()
+
+            # ----- product key ----------------------------------------------------------------------------
+
+            def _key_typed(self, number, event):
+                self.validation_msg.config(text="")
+                value = self.entry_vars[number].get().upper()
+                if value != self.entry_vars[number].get():
+                    self.entry_vars[number].set(value)
+                if len(value) >= 5 and number < 4 and event.keysym not in ("BackSpace", "Left", "Right"):
+                    self.entries[number + 1].focus_set()                        # jump to the next group, like a real key
+
+            def validate_entries(self):
+                product_key = "-".join(var.get().strip().upper() for var in self.entry_vars)
+                if product_key != KEY:
+                    return False
+                try:
+                    os.makedirs(SERIAL_FOLDER, exist_ok=True)
+                    with open(os.path.join(SERIAL_FOLDER, LICENSE_FILE), "w", encoding="utf-8") as handle:
+                        handle.write(product_key)
+                except OSError as exc:
+                    messagebox.showerror(APP, f"Could not create the license file:\n{exc}", parent=self)
+                    return False
+                return True
+
+            # ----- progress, repair -----------------------------------------------------------------------
+
+            def start_progress(self):
+                if self.installing or self.finished:
+                    return
+                self.installing = True
+                self._update_buttons()
+                self._tick()
+
+            def _tick(self):
+                import random
+                if self.progress_value < 100:
+                    self.progress_value = min(100, self.progress_value + random.randint(6, 16))
+                    self._draw_progress()
+                    self.after(300, self._tick)
+                else:
+                    self.installing = False
+                    self.finished = True
+                    self.run_repair()
+                    self.progress_label.config(text="Repair complete")
+                    self.panel_title.config(text="Repair\nComplete")
+                    self._update_buttons()
+                    self.btn_finish.focus_set()
+
+            def _draw_progress(self):
+                canvas = self.progress_canvas
+                canvas.delete("all")
+                canvas.update_idletasks()
+                width = canvas.winfo_width()
+                filled = int(width * self.progress_value / 100)
+                block = 12
+                x = 0
+                while x < filled - 2:
+                    canvas.create_rectangle(x + 1, 1, min(x + block - 1, filled), canvas.winfo_height() - 1,
+                                            fill=NAVY, outline=NAVY)
+                    x += block
+                self.progress_percent.config(text=f"{self.progress_value}%")
+
+            def run_repair(self):
+                logged, reason = self.write_repair_log()
+                self.write_mopad_ini()
+                if logged:
+                    self.status.config(text="The repair log was written to the Bitpack database.")
+                else:
+                    self.status.config(text=f"Repair log kept in RepairLog.txt ({reason}).")
+
+            def repair_messages(self):
+                return ["ENCRYPTED HEX LOG VIEW:", "1A SD 8U 3E 7C 91 F0 D2", "B5 SD 8U 9B 6A 56 CF D8 37",
+                        "7C SD 8U A1 B0 62 8D F0 D2", "F0 SD 8U 3E 84 56 CF 9B 6A", "3E SD 8U 7C 91 A1 B0 D8 37",
+                        "5F SD 8U 2A 7B E4 F9 C3", "A8 SD 8U 6D 3C 1F B2 9E", "D1 SD 8U 8E 47 F6 A9 2B",
+                        "7E SD 8U BC 53 DA 61 9F", "32 SD 8U 9D 4A 78 CE E1", "F5 SD 8U B8 A2 6D 1E C7",
+                        "8B SD 8U 37 9F E4 5C A1", "6E SD 8U D9 24 5A F3 81", "-#-", "-#-",
+                        "A7 SD 8U 12 C6 73 9F BD", "-#-", "2F SD 8U 7D 56 18 E9 A4", "NA", "NA", "NA",
+                        "FF FF FF FF FF FF FF FF"]
+
+            def write_repair_log(self):
+                """Write the repair_log table (created by setup_database_ALL). On failure, fall back to RepairLog.txt."""
+                messages = self.repair_messages()
+                path = db_path()
+                if os.path.isfile(path):
+                    try:
+                        conn = sqlite3.connect(path, timeout=3)
+                        try:
+                            conn.execute("DELETE FROM repair_log")
+                            conn.executemany("INSERT INTO repair_log (message) VALUES (?)",
+                                             [(message,) for message in messages])
+                            conn.commit()
+                            return True, ""
+                        finally:
+                            conn.close()
+                    except sqlite3.Error:
+                        pass
+                try:
+                    with open("RepairLog.txt", "w", encoding="utf-8") as handle:
+                        handle.write(f"Repair by {user or 'user'} at {datetime.now():%Y-%m-%d %H:%M:%S}\n\n")
+                        handle.write("\n".join(messages))
+                except OSError:
+                    pass
+                return False, "repair_log table missing, run setup_database_ALL"
+
+            def write_mopad_ini(self):
+                path = "mopad.ini"
+                if not os.path.exists(path):
+                    content = ('\n[Run]\n'
+                               'mate = mate-terminal -x sh -c "python3 {}; exec bash"\n'
+                               'gnome = gnome-terminal -- sh -c "python3 {}; exec bash"\n'
+                               'kde = konsole --hold -e "python3 {}"\n'
+                               'xterm = xterm -hold -e "python3 {}"\n'
+                               'windows = start cmd /K python {}\n'
+                               'mac = open -a Terminal ./python3 {}\n\n'
+                               '[Terminal]\n'
+                               'mate = mate-terminal\ngnome = gnome-terminal\nkde = konsole\nxterm = xterm\n'
+                               'windows = start cmd\nmac = open -a Terminal ./\n\n'
+                               '[Interpreter]\n'
+                               'mate = mate-terminal -x "python3"\ngnome = gnome-terminal -- "python3"\n'
+                               'kde = konsole -e python3\nxterm = xterm python3\nwindows = start cmd /K python\n'
+                               'mac = open -a Terminal ./python3\n\n'
+                               '[System]\nsystem = windows\n\n[Password]\npassword = \n')
+                    try:
+                        with open(path, "w", encoding="utf-8") as handle:
+                            handle.write(content)
+                    except OSError:
+                        return
+                try:
+                    config = configparser.ConfigParser()
+                    config.read(path)
+                except configparser.Error:
+                    pass
+
+            def finish(self):
+                messagebox.showinfo(APP, "Repair completed successfully!", parent=self)
+                self.destroy()
+
+        def check_internet_connection():
+            try:
+                socket.create_connection(("www.google.com", 80), timeout=5)
+                return True
+            except OSError:
+                return False
+
+        Wizard().mainloop()
+
+
+    if __name__ == "__main__":
+        FetcherRepair95("test")
+    # class SetupWizard(tk.Tk):
+        # def __init__(self):
+            # super().__init__()
+     
+            # self.title("Repair Setup - Fetcher")
+            # self.geometry("500x400")
+            # self.resizable(False, False)
+     
+            # self.steps = []
+            # self.current_step = 0
+     
+            # self.container = ttk.Frame(self)
+            # self.container.pack(fill="both", expand=True)
+     
+            # self.create_steps()
+            # self.show_step(0)
+     
+            # self.navigation_frame = ttk.Frame(self)
+            # self.navigation_frame.pack(side="bottom", fill="x")
+     
+            # self.back_button = ttk.Button(self.navigation_frame, text="Back", command=self.back)
+            # self.next_button = ttk.Button(self.navigation_frame, text="Next", command=self.next)
+            # self.finish_button = ttk.Button(self.navigation_frame, text="Finish", command=self.finish, state="disabled")
+     
+            # self.back_button.pack(side="left", padx=(10, 0), pady=10)
+            # self.finish_button.pack(side="right", padx=(0, 10), pady=10)
+            # self.next_button.pack(side="right", padx=(0, 10), pady=10)
+     
+            # self.update_buttons()
+     
+        # def create_steps(self):
+            # # Step 1: Welcome
+            # frame1 = ttk.Frame(self.container)
+            # label1 = ttk.Label(frame1, text="Welcome to the Repair Setup for Bitpack", font=("Arial", 14))
+            # label1.pack(pady=20)
+            # self.steps.append(frame1)
+     
+            # # Step 2: Accept Terms and Conditions
+            # frame2 = ttk.Frame(self.container)
+            # label2 = ttk.Label(frame2, text="Please read and accept the terms and conditions to continue.", font=("Arial", 12))
+            # label2.pack(pady=10)
+     
+            # terms_frame = ttk.Frame(frame2)
+            # terms_frame.pack(fill="both", expand=True, pady=(0, 10))
+     
+            # self.terms_text = tk.Text(terms_frame, wrap="word", width=60, height=10)
+            # self.terms_text.insert("1.0", "End-User License Agreement (EULA) for Fetcher - Repair Kit for Bitpack\n\n"
+                                          # "This End-User License Agreement (EULA) is a legal agreement "
+                                          # "between you and Tudor Marmureanu.\n\n"
+                                          # "This software repair program is provided 'as-is' and without "
+                                          # "warranty of any kind. By using this software, you agree to the "
+                                          # "terms and conditions outlined in this agreement.\n\n"
+                                          # "1. GRANT OF LICENSE. This EULA grants you the following rights: "
+                                          # "You may use this software to repair the Bitpack program.\n"
+                                          # "2. DESCRIPTION OF OTHER RIGHTS AND LIMITATIONS.\n"
+                                          # "   - Maintenance of Copyright Notices. You must not remove or alter any copyright "
+                                          # "notices on any copies of the software.\n"
+                                          # "   - Distribution. You may not distribute copies of the software to third parties.\n"
+                                          # "   - Prohibition on Reverse Engineering, Decompilation, and Disassembly. You may not "
+                                          # "reverse engineer, decompile, or disassemble the software.\n\n"
+                                          # "Tudor Marmureanu reserves all rights not expressly granted to you in this EULA.\n\n"
+                                          # "If you do not agree to these terms, do not use this software.")
+            # self.terms_text.config(state="disabled")  # Make the text read-only
+            # self.terms_text.pack(side="left", fill="both", expand=True)
+     
+            # scrollbar = ttk.Scrollbar(terms_frame, command=self.terms_text.yview)
+            # scrollbar.pack(side="right", fill="y")
+            # self.terms_text.config(yscrollcommand=scrollbar.set)
+     
+            # self.terms_var = tk.BooleanVar()
+            # terms_check = ttk.Checkbutton(frame2, text="I accept the terms and conditions", variable=self.terms_var)
+            # terms_check.pack(pady=10)
+            # self.steps.append(frame2)
+     
+            # # Step 3: Choose Installation Directory
+            # frame3 = ttk.Frame(self.container)
+            # label3 = ttk.Label(frame3, text="Current directory:", font=("Arial", 12))
+            # label3.pack(pady=20)
+            # self.directory_var = tk.StringVar(value=os.getcwd())  # Setează folderul curent
+            # directory_entry = ttk.Entry(frame3, textvariable=self.directory_var, width=75, state='readonly')
+            # directory_entry.pack(pady=5)
+            # # Butonul Browse este comentat
+            # # browse_button = ttk.Button(frame3, text="Browse...", command=self.browse_directory)
+            # # browse_button.pack(pady=5)
+            # self.steps.append(frame3)
+ 
+            # # Step 4: Validation Window
+            # try:
+                # should_skip = False
+                
+                # # Verifica has_key din BD pentru fetcher
+                # try:
+                    # import sqlite3 as _sq
+                    # _conn = _sq.connect("Config/dbo_bitpack.db")
+                    # _cursor = _conn.cursor()
+                    # _cursor.execute("SELECT has_key FROM accounts WHERE var_value='1995'")
+                    # _r = _cursor.fetchone()
+                    # _conn.close()
+                    # if _r is not None and not bool(_r[0]):
+                        # should_skip = True
+                # except:
+                    # pass
+                
+                # if os.path.exists("Serial") and os.path.isdir("Serial"):
+                    # product_key_file = os.path.join("Serial", "product_key.lic95")
+                    # if os.path.exists(product_key_file):
+                        # with open(product_key_file, 'r', encoding='utf-8') as file:
+                            # first_line = file.readline().strip()
+                            # if first_line == "R46BX-JHR2J-PG7ER-24QFG-MWKVR":
+                                # should_skip = True
+                
+                # if not should_skip:
+                    # frame4 = ttk.Frame(self.container)
+                    # label4 = ttk.Label(frame4, text="Product Key Validation", font=("Arial", 18, "bold"))
+                    # label4.pack(pady=20)
+             
+                    # validation_frame = ttk.Frame(frame4)
+                    # validation_frame.pack(expand=True)
+             
+                    # self.entry_vars = [tk.StringVar() for _ in range(5)]
+                    # self.entries = []
+                    # for i in range(5):
+                        # entry = ttk.Entry(validation_frame, textvariable=self.entry_vars[i], width=8)
+                        # entry.grid(row=0, column=2 * i)
+                        # self.entries.append(entry)
+                        # if i < 4:
+                            # dash_label = ttk.Label(validation_frame, text="-")
+                            # dash_label.grid(row=0, column=2 * i + 1)
+             
+                    # self.steps.append(frame4)
+            # except Exception as e:
+                # pass
+     
+            # # Step 5: Installation Progress
+            # frame5 = ttk.Frame(self.container)
+            # label5 = ttk.Label(frame5, text="Running Driver...", font=("Arial", 14))
+            # label5.pack(pady=20)
+            # self.progress = ttk.Progressbar(frame5, orient="horizontal", length=300, mode="determinate")
+            # self.progress.pack(pady=10)
+            # self.steps.append(frame5)
+     
+        # def show_step(self, step):
+            # for frame in self.steps:
+                # frame.pack_forget()
+            # self.steps[step].pack(fill="both", expand=True)
+     
+        # def next(self):
+            # if self.current_step == 1 and not self.terms_var.get():
+                # messagebox.showwarning("Warning", "You must accept the terms and conditions to continue.")
+                # return
+            # if self.current_step == 2 and not self.directory_var.get():
+                # messagebox.showwarning("Warning", "Please choose an installation directory.")
+                # return
+            # if self.current_step == 3 and not self.validate_entries():
+                # messagebox.showwarning("Warning", "Validation failed. Please enter valid serial number.")
+                # return
+     
+            # if self.current_step < len(self.steps) - 1:
+                # self.current_step += 1
+                # self.show_step(self.current_step)
+                # self.update_buttons()
+     
+        # def back(self):
+            # if self.current_step > 0:
+                # self.current_step -= 1
+                # self.show_step(self.current_step)
+                # self.update_buttons()
+
+        # def create_accounts_file(self):
+            # installation_directory = self.directory_var.get()
+            # if not installation_directory:
+                # return
+            
+            # accounts_file_path = os.path.join(installation_directory, "Accounts.txt")
+            
+            # accounts_data = """|___user___|            |___password___|
+
+# user                        nopass
+# it                          copy (+- product_key)
+# passgen                     passgen
+# quiz                        test
+# pausemanager                pauze (+- product_key)
+# taskmanager                 terminator
+# launcher                    launcher
+# hardware                    lite
+# eventviewer                 eventviewer
+# config                      editor
+# calculator	                calculator
+# pathstxt                    pathstxt
+# profilesjson                profilesjson
+# ChooseLocationForPausetxt   ChooseLocationForPausetxt
+
+# --------------------------------------------
+# terminal                    terminal (+ product_key)
+# passgenV2     	            passgenV2 (+ product_key)
+# system         	            realtime (+ product_key)
+# screenrec      	            screenrec (+ product_key)
+# zipmanager     	            zipmngr (+ product_key)
+# comparator     	            comparator (+ product_key)
+# convertorpdf   	            toword (+ product_key)
+# textreplace    	            textfind (+ product_key)
+# pdftools      	            enjoyit (+ product_key)
+# pdfviewer                   pdfviewer (+ product_key)
+# bandmonitoring 	            networking (+ product_key)
+# cryptoV2      	            security (+ product_key)
+# chatbot        	            aichatbot (+ product_key)
+# notepad        	            notepad (+ product_key)
+# paint          	            paint (+ product_key)
+# zippass        	            wordsmith (+ product_key)
+# backupmanager               backupmngr (+ product_key)
+# renamemanager  	            renamer (+ product_key)
+# kbmanager      	            knowladgebase (+ product_key)
+# kbretro                     kbretro (+ product_key)
+# password       	            manager (+ product_key)
+# junk           	            manager (+ product_key)
+# whiteboard     	            presentation (+ product_key)
+# contact        	            manager (+ product_key)
+# check          	            devices (+ product_key)
+# excel                       lite (+ product_key)
+# excel                       litev2 (+ product_key)
+# reader                      office (+ product_key)
+# fetcher                     repair (+ product_key)
+# shell                       integrator (+ product_key)
+# sql                         explorer (+ product_key)
+# ide                         pycharm (+ product_key)
+# ide                         vscode (+ produce_key)
+# diagram                     beta (+ product_key)
+# mindmap                     diagram (+ product_key)
+# commander		            total (+ product_key)
+# calendar                    calendar (+ product_key)
+# alert                       monitor (+ product_key)
+# process                     viewer (+ produck_key)
+# md		                    mdviewer (+ product_key)
+# history                     files (+ product_key)
+# expense	                    tracker (+ product_key)
+# script	                    agent (+ product_key)
+# recovery	                tunnel (+ product_key)
+# fisher	                    file (+ product_key)
+# multifile                   editor (+ product_key)
+# safe                        checker (+ product_key)
+# traffic                     network (+ product_key)
+# clipboard                   history (+ product_key)
+# quickfinder	                file (+ product_key)
+# topology 	                network (+ product_key)
+# disktool                    utility (+ product_key)
+# device                      manager (+ product_key)
+# todo                        manager (+ product_key)
+# pdfto                       excelcsv (+ product_key)
+# csv		                    reader (+ product_key)
+# document	                topdftext (+ product_key)
+# extensions	                manager (+ product_key)
+# colorpicker                 colorpicker (+ product_key)
+# winreg	                    reg (+ product_key)
+# universal                   converter (+ product_key)
+# calculator                  programmer (+ product_key)
+# projectmanager              projectmanager (+ product_key)
+# regextest                   regextest (+ product_key)
+# calculator                  graphing (+ product_key)
+# codemerger                  codemerger (+ product_key)
+# sql                         sql (+ product_key)
+# pythonlogic	                visualizer (+ product_key)
+# pdfeditor	                pdfeditor (+ product_key)
+# convertorword               topdf (+ product_key)
+# timeline                    file (+ product_key)
+# forensic	                timeline (+ product_key)
+# timetracker	                timetracker (+ product_key)
+# sql		                    comp (+ product_key)
+# decisiontree                decisiontree (+ product_key)
+# bo95                        bo95 (+ product_key)
+# versioncontrol              versioncontrol (+ product_key)
+# dataplotter                 dataplotter (+ product_key)
+# sql                         diagram (+ product_key)
+# sql                         executor (+ product_key)
+# ico                         converter (+ product_key)
+# px95                        px95 (+ product_key)
+# imgeditor                   imgeditor (+ product_key)
+# api                         api (+ product_key)
+# sql                         querycreator (+ product_key)
+# sqlmanagementstudio         sqlmanagementstudio (+ product_key)
+# sql                         designer (+ product_key)
+# personalstorage             personalstorage (+ product_key)
+# activity                    monitor (+ product_key)
+# binhex                      binhex (+ product_key)
+# password                    checker (+ product_key)
+# dbobitpackdash              dbobitpackdash (+ product_key)
+# whoisonmynetwork            whoisonmynetwork (+ product_key)
+# planogram                   studio (+ product_key)
+# code                        beautify (+ product_key)
+# imgres                      imgres (+ product_key)
+# batchfileeditor             batchfileeditor (+ product_key)
+# pdfcnvbulk                  pdfcnvbulk (+ product_key)
+# fldrcp                      fldrcp (+ product_key)
+# arcbr                       arcbr (+ product_key)
+# fldpck                      fldpck (+ product_key)
+# docmrg                      docmrg (+ product_key)
+# iconed                      iconed (+ product_key)
+# chartbld                    chartbld (+ product_key)
+# exccmp                      exccmp (+ product_key)
+# sticky                      notes (+ product_key)
+# repbld                      repbld (+ product_key)
+# stprcd                      stprcd (+ product_key)
+    # """
+
+            # with open(accounts_file_path, "w") as accounts_file:
+                # accounts_file.write(accounts_data.strip())  # Scrie datele în fișier
 
      
-        def finish(self):
-            # Your existing code for handling 'Finish' button clicks goes here
-            self.log_messages()
-            #self.create_accounts_file()
-            messagebox.showinfo("Info", "Repair completed successfully!")
-            self.quit()
+        # def finish(self):
+            # # Your existing code for handling 'Finish' button clicks goes here
+            # self.log_messages()
+            # #self.create_accounts_file()
+            # messagebox.showinfo("Info", "Repair completed successfully!")
+            # self.quit()
      
-        def browse_directory(self):
-            directory = filedialog.askdirectory()
-            if directory:
-                if not os.path.exists(os.path.join(directory, "Bitpack.exe")):
-                    messagebox.showerror("Error", "Bitpack.exe not found in the selected directory.")
-                    self.directory_var.set("")
-                else:
-                    self.directory_var.set(directory)
+        # def browse_directory(self):
+            # directory = filedialog.askdirectory()
+            # if directory:
+                # if not os.path.exists(os.path.join(directory, "Bitpack.exe")):
+                    # messagebox.showerror("Error", "Bitpack.exe not found in the selected directory.")
+                    # self.directory_var.set("")
+                # else:
+                    # self.directory_var.set(directory)
      
-        def install_application(self):
-            self.progress["value"] = 0
-            self.back_button.config(state="disabled")
-            self.next_button.config(state="disabled")
-            self.simulate_progress()
+        # def install_application(self):
+            # self.progress["value"] = 0
+            # self.back_button.config(state="disabled")
+            # self.next_button.config(state="disabled")
+            # self.simulate_progress()
      
-        def simulate_progress(self):
-            current_value = self.progress["value"]
-            if current_value < 100:
-                # Generăm o valoare aleatorie între 1 și 10 pentru progres
-                next_value = current_value + random.randint(1, 20)
-                self.progress["value"] = min(next_value, 100)  # Limităm la 100%
-                self.after(900, self.simulate_progress)  # Programăm următoarea actualizare
-            else:
-                self.finish_button.config(state="normal")  # Activați butonul Finish
-                self.back_button.config(state="normal")    # Activați butonul Back
+        # def simulate_progress(self):
+            # current_value = self.progress["value"]
+            # if current_value < 100:
+                # # Generăm o valoare aleatorie între 1 și 10 pentru progres
+                # next_value = current_value + random.randint(1, 20)
+                # self.progress["value"] = min(next_value, 100)  # Limităm la 100%
+                # self.after(900, self.simulate_progress)  # Programăm următoarea actualizare
+            # else:
+                # self.finish_button.config(state="normal")  # Activați butonul Finish
+                # self.back_button.config(state="normal")    # Activați butonul Back
      
      
-        def validate_entries(self):
-            # Construim cheia din cele 5 campuri
-            product_key = "-".join([var.get().strip().upper() for var in self.entry_vars])
+        # def validate_entries(self):
+            # # Construim cheia din cele 5 campuri
+            # product_key = "-".join([var.get().strip().upper() for var in self.entry_vars])
             
-            # Verificăm dacă cheia este corectă
-            if product_key == "R46BX-JHR2J-PG7ER-24QFG-MWKVR":
-                # Creăm folderul Serial dacă nu există
-                if not os.path.exists("Serial"):
-                    os.makedirs("Serial")
+            # # Verificăm dacă cheia este corectă
+            # if product_key == "R46BX-JHR2J-PG7ER-24QFG-MWKVR":
+                # # Creăm folderul Serial dacă nu există
+                # if not os.path.exists("Serial"):
+                    # os.makedirs("Serial")
                 
-                # Creăm fișierul product_key.lic95 cu cheia de produs
-                product_key_file = os.path.join("Serial", "product_key.lic95")
-                try:
-                    with open(product_key_file, 'w', encoding='utf-8') as file:
-                        file.write(product_key)
-                    return True
-                except Exception as e:
-                    messagebox.showerror("Error", f"Could not create license file: {str(e)}")
-                    return False
-            else:
-                return False
+                # # Creăm fișierul product_key.lic95 cu cheia de produs
+                # product_key_file = os.path.join("Serial", "product_key.lic95")
+                # try:
+                    # with open(product_key_file, 'w', encoding='utf-8') as file:
+                        # file.write(product_key)
+                    # return True
+                # except Exception as e:
+                    # messagebox.showerror("Error", f"Could not create license file: {str(e)}")
+                    # return False
+            # else:
+                # return False
      
      
-        def update_buttons(self):
-            if self.current_step == 0:
-                self.back_button.config(state="disabled")
-            else:
-                self.back_button.config(state="normal")
+        # def update_buttons(self):
+            # if self.current_step == 0:
+                # self.back_button.config(state="disabled")
+            # else:
+                # self.back_button.config(state="normal")
      
-            if self.current_step == len(self.steps) - 1:
-                self.next_button.config(state="disabled")
-                self.install_application()  # Start the progress simulation
-            else:
-                self.next_button.config(state="normal")
-                self.finish_button.config(state="disabled")
+            # if self.current_step == len(self.steps) - 1:
+                # self.next_button.config(state="disabled")
+                # self.install_application()  # Start the progress simulation
+            # else:
+                # self.next_button.config(state="normal")
+                # self.finish_button.config(state="disabled")
      
      
-        def log_messages(self):
-            import sqlite3
-            messages = [
-                # "11002: TEXT ERROR",
-                # "11004: Assembly media failed",
-                # "11005: Running instance",
-                # "11009: mopad.ini running...",
-                # "11010: Active patch",
-                # "11011: Service redirection to the core",
-                # "11013: Data sent",
-                # "11014: Matching Packages",
-                # "11025: Assembly #-N#",
-                # "11027: None",
-                # "11028: None",
-                # "11029: None",
-                # "11030: None",
-                # "11031: None",
-                # "11032: None",
-                # "11033: None",
-                # "11034: None",
-                # "11035: None",
-                # "11036: None",
-                # "11037: None",
-                # "11038: None",
-                # "11039: None",
-                # "11040: None",
-                # "11041: None",
-                # "11042: Assembly media running...",
-                # "11043: Product repairing...",
-                # "11044: Configparser active",
-                # "11045: Logging successfully",
-                # "11056: SUCCES",
-                # " ",
-                # "DETAILES:",
-                # "11082: Check port connectivity - sesion 1",
-                # "Port: 80 --#--",
-                # "Port: 443 --#--",
-                # "11083: Check port connectivity - sesion 2",
-                # "Port: 21 --#--",
-                # "Port: 22 --#--",
-                # "Port: 53 --#-- (#managed_for_this_session#: ID 3)",
-                # "11088: Data integrity verified",
-                # "11092: Configuration file updated",
-                # "11191: User session terminated",
-                # " ",
-                "ENCRYPTED HEX LOG VIEW:",
-                "1A SD 8U 3E 7C 91 F0 D2",
-                "B5 SD 8U 9B 6A 56 CF D8 37",
-                "7C SD 8U A1 B0 62 8D F0 D2",
-                "F0 SD 8U 3E 84 56 CF 9B 6A",
-                "3E SD 8U 7C 91 A1 B0 D8 37",
-                "5F SD 8U 2A 7B E4 F9 C3",
-                "A8 SD 8U 6D 3C 1F B2 9E",
-                "D1 SD 8U 8E 47 F6 A9 2B",
-                "7E SD 8U BC 53 DA 61 9F",
-                "32 SD 8U 9D 4A 78 CE E1",
-                #"Timeout",
-                "F5 SD 8U B8 A2 6D 1E C7",
-                "8B SD 8U 37 9F E4 5C A1",
-                "6E SD 8U D9 24 5A F3 81",
-                "-#-",
-                "-#-",
-                "A7 SD 8U 12 C6 73 9F BD",
-                "-#-",
-                "2F SD 8U 7D 56 18 E9 A4",
-                "NA",
-                "NA",
-                "NA",
-                "FF FF FF FF FF FF FF FF"
-            ]
-            conn = sqlite3.connect("Config/dbo_bitpack.db")
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM repair_log")  # sterge log-ul anterior
-            for message in messages:
-                cursor.execute("INSERT INTO repair_log (message) VALUES (?)", (message,))
-            conn.commit()
-            conn.close()
-            # Write messages to RepairLog.txt
-            # with open("RepairLog.txt", "w") as file:
-                # for message in messages:
-                    # file.write(message + "\n")
+        # def log_messages(self):
+            # import sqlite3
+            # messages = [
+                # # "11002: TEXT ERROR",
+                # # "11004: Assembly media failed",
+                # # "11005: Running instance",
+                # # "11009: mopad.ini running...",
+                # # "11010: Active patch",
+                # # "11011: Service redirection to the core",
+                # # "11013: Data sent",
+                # # "11014: Matching Packages",
+                # # "11025: Assembly #-N#",
+                # # "11027: None",
+                # # "11028: None",
+                # # "11029: None",
+                # # "11030: None",
+                # # "11031: None",
+                # # "11032: None",
+                # # "11033: None",
+                # # "11034: None",
+                # # "11035: None",
+                # # "11036: None",
+                # # "11037: None",
+                # # "11038: None",
+                # # "11039: None",
+                # # "11040: None",
+                # # "11041: None",
+                # # "11042: Assembly media running...",
+                # # "11043: Product repairing...",
+                # # "11044: Configparser active",
+                # # "11045: Logging successfully",
+                # # "11056: SUCCES",
+                # # " ",
+                # # "DETAILES:",
+                # # "11082: Check port connectivity - sesion 1",
+                # # "Port: 80 --#--",
+                # # "Port: 443 --#--",
+                # # "11083: Check port connectivity - sesion 2",
+                # # "Port: 21 --#--",
+                # # "Port: 22 --#--",
+                # # "Port: 53 --#-- (#managed_for_this_session#: ID 3)",
+                # # "11088: Data integrity verified",
+                # # "11092: Configuration file updated",
+                # # "11191: User session terminated",
+                # # " ",
+                # "ENCRYPTED HEX LOG VIEW:",
+                # "1A SD 8U 3E 7C 91 F0 D2",
+                # "B5 SD 8U 9B 6A 56 CF D8 37",
+                # "7C SD 8U A1 B0 62 8D F0 D2",
+                # "F0 SD 8U 3E 84 56 CF 9B 6A",
+                # "3E SD 8U 7C 91 A1 B0 D8 37",
+                # "5F SD 8U 2A 7B E4 F9 C3",
+                # "A8 SD 8U 6D 3C 1F B2 9E",
+                # "D1 SD 8U 8E 47 F6 A9 2B",
+                # "7E SD 8U BC 53 DA 61 9F",
+                # "32 SD 8U 9D 4A 78 CE E1",
+                # #"Timeout",
+                # "F5 SD 8U B8 A2 6D 1E C7",
+                # "8B SD 8U 37 9F E4 5C A1",
+                # "6E SD 8U D9 24 5A F3 81",
+                # "-#-",
+                # "-#-",
+                # "A7 SD 8U 12 C6 73 9F BD",
+                # "-#-",
+                # "2F SD 8U 7D 56 18 E9 A4",
+                # "NA",
+                # "NA",
+                # "NA",
+                # "FF FF FF FF FF FF FF FF"
+            # ]
+            # conn = sqlite3.connect("Config/dbo_bitpack.db")
+            # cursor = conn.cursor()
+            # cursor.execute("DELETE FROM repair_log")  # sterge log-ul anterior
+            # for message in messages:
+                # cursor.execute("INSERT INTO repair_log (message) VALUES (?)", (message,))
+            # conn.commit()
+            # conn.close()
+            # # Write messages to RepairLog.txt
+            # # with open("RepairLog.txt", "w") as file:
+                # # for message in messages:
+                    # # file.write(message + "\n")
      
-            def create_default_ini_file(file_path):
-                if not os.path.exists(file_path):
-                    mopad_ini_content = """
-[Run]
-mate = mate-terminal -x sh -c "python3 {}; exec bash"
-gnome = gnome-terminal -- sh -c "python3 {}; exec bash"
-kde = konsole --hold -e "python3 {}"
-xterm = xterm -hold -e "python3 {}"
-windows = start cmd /K python {}
-mac = open -a Terminal ./python3 {}
+            # def create_default_ini_file(file_path):
+                # if not os.path.exists(file_path):
+                    # mopad_ini_content = """
+# [Run]
+# mate = mate-terminal -x sh -c "python3 {}; exec bash"
+# gnome = gnome-terminal -- sh -c "python3 {}; exec bash"
+# kde = konsole --hold -e "python3 {}"
+# xterm = xterm -hold -e "python3 {}"
+# windows = start cmd /K python {}
+# mac = open -a Terminal ./python3 {}
  
-[Terminal]
-mate = mate-terminal
-gnome = gnome-terminal
-kde = konsole
-xterm = xterm
-windows = start cmd
-mac = open -a Terminal ./
+# [Terminal]
+# mate = mate-terminal
+# gnome = gnome-terminal
+# kde = konsole
+# xterm = xterm
+# windows = start cmd
+# mac = open -a Terminal ./
  
-[Interpreter]
-mate = mate-terminal -x "python3"
-gnome = gnome-terminal -- "python3"
-kde = konsole -e python3
-xterm = xterm python3
-windows = start cmd /K python
-mac = open -a Terminal ./python3
+# [Interpreter]
+# mate = mate-terminal -x "python3"
+# gnome = gnome-terminal -- "python3"
+# kde = konsole -e python3
+# xterm = xterm python3
+# windows = start cmd /K python
+# mac = open -a Terminal ./python3
  
-[System]
-system = windows
+# [System]
+# system = windows
  
-[Password]
-password = 
-            """
-                    with open(file_path, 'w') as config_file:
-                        config_file.write(mopad_ini_content)
+# [Password]
+# password = 
+            # """
+                    # with open(file_path, 'w') as config_file:
+                        # config_file.write(mopad_ini_content)
      
-            # Verifică și creează fișierul ini implicit dacă nu există
-            create_default_ini_file('mopad.ini')
+            # # Verifică și creează fișierul ini implicit dacă nu există
+            # create_default_ini_file('mopad.ini')
      
-            # Continuă cu citirea și procesarea configurației din fișierul ini
-            config = configparser.ConfigParser()
-            config.read('mopad.ini')
+            # # Continuă cu citirea și procesarea configurației din fișierul ini
+            # config = configparser.ConfigParser()
+            # config.read('mopad.ini')
      
      
-    def check_internet_connection():
-        try:
-            socket.create_connection(("www.google.com", 80))
-            return True
-        except OSError:
-            return False
+    # def check_internet_connection():
+        # try:
+            # socket.create_connection(("www.google.com", 80))
+            # return True
+        # except OSError:
+            # return False
      
-    if __name__ == "__main__":
-        #if check_internet_connection():
-        app = SetupWizard()
-        app.mainloop()
-        #else:
-        #messagebox.showerror("Error", "No internet connection detected. Please check your connection and try again.")
-        #exit()
+    # if __name__ == "__main__":
+        # #if check_internet_connection():
+        # app = SetupWizard()
+        # app.mainloop()
+        # #else:
+        # #messagebox.showerror("Error", "No internet connection detected. Please check your connection and try again.")
+        # #exit()
 
 if shellvar == 1996:
     import os
@@ -81733,29 +82304,44 @@ if shellvar == 1996:
     #!/usr/bin/env python3
     # -*- coding: utf-8 -*-
     """
-    Shell Integrator 95 - the Shell Integrator command window as a Windows 95 "MS-DOS Prompt" (tkinter, no ttk).
+    Shell Integrator 95 - the Bitpack terminal, a Windows 95 "MS-DOS Prompt" (tkinter, no ttk).
 
-    In Bitpack: inside the `if shellvar == 1996:` block keep the product key part and your `messages = {...}`
-    dictionary as they are. Replace everything from `app = QApplication(sys.argv)` down to the end of the block
-    (show_error, check_internet, save_to_log, process_command, the CLI functions, CommandSimulatorApp,
-    run_gui_mode, main) with the function below and this call:
+    Commands, in this order:
+      * built in:  help, cls / clear, history, log [N], ver, exit / quit, dir / ls, cd
+      * the manual repair commands of your `messages` dictionary (init, powercli Bitpack -t, ... launch_bitpack)
+      * the Bitpack commands of the w95dist Command Prompt (exec ...). The administrator ones run for anyone
+        who types them, as in w95dist; help lists them for an administrator (admin=True) or once
+        `exec dbo_bitpack --admin` has set exec_admin_sql = 1 in app_flags
+      * any other text runs as a system command (cmd on Windows), with its output in the window; Ctrl+C stops it.
+
+    `cd` changes only the terminal's own folder (the prompt and the system commands use it); the folder of
+    the Bitpack process is never changed, so Config/dbo_bitpack.db is always found.
+
+    Every command is logged in Config/dbo_bitpack.db, table shell_log (created by setup_database_ALL); without
+    the table, in log.txt.
+
+    In Bitpack, inside the `if shellvar == 1996:` block, after `messages = {...}`:
 
         ShellIntegrator95(messages, logged_username)
 
-    Commands are logged in Config/dbo_bitpack.db, table shell_log (created by setup_database_ALL). When the table is
-    missing, the log goes to log.txt as before and the status bar says so.
-
-    The PyQt5 import at the top of the block is no longer needed. create_accounts_file() can stay where it is
-    (it is not called). Stand-alone: run this file.
+    The exec commands call setup_database_ALL(), create_recreate_data(), data_folder_creation_script(),
+    create_pxed_data(), create_bitpack_assets() and read ddapointer directly by name, exactly as the w95dist
+    Command Prompt does. That works because this function is pasted into the Bitpack main file: the names are
+    looked up in that file when the command runs, so it does not matter where in the file they are defined.
+    Run on its own (without Bitpack) those commands answer "not available here".
     """
 
 
-    def ShellIntegrator95(messages, user=None, log_path="log.txt"):
+    def ShellIntegrator95(messages, user=None, admin=None, log_path="log.txt"):
         import os
+        import queue
         import random
+        import re
+        import signal
         import sqlite3
         import subprocess
         import sys
+        import threading
         import tkinter as tk
         import tkinter.font as tkfont
         from datetime import datetime
@@ -81767,20 +82353,39 @@ if shellvar == 1996:
         FONT, FONT_BOLD = ("MS Sans Serif", 8), ("MS Sans Serif", 8, "bold")
         APP = "Shell Integrator"
         FONT_SIZES = ("7 x 12", "8 x 14", "10 x 18", "12 x 22")
-        BUILT_IN = {"help": "list the commands", "cls": "clear the screen", "history": "commands typed in this window",
-                    "log": "the last 30 log entries (log 100 = the last 100)", "ver": "version", "exit": "close the window"}
+        BUILT_IN = (("help", "this list"), ("cls", "clear the screen (also: clear)"),
+                    ("dir", "list the files of the current folder (also: ls)"),
+                    ("cd <folder>", "change the terminal's folder (cd .. / cd \\ / cd D:\\... / D:)"),
+                    ("history", "commands typed in this window"), ("log [N]", "the last 30 (or N) log entries"),
+                    ("ver", "version"), ("exit", "close the window (also: quit)"))
+        OUTPUT_LIMIT = 4000                                      # characters of a system command kept in the log
 
-        def prompt_text():
-            return os.getcwd() + ">"                          # the current folder, like the real MS-DOS prompt
+        if IS_WINDOWS:
+            try:
+                import ctypes
+                CONSOLE_ENCODING = f"cp{ctypes.windll.kernel32.GetOEMCP()}"     # what cmd writes (cp852 in Romania)
+            except Exception:
+                CONSOLE_ENCODING = "cp850"
+        else:
+            CONSOLE_ENCODING = "utf-8"
+
+        # ----- database: the log and the exec commands ------------------------------------------------------
+
+        def find_db():
+            app_dir = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0]))
+            for candidate in (os.path.join("Config", "dbo_bitpack.db"), os.path.join(app_dir, "Config", "dbo_bitpack.db")):
+                if os.path.isfile(candidate):
+                    return candidate
+            return os.path.join("Config", "dbo_bitpack.db")
 
         class LogStore:
-            """The shell_log table of Config/dbo_bitpack.db (created by setup_database_ALL; nothing is created here).
-            Without it, entries go to log.txt in the old format, so nothing is lost."""
+            """The shell_log table (created by setup_database_ALL; nothing is created here); log.txt without it."""
 
             def __init__(self):
-                app_dir = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0]))
-                candidates = (os.path.join("Config", "dbo_bitpack.db"), os.path.join(app_dir, "Config", "dbo_bitpack.db"))
-                self.path = next((c for c in candidates if os.path.isfile(c)), None)
+                self.refresh()
+
+            def refresh(self):
+                self.path = find_db() if os.path.isfile(find_db()) else None
                 self.ok = False
                 if self.path:
                     try:
@@ -81809,15 +82414,15 @@ if shellvar == 1996:
                 finally:
                     conn.close()
 
-            def add(self, command, response):
+            def add(self, command, response, folder):
                 if self.ok:
                     try:
                         self._run("INSERT INTO shell_log (logged_at, username, command, response, working_dir) "
                                   "VALUES (?, ?, ?, ?, ?)",
-                                  (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user, command, response, os.getcwd()))
+                                  (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user, command, response, folder))
                         return
                     except sqlite3.Error:
-                        self.ok = False                       # e.g. the database is locked: keep it in the file
+                        self.ok = False
                 try:
                     with open(log_path, "a", encoding="utf-8") as log:
                         log.write(f"Command: {command}\nResponse: {response}\n---\n")
@@ -81831,12 +82436,12 @@ if shellvar == 1996:
                     return 0
 
             def last(self, limit):
-                """The last `limit` entries as text lines, oldest first."""
                 if self.ok:
                     try:
                         rows = self._run("SELECT logged_at, username, command, response FROM shell_log "
                                          "ORDER BY id DESC LIMIT ?", (limit,), fetch=True)
-                        return [f"{at}  {who or '-':<12} {cmd}  ->  {resp}" for at, who, cmd, resp in reversed(rows)]
+                        return [f"{at}  {who or '-':<12} {cmd}  ->  {(resp or '').splitlines()[0] if resp else ''}"
+                                for at, who, cmd, resp in reversed(rows)]
                     except sqlite3.Error:
                         pass
                 try:
@@ -81847,29 +82452,216 @@ if shellvar == 1996:
 
         store = LogStore()
 
-        def save_to_log(command, response):
-            store.add(command, response)
-
         def launch_bitpack():
-            """Start Bitpack again: the .exe itself when built with PyInstaller, otherwise python + the script."""
             if getattr(sys, "frozen", False):
                 subprocess.Popen([sys.executable], cwd=os.path.dirname(sys.executable) or None)
             else:
                 script = os.path.abspath(sys.argv[0])
                 subprocess.Popen([sys.executable, script], cwd=os.path.dirname(script) or None)
 
-        def process_command(command):
-            if command in messages:
-                response = messages[command]
-                if command == "launch_bitpack":
-                    try:
-                        launch_bitpack()
-                    except Exception as exc:
-                        response = f"Failed to launch Bitpack: {exc}"
-            else:
-                response = "Unknown command. Please try again."
-            save_to_log(command, response)
-            return response
+        # ----- the exec commands (from the w95dist Command Prompt) ----------------------------------------------
+
+        def set_flag(key, value):
+            conn = sqlite3.connect(find_db())
+            try:
+                conn.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES (?, ?)", (key, value))
+                conn.commit()
+            finally:
+                conn.close()
+
+        def export_db(target_name):
+            db_path = find_db()
+            if not os.path.isfile(db_path):
+                return ["Error: Config/dbo_bitpack.db not found."], "error"
+            target = os.path.join(os.path.dirname(db_path), target_name)
+            conn = sqlite3.connect(db_path)
+            try:
+                tables = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                                      "AND name NOT LIKE 'sqlite_%'").fetchone()[0]
+                statements = 0
+                temp = target + ".part"
+                with open(temp, "w", encoding="utf-8") as handle:
+                    handle.write(f"-- Bitpack database export ({target_name})\n")
+                    handle.write(f"-- Generated: {datetime.now():%Y-%m-%d %H:%M:%S}\n")
+                    handle.write("-- Source: Config/dbo_bitpack.db\n")
+                    restore = "exec dbo_bitpack --import" + (" --sql" if target_name.endswith(".sql") else "")
+                    handle.write(f"-- Restore with: {restore}\n\n")
+                    handle.write("PRAGMA foreign_keys = OFF;\n")
+                    for line in conn.iterdump():
+                        handle.write(f"{line}\n")
+                        statements += 1
+                os.replace(temp, target)                         # a failed export never leaves half a file
+            finally:
+                conn.close()
+            size_kb = os.path.getsize(target) / 1024
+            return [f"Exported {tables} table(s), {statements} statement(s).",
+                    f"File: {target} ({size_kb:.1f} KB)", "Export completed successfully."], "response"
+
+        def import_db(source_name):
+            db_path = find_db()
+            source = os.path.join(os.path.dirname(db_path), source_name)
+            if not os.path.isfile(source):
+                export = "exec dbo_bitpack --export" + (" --sql" if source_name.endswith(".sql") else "")
+                return [f"Error: Config/{source_name} not found.", f"Run '{export}' first."], "error"
+            with open(source, encoding="utf-8") as handle:
+                script = handle.read()
+            conn = sqlite3.connect(db_path)
+            try:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA foreign_keys = OFF")
+                dropped = 0
+                for kind in ("trigger", "view", "index", "table"):
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'", (kind,))
+                    for (name,) in cursor.fetchall():
+                        cursor.execute(f'DROP {kind.upper()} IF EXISTS "{name}"')
+                        dropped += 1
+                conn.commit()
+                conn.executescript(script)
+                conn.commit()
+                tables = cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+                                        "AND name NOT LIKE 'sqlite_%'").fetchone()[0]
+                conn.isolation_level = None
+                conn.execute("VACUUM")
+            finally:
+                conn.close()
+            return [f"Dropped {dropped} existing object(s).",
+                    f"Database overwritten from {source_name} ({tables} table(s)).",
+                    "Import completed successfully.", "Restart Bitpack to reload the new database."], "response"
+
+        def drop_all_tables(foreign_keys_off):
+            conn = sqlite3.connect(find_db())
+            try:
+                cursor = conn.cursor()
+                if foreign_keys_off:
+                    cursor.execute("PRAGMA foreign_keys = OFF")
+                names = [n for (n,) in cursor.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                                                      "AND name NOT LIKE 'sqlite_%'").fetchall()]
+                for name in names:
+                    cursor.execute(f'DROP TABLE IF EXISTS "{name}"')
+                conn.commit()
+            finally:
+                conn.close()
+            return names
+
+        # The Bitpack functions are called by name, exactly as in the w95dist Command Prompt.
+        def cmd_pxed():
+            create_pxed_data()                       # noqa: F821  (Bitpack function)
+            return ["data_pxed folder created."], "response"
+
+        def cmd_assets():
+            create_bitpack_assets()                  # noqa: F821  (Bitpack function)
+            return ["Bitpack assets folder created."], "response"
+
+        def cmd_dda():
+            create_recreate_data()                   # noqa: F821  (Bitpack function)
+            return ["data_dda folder created."], "response"
+
+        def cmd_data_script():
+            data_folder_creation_script()            # noqa: F821  (Bitpack function)
+            return ["recreate_data.py script created."], "response"
+
+        def is_dda_admin():
+            try:
+                return ddapointer == 9900            # noqa: F821  (Bitpack variable, as in the w95dist help)
+            except NameError:
+                return False
+
+        def cmd_mail():
+            set_flag("m95ec", "True")
+            return ["The registered mail client has been activated.",
+                    "Mail client configuration executed successfully."], "response"
+
+        def cmd_admin():
+            setup_database_ALL()                     # noqa: F821  (Bitpack function)
+            set_flag("exec_admin_sql", "1")
+            return ["The admin database client has been created.", "Access level: ADMINISTRATOR",
+                    "Admin rights granted successfully."], "response"
+
+        def cmd_purge():
+            names = drop_all_tables(foreign_keys_off=False)
+            return [f"All tables have been dropped ({len(names)}).", "Purge completed successfully."], "response"
+
+        def cmd_flush():
+            names = drop_all_tables(foreign_keys_off=True)
+            return [f"All tables have been dropped ({len(names)}).", "Flush completed successfully."], "response"
+
+        def cmd_splash(enabled):
+            def run():
+                conn = sqlite3.connect(find_db())
+                try:
+                    conn.execute("UPDATE splash_img SET enabled = ?", (1 if enabled else 0,))
+                    conn.commit()
+                finally:
+                    conn.close()
+                return [f"Splash images {'enabled' if enabled else 'disabled'}."], "response"
+            return run
+
+        def cmd_sqlms():
+            set_flag("sqlms", "00 11 45 32 01 83 57 90 xx")
+            return ["SQL Management Studio environment variable created."], "response"
+
+        WIPE = "This DELETES every table of Config/dbo_bitpack.db (accounts, settings, logs...)."
+        EXEC = [  # command, help, administrator only, warning before it runs, action
+            ("exec class mail_client:95", "Bitpack Mail Express client activation", False, None, cmd_mail),
+            ("exec dbo_bitpack --export", "export the database to Config/init.bpk95", False, None,
+             lambda: export_db("init.bpk95")),
+            ("exec dbo_bitpack --export --sql", "export the database as SQL to Config/init.sql", False, None,
+             lambda: export_db("init.sql")),
+            ("exec dbo_bitpack --import", "rebuild the database from Config/init.bpk95", False,
+             "The current database is REPLACED by Config/init.bpk95.", lambda: import_db("init.bpk95")),
+            ("exec dbo_bitpack --import --sql", "rebuild the database from Config/init.sql", False,
+             "The current database is REPLACED by Config/init.sql.", lambda: import_db("init.sql")),
+            ("exec recreate_data_pxed", "create the data_pxed folder for the pixel art account", False, None,
+             cmd_pxed),
+            ("exec bitpack_assets", "create the Bitpack assets folder", False, None,
+             cmd_assets),
+            ("exec sql_management_studio_variable", "create the SQL Management Studio environment variable", False,
+             None, cmd_sqlms),
+            ("exec bitpack_splash_image:0", "disable the splash images", False, None, cmd_splash(False)),
+            ("exec bitpack_splash_image:1", "enable the splash images", False, None, cmd_splash(True)),
+            ("exec dbo_bitpack --admin", "create the admin database for Bitpack", True, None, cmd_admin),
+            ("exec dbo_bitpack --purge", "delete every table (foreign keys on)", True, WIPE, cmd_purge),
+            ("exec dbo_bitpack --flush", "delete every table (PRAGMA foreign_keys = OFF)", True, WIPE, cmd_flush),
+            ("exec recreate_data_dda", "create the data_dda folder for the dda account", True, None,
+             cmd_dda),
+            ("exec recreate_data_script", "create the recreate_data.py script for the data folder", True, None,
+             cmd_data_script),
+        ]
+
+        def precheck(entry):
+            """Problems found before the Y/N question (so a missing file is reported at once)."""
+            if entry[0].startswith("exec dbo_bitpack --import"):
+                name = "init.sql" if entry[0].endswith("--sql") else "init.bpk95"
+                if not os.path.isfile(os.path.join(os.path.dirname(find_db()), name)):
+                    export = "exec dbo_bitpack --export" + (" --sql" if name.endswith(".sql") else "")
+                    return [f"Error: Config/{name} not found.", f"Run '{export}' first."]
+            return None
+
+        def admin_visible():
+            """help / Tab show the administrator commands: admin=True, or after `exec dbo_bitpack --admin`."""
+            if admin is not None:
+                if admin:
+                    return True
+            elif is_dda_admin():
+                return True
+            path = find_db()
+            if not os.path.isfile(path):                     # never create an empty database just to look
+                return False
+            try:
+                conn = sqlite3.connect(path, timeout=3)
+                try:
+                    row = conn.execute("SELECT value FROM app_flags WHERE key='exec_admin_sql'").fetchone()
+                finally:
+                    conn.close()
+                return bool(row) and str(row[0]) == "1"
+            except sqlite3.Error:
+                return False
+
+        def find_exec(command):
+            normal = " ".join(command.lower().split())
+            return next((entry for entry in EXEC if entry[0] == normal), None)
+
+        # ----- widgets ---------------------------------------------------------------------------------------
 
         def w95_button(parent, text, command, width=None):
             button = tk.Button(parent, text=text, command=command, font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
@@ -81887,9 +82679,9 @@ if shellvar == 1996:
             def __init__(self):
                 super().__init__()
                 self.title(APP)
-                x = max(0, (self.winfo_screenwidth() - 760) // 2)
-                y = max(0, (self.winfo_screenheight() - 520) // 2)
-                self.geometry(f"760x520+{x}+{y}")
+                x = max(0, (self.winfo_screenwidth() - 800) // 2)
+                y = max(0, (self.winfo_screenheight() - 540) // 2)
+                self.geometry(f"800x540+{x}+{y}")
                 self.minsize(480, 300)
                 self.configure(bg=FACE)
                 if CUSTOM_TITLE_BAR:
@@ -81900,7 +82692,10 @@ if shellvar == 1996:
                 self.history = []
                 self.history_index = 0
                 self.busy = False
+                self.process = None
+                self.pending = None                              # an exec command waiting for Y / N
                 self.count = 0
+                self.cwd = os.getcwd()                           # the terminal's own folder (never os.chdir)
                 self.var_size = tk.StringVar(value="8 x 14")
                 self.console_font = tkfont.Font(self, family="Lucida Console" if IS_WINDOWS else "Courier New", size=10)
 
@@ -81908,8 +82703,9 @@ if shellvar == 1996:
                 self._build_toolbar()
                 self._build_statusbar()
                 self._build_console()
+                self.update_level()
                 self._banner()
-                self.protocol("WM_DELETE_WINDOW", self.destroy)
+                self.protocol("WM_DELETE_WINDOW", self.close)
                 if CUSTOM_TITLE_BAR:
                     self.after(10, self._enable_custom_frame)
                 self.after(50, self.console.focus_set)
@@ -81926,8 +82722,7 @@ if shellvar == 1996:
                 icon.create_text(5, 9, text="C:", fill=WHITE, font=("MS Sans Serif", 5, "bold"), anchor="w")
                 icon.pack(side="left", padx=(2, 3))
                 self.caption_icon = icon
-                self.caption_title = tk.Label(self.caption, text=f"MS-DOS Prompt - {APP}", font=FONT_BOLD, bg=NAVY,
-                                              fg=WHITE, anchor="w")
+                self.caption_title = tk.Label(self.caption, text=f"BPK-DOS Prompt - {APP}", font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
                 self.caption_title.pack(side="left", fill="x", expand=True)
                 marlett = "Marlett" in tkfont.families(self)
                 self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
@@ -81941,7 +82736,7 @@ if shellvar == 1996:
                                      fg=BLACK, activebackground=FACE, relief="raised", bd=2, highlightthickness=0,
                                      takefocus=0)
 
-                caption_button("close", self.destroy).pack(side="right", padx=(2, 2))
+                caption_button("close", self.close).pack(side="right", padx=(2, 2))
                 self.btn_max = caption_button("max", self.toggle_maximize)
                 self.btn_max.pack(side="right")
                 caption_button("min", self.minimize).pack(side="right")
@@ -81952,6 +82747,11 @@ if shellvar == 1996:
                 self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
                 self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
                 self.bind("<Map>", self._on_map)
+
+            def update_level(self):
+                visible = admin_visible()
+                self.caption_title.config(text=f"BPK-DOS Prompt - {APP}" + ("  [Administrator]" if visible else ""))
+                self.status_level.config(text="Administrator" if visible else "User")
 
             def _set_caption_active(self, active):
                 for widget in (self.caption, self.caption_title, self.caption_icon):
@@ -82022,7 +82822,7 @@ if shellvar == 1996:
                     x0, y0, width, height = self._resize_origin
                     self.geometry(f"{max(480, width + event.x_root - x0)}x{max(300, height + event.y_root - y0)}")
 
-            # ----- layout (like the MS-DOS Prompt toolbar of Windows 95) -------------------------------
+            # ----- layout -----------------------------------------------------------------------------
 
             def _build_toolbar(self):
                 bar = tk.Frame(self, bg=FACE, bd=1, relief="raised")
@@ -82034,9 +82834,9 @@ if shellvar == 1996:
                             width=7, anchor="w")
                 menu["menu"].config(font=FONT, bg=FACE, activebackground=NAVY, activeforeground=WHITE)
                 menu.pack(side="left", padx=(0, 6))
-                for entry in (("Copy", self.copy), ("Paste", self.paste), None, ("Clear", self.clear), None,
-                              ("Commands", lambda: self.run_built_in("help")), ("Log", lambda: self.run_built_in("log")),
-                              ("History", lambda: self.run_built_in("history"))):
+                for entry in (("Copy", self.copy), ("Paste", self.paste), None, ("Clear", self.clear), ("Stop", self.stop),
+                              None, ("Commands", lambda: self.typed("help")), ("Log", lambda: self.typed("log")),
+                              ("History", lambda: self.typed("history"))):
                     if entry is None:
                         tk.Frame(inner, width=2, height=22, bd=1, relief="sunken", bg=FACE).pack(side="left", padx=4)
                     else:
@@ -82054,11 +82854,14 @@ if shellvar == 1996:
                 grip.pack(side="right", anchor="se")
                 grip.bind("<ButtonPress-1>", self._grip_press)
                 grip.bind("<B1-Motion>", self._grip_drag)
+                self.status_level = tk.Label(bar, text="User", font=FONT, bg=FACE,
+                                             anchor="w", bd=1, relief="sunken", padx=4, width=12)
+                self.status_level.pack(side="right", padx=1)
                 self.status_count = tk.Label(bar, text="0 command(s)", font=FONT, bg=FACE, anchor="w", bd=1,
-                                             relief="sunken", padx=4, width=16)
+                                             relief="sunken", padx=4, width=14)
                 self.status_count.pack(side="right", padx=1)
-                self.status = tk.Label(bar, text=store.where(), font=FONT, bg=FACE, anchor="w",
-                                       bd=1, relief="sunken", padx=4)
+                self.status = tk.Label(bar, text=store.where(), font=FONT, bg=FACE, anchor="w", bd=1, relief="sunken",
+                                       padx=4)
                 self.status.pack(side="left", fill="x", expand=True, padx=1)
 
             def _build_console(self):
@@ -82072,38 +82875,46 @@ if shellvar == 1996:
                 self.console.config(yscrollcommand=scroll.set)
                 scroll.pack(side="right", fill="y")
                 self.console.pack(side="left", fill="both", expand=True)
-                self.console.tag_config("response", foreground=WHITE)
-                self.console.tag_config("error", foreground="#ff5555")
-                self.console.tag_config("info", foreground="#55ffff")
-                self.console.bind("<Key>", self._key)
-                self.console.bind("<Return>", self._enter)
-                self.console.bind("<KP_Enter>", self._enter)
-                self.console.bind("<BackSpace>", self._backspace)
-                self.console.bind("<Up>", lambda _e: self._recall(-1))
-                self.console.bind("<Down>", lambda _e: self._recall(1))
-                self.console.bind("<Tab>", self._complete)
-                self.console.bind("<Home>", lambda _e: (self.console.mark_set("insert", "input"), "break")[1])
-                self.console.bind("<Escape>", lambda _e: (self._set_input(""), "break")[1])
-                self.console.bind("<Control-c>", lambda _e: (self.copy(), "break")[1])
-                self.console.bind("<Control-v>", lambda _e: (self.paste(), "break")[1])
-                self.console.bind("<Control-l>", lambda _e: (self.clear(), "break")[1])
-                self.console.bind("<<Paste>>", lambda _e: (self.paste(), "break")[1])
-                self.console.bind("<<Cut>>", lambda _e: (self.copy(), "break")[1])
-                self.console.bind("<Button-3>", self._context_menu)
+                for tag, color in (("response", WHITE), ("error", "#ff5555"), ("info", "#55ffff"),
+                                   ("warning", "#ffff55"), ("admin", "#ff55ff")):
+                    self.console.tag_config(tag, foreground=color)
+                c = self.console
+                c.bind("<Key>", self._key)
+                c.bind("<Return>", self._enter)
+                c.bind("<KP_Enter>", self._enter)
+                c.bind("<BackSpace>", self._backspace)
+                c.bind("<Up>", lambda _e: self._recall(-1))
+                c.bind("<Down>", lambda _e: self._recall(1))
+                c.bind("<Tab>", self._complete)
+                c.bind("<Home>", lambda _e: (c.mark_set("insert", "input"), "break")[1])
+                c.bind("<Escape>", lambda _e: (self._set_input(""), "break")[1])
+                c.bind("<Control-c>", lambda _e: (self.ctrl_c(), "break")[1])
+                c.bind("<Control-v>", lambda _e: (self.paste(), "break")[1])
+                c.bind("<Control-l>", lambda _e: (self.clear(), "break")[1])
+                c.bind("<<Paste>>", lambda _e: (self.paste(), "break")[1])
+                c.bind("<<Cut>>", lambda _e: (self.copy(), "break")[1])
+                c.bind("<Button-3>", self._context_menu)
                 self.set_font()
 
             def set_font(self):
                 size = {"7 x 12": 8, "8 x 14": 10, "10 x 18": 13, "12 x 22": 16}[self.var_size.get()]
                 self.console_font.config(size=size)
 
-            # ----- console mechanics: only the text after the prompt can be edited -------------------------
+            # ----- console mechanics -------------------------------------------------------------------------
 
             def write(self, text, tag=None):
                 self.console.insert("end", text, tag or ())
                 self.console.see("end")
 
+            def lines(self, texts, tag="response"):
+                for text in texts:
+                    self.write(text + "\n", tag)
+
             def prompt(self):
-                self.write(prompt_text())
+                if self.pending:
+                    self.write("Continue (Y/N)? ", "warning")
+                else:
+                    self.write(self.cwd + ">")
                 self.console.mark_set("input", "end-1c")
                 self.console.mark_gravity("input", "left")
                 self.console.mark_set("insert", "end-1c")
@@ -82111,7 +82922,10 @@ if shellvar == 1996:
 
             def _banner(self):
                 self.write(f"Bitpack {APP} [Version 4.00.950]\n", "info")
-                self.write("(C)Copyright Tudor Marmureanu. Type HELP for the list of commands.\n\n", "info")
+                self.write("(C)Copyright Tudor Marmureanu. Type HELP for the list of commands.\n", "info")
+                if admin_visible():
+                    self.write("Access level: ADMINISTRATOR\n", "admin")
+                self.write("\n")
                 self.prompt()
 
             def current_input(self):
@@ -82125,17 +82939,17 @@ if shellvar == 1996:
 
             def _key(self, event):
                 if self.busy:
-                    return "break" if event.keysym not in ("c", "C") or not event.state & 0x4 else None
-                if event.state & 0x4:                                   # Ctrl+... handled by their own bindings
+                    return None if (event.state & 0x4 and event.keysym.lower() == "c") else "break"
+                if event.state & 0x4:
                     return None
                 if event.keysym in ("Left", "Right", "End", "Prior", "Next", "Shift_L", "Shift_R", "Control_L",
                                     "Control_R", "Alt_L", "Alt_R"):
                     if event.keysym == "Left" and self.console.compare("insert", "<=", "input"):
                         return "break"
                     return None
-                if self.console.compare("insert", "<", "input"):        # typing above the prompt goes to the end
+                if self.console.compare("insert", "<", "input"):
                     self.console.mark_set("insert", "end-1c")
-                try:                                                    # typing over a selection in the old output
+                try:
                     if self.console.compare("sel.first", "<", "input"):
                         self.console.tag_remove("sel", "1.0", "end")
                 except tk.TclError:
@@ -82156,110 +82970,317 @@ if shellvar == 1996:
                 return None
 
             def _recall(self, direction):
-                if self.busy or not self.history:
+                if self.busy or not self.history or self.pending:
                     return "break"
                 self.history_index = max(0, min(len(self.history), self.history_index + direction))
                 self._set_input(self.history[self.history_index] if self.history_index < len(self.history) else "")
                 return "break"
 
+            def names(self):
+                built_in = ["help", "cls", "clear", "dir", "ls", "cd", "history", "log", "ver", "exit", "quit"]
+                visible = admin_visible()
+                exec_names = [e[0] for e in EXEC if visible or not e[2]]
+                return sorted(set(messages) | set(built_in) | set(exec_names))
+
             def _complete(self, _event):
-                if self.busy:
+                if self.busy or self.pending:
                     return "break"
                 typed = self.current_input()
-                names = sorted(set(messages) | set(BUILT_IN))
-                matches = [n for n in names if n.lower().startswith(typed.lower())] if typed else []
+                matches = [n for n in self.names() if n.lower().startswith(typed.lower())] if typed else []
                 if len(matches) == 1:
                     self._set_input(matches[0])
                 elif len(matches) > 1:
                     common = os.path.commonprefix([m.lower() for m in matches])
-                    self.write("\n" + "    ".join(matches) + "\n", "info")
+                    self.write("\n" + "\n".join("  " + m for m in matches) + "\n", "info")
                     self.prompt()
                     self._set_input(matches[0][:len(common)] if len(common) > len(typed) else typed)
                 else:
                     self.bell()
                 return "break"
 
-            def _enter(self, _event):
+            def typed(self, command):
+                """Run a command as if it had been typed (toolbar buttons)."""
+                if self.busy or self.pending:
+                    return
+                self._set_input(command)
+                self._enter()
+
+            # ----- running a command ---------------------------------------------------------------------------
+
+            def finish(self, command, text, tag="response", log=True):
+                """End of a command: show its lines, log it, new prompt."""
+                if text:
+                    self.lines(text if isinstance(text, list) else [text], tag)
+                self.write("\n")
+                if log:
+                    store.add(command, "\n".join(text) if isinstance(text, list) else (text or ""), self.cwd)
+                    self.count += 1
+                    self.status_count.config(text=f"{self.count} command(s)")
+                self.status.config(text=store.where())
+                self.busy = False
+                self.prompt()
+
+            def _enter(self, _event=None):
                 if self.busy:
                     return "break"
                 command = self.current_input().strip()
                 self.write("\n")
+                if self.pending:                                       # answering Continue (Y/N)?
+                    entry, self.pending = self.pending, None
+                    if command.upper() in ("Y", "YES", "D", "DA"):
+                        self.run_exec(entry)
+                    else:
+                        self.finish(entry[0], "Cancelled.", "info", log=False)
+                    return "break"
                 if not command:
                     self.prompt()
                     return "break"
                 if not self.history or self.history[-1] != command:
                     self.history.append(command)
                 self.history_index = len(self.history)
-                word, _space, argument = command.lower().partition(" ")
-                if command.lower() in BUILT_IN or (word == "log" and argument.strip().isdigit()):
-                    self.run_built_in(word, echoed=True, argument=argument.strip())
-                    return "break"
-                self.busy = True
-                self.status.config(text=f"Processing: {command}")
-                self._spin(command, 0, random.randint(1000, 3000))      # the simulated delay, without freezing
+                lower = command.lower()
+                word, _space, argument = lower.partition(" ")
+                if lower in ("help", "cls", "clear", "history", "ver", "exit", "quit", "log") or \
+                        (word == "log" and argument.strip().isdigit()):
+                    self.built_in(word, argument.strip())
+                elif word in ("dir", "ls") and not argument.strip().startswith(("/", "-")):
+                    self.dir(command, command.strip()[len(word):].strip())
+                elif word == "cd" or word == "chdir" or lower.startswith("cd\\") or lower.startswith("cd.") or \
+                        re.fullmatch(r"[a-z]:", lower):
+                    self.cd(command)
+                elif command in messages:
+                    self.busy = True
+                    self.status.config(text=f"Processing: {command}")
+                    self._spin(command, 0, random.randint(1000, 3000))
+                elif lower.startswith("exec "):
+                    entry = find_exec(command)
+                    if entry is None:
+                        self.finish(command, f"Unknown exec command: {command}  (type HELP)", "error")
+                    elif precheck(entry):
+                        self.finish(command, precheck(entry), "error")
+                    elif entry[3]:
+                        self.lines(["WARNING: " + entry[3]], "warning")
+                        self.pending = entry
+                        self.prompt()
+                    else:
+                        self.run_exec(entry)
+                else:
+                    self.run_system(command)
                 return "break"
 
             def _spin(self, command, step, remaining):
+                """The manual repair commands keep their simulated delay, without freezing the window."""
                 if step:
                     self.console.delete("end-2c", "end-1c")
                 if remaining <= 0:
-                    self.console.delete("spin_start", "end-1c") if "spin_start" in self.console.mark_names() else None
-                    response = process_command(command)
-                    self.count += 1
-                    self.status_count.config(text=f"{self.count} command(s)")
-                    tag = "error" if response.startswith(("Unknown command", "Failed")) else "response"
-                    self.write(f"{response}\n\n", tag)
-                    self.status.config(text=store.where())
-                    self.busy = False
-                    self.prompt()
+                    response = messages[command]
+                    if command == "launch_bitpack":
+                        try:
+                            launch_bitpack()
+                        except Exception as exc:
+                            response = f"Failed to launch Bitpack: {exc}"
+                    self.finish(command, response, "error" if response.startswith("Failed") else "response")
                     return
-                if step == 0:
-                    self.console.mark_set("spin_start", "end-1c")
-                    self.console.mark_gravity("spin_start", "left")
                 self.write("|/-\\"[step % 4])
                 self.after(120, lambda: self._spin(command, step + 1, remaining - 120))
 
-            # ----- built-in commands --------------------------------------------------------------------
+            def run_exec(self, entry):
+                self.busy = True
+                self.update_idletasks()
+                try:
+                    text, tag = entry[4]()
+                except NameError as exc:
+                    missing = getattr(exc, "name", None) or str(exc)
+                    text, tag = [f"This command is not available here ({missing} not found)."], "error"
+                except Exception as exc:
+                    text, tag = [f"Error: {exc}"], "error"
+                if entry[0].startswith(("exec dbo_bitpack --import", "exec dbo_bitpack --purge",
+                                        "exec dbo_bitpack --flush", "exec dbo_bitpack --admin")):
+                    store.refresh()                                    # the log table may be gone or back
+                    self.update_level()                                # --admin shows the admin commands
+                self.finish(entry[0], text, tag)
 
-            def run_built_in(self, name, echoed=False, argument=""):
-                if self.busy:
+            def run_system(self, command):
+                """Any other command runs in cmd (or the shell), in the terminal's folder, output streamed here."""
+                self.busy = True
+                self.status.config(text=f"Running: {command}   (Ctrl+C or Stop to end it)")
+                events, collected = queue.Queue(), []
+
+                def worker():
+                    try:
+                        options = {"shell": True, "cwd": self.cwd, "stdout": subprocess.PIPE,
+                                   "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL}
+                        if IS_WINDOWS:   # no console window pops up in the --noconsole exe
+                            options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
+                        else:
+                            options["start_new_session"] = True
+                        process = subprocess.Popen(command, **options)
+                        self.process = process
+                        for raw in iter(process.stdout.readline, b""):
+                            events.put(("out", raw.decode(CONSOLE_ENCODING, errors="replace").replace("\r", "")))
+                        process.wait()
+                        events.put(("done", process.returncode))
+                    except Exception as exc:
+                        events.put(("fail", str(exc)))
+
+                threading.Thread(target=worker, daemon=True).start()
+                self._drain(command, events, collected)
+
+            def _drain(self, command, events, collected):
+                try:
+                    while True:
+                        kind, value = events.get_nowait()
+                        if kind == "out":
+                            self.write(value)
+                            collected.append(value)
+                        else:
+                            self.process = None
+                            output = "".join(collected).strip()
+                            summary = (output[:OUTPUT_LIMIT] + ("\n..." if len(output) > OUTPUT_LIMIT else "")) or ""
+                            if kind == "fail":
+                                self.write(f"Error: {value}\n", "error")
+                                summary = f"Error: {value}"
+                            elif value not in (0, None):
+                                self.write(f"[exit code {value}]\n", "info")
+                                summary = (summary + "\n" if summary else "") + f"[exit code {value}]"
+                            store.add(command, summary, self.cwd)
+                            self.count += 1
+                            self.status_count.config(text=f"{self.count} command(s)")
+                            self.finish(command, None, log=False)
+                            return
+                except queue.Empty:
+                    pass
+                self.after(40, lambda: self._drain(command, events, collected))
+
+            def stop(self):
+                process = self.process
+                if process is None or process.poll() is not None:
                     return
-                if not echoed:                                           # from a toolbar button: show it typed
-                    self._set_input(name)
-                    self.write("\n")
+                try:
+                    if IS_WINDOWS:
+                        subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, capture_output=True,
+                                       creationflags=0x08000000)
+                    else:
+                        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                    self.write("^C\n", "warning")
+                except Exception as exc:
+                    self.write(f"\nCannot stop the command: {exc}\n", "error")
+
+            def ctrl_c(self):
+                try:
+                    self.console.get("sel.first", "sel.last")
+                    self.copy()                                        # text selected: copy it
+                except tk.TclError:
+                    if self.busy:
+                        self.stop()                                    # nothing selected: stop the command
+
+            # ----- built-in commands ----------------------------------------------------------------------------
+
+            def built_in(self, name, argument=""):
                 if name == "help":
-                    self.write("Commands:\n", "info")
-                    width = max((len(k) for k in messages), default=10) + 2
-                    for key in messages:
-                        self.write(f"  {key.ljust(width)}\n")
+                    width = 36
                     self.write("Built in:\n", "info")
-                    for key, text in BUILT_IN.items():
-                        self.write(f"  {key.ljust(width)}{text}\n")
-                    self.write("Up / Down = previous commands, Tab = complete, Esc = clear the line\n\n", "info")
-                elif name == "cls":
+                    for key, text in BUILT_IN:
+                        self.write(f"  {key:<{width}}{text}\n")
+                    self.write("Repair (shell/integrator):\n", "info")
+                    for key in messages:
+                        self.write(f"  {key}\n")
+                    self.write("Bitpack:\n", "info")
+                    for entry in EXEC:
+                        if not entry[2]:
+                            self.write(f"  {entry[0]:<{width}}{entry[1]}\n")
+                    if admin_visible():
+                        self.write("Administrator:\n", "admin")
+                        for entry in EXEC:
+                            if entry[2]:
+                                self.write(f"  {entry[0]:<{width}}{entry[1]}\n", "admin")
+                    self.write("Any other command runs in the system shell (ipconfig, ping, tasklist...).\n", "info")
+                    self.write("Up / Down = previous commands, Tab = complete, Esc = clear the line, "
+                               "Ctrl+C = copy / stop.\n\n", "info")
+                    self.prompt()
+                elif name in ("cls", "clear"):
                     self.console.delete("1.0", "end")
+                    self.prompt()
                 elif name == "history":
                     for number, command in enumerate(self.history, 1):
                         self.write(f"  {number:3}  {command}\n")
                     self.write("\n")
+                    self.prompt()
                 elif name == "log":
                     limit = max(1, min(1000, int(argument))) if argument.isdigit() else 30
-                    lines = store.last(limit)
-                    if lines:
-                        self.write(f"{store.where()}  - the last {len(lines)} shown\n", "info")
-                        for line in lines:
-                            self.write(line + "\n")
+                    rows = store.last(limit)
+                    if rows:
+                        self.write(f"{store.where()}  - the last {len(rows)} shown\n", "info")
+                        for row in rows:
+                            self.write(row + "\n")
                         self.write("\n")
                     else:
                         self.write(f"The log is empty. {store.where()}\n\n", "info")
+                    self.prompt()
                 elif name == "ver":
                     self.write(f"\nBitpack {APP} [Version 4.00.950]  {datetime.now():%d.%m.%Y %H:%M}\n\n", "info")
-                elif name == "exit":
-                    self.destroy()
-                    return
-                self.prompt()
+                    self.prompt()
+                elif name in ("exit", "quit"):
+                    self.close()
 
-            # ----- clipboard ----------------------------------------------------------------------------
+            def dir(self, command, argument):
+                folder = self._resolve(argument) if argument else self.cwd
+                if not os.path.isdir(folder):
+                    self.finish(command, "File Not Found", "error")
+                    return
+                out, dirs, files, total = [f" Directory of {folder}", ""], 0, 0, 0
+                try:
+                    names = sorted(os.listdir(folder), key=str.lower)
+                except OSError as exc:
+                    self.finish(command, f"Error: {exc}", "error")
+                    return
+                for name in names:
+                    path = os.path.join(folder, name)
+                    try:
+                        stamp = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d.%m.%Y  %H:%M")
+                    except OSError:
+                        stamp = " " * 17
+                    if os.path.isdir(path):
+                        out.append(f"{stamp}    <DIR>          {name}")
+                        dirs += 1
+                for name in names:
+                    path = os.path.join(folder, name)
+                    if os.path.isfile(path):
+                        try:
+                            size = os.path.getsize(path)
+                            stamp = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%d.%m.%Y  %H:%M")
+                        except OSError:
+                            size, stamp = 0, " " * 17
+                        out.append(f"{stamp}    {size:>14,} {name}".replace(",", "."))
+                        files += 1
+                        total += size
+                out += [f"{files:>16} File(s) {total:>14,} bytes".replace(",", "."), f"{dirs:>16} Dir(s)"]
+                self.finish(command, out, log=False)
+
+            def _resolve(self, text):
+                text = os.path.expandvars(os.path.expanduser(text.strip().strip('"')))
+                if text in ("\\", "/"):
+                    return os.path.splitdrive(self.cwd)[0] + os.sep
+                return os.path.normpath(text if os.path.isabs(text) else os.path.join(self.cwd, text))
+
+            def cd(self, command):
+                text = command.strip()
+                if re.fullmatch(r"[A-Za-z]:", text):                    # "D:" switches drive
+                    target = text.upper() + os.sep
+                else:
+                    rest = re.sub(r"^(cd|chdir)", "", text, flags=re.IGNORECASE).strip()
+                    rest = re.sub(r"^/d\s+", "", rest, flags=re.IGNORECASE)
+                    if not rest:
+                        self.finish(command, self.cwd, log=False)
+                        return
+                    target = self._resolve(rest)
+                if os.path.isdir(target):
+                    self.cwd = target
+                    self.finish(command, None, log=False)
+                else:
+                    self.finish(command, "The system cannot find the path specified.", "error")
+
+            # ----- clipboard, menu, closing -------------------------------------------------------------------------
 
             def copy(self):
                 try:
@@ -82276,7 +83297,7 @@ if shellvar == 1996:
                     text = self.clipboard_get()
                 except tk.TclError:
                     return
-                text = text.splitlines()[0] if text.splitlines() else ""     # one command line at a time
+                text = text.splitlines()[0] if text.splitlines() else ""      # one command line at a time
                 if self.console.compare("insert", "<", "input"):
                     self.console.mark_set("insert", "end-1c")
                 self.console.insert("insert", text)
@@ -82296,6 +83317,7 @@ if shellvar == 1996:
                 menu.add_command(label="Copy", command=self.copy)
                 menu.add_command(label="Paste", command=self.paste)
                 menu.add_separator()
+                menu.add_command(label="Stop Command", command=self.stop, state="normal" if self.process else "disabled")
                 menu.add_command(label="Clear Screen", command=self.clear)
                 self._menu = menu
                 try:
@@ -82303,13 +83325,18 @@ if shellvar == 1996:
                 finally:
                     menu.grab_release()
 
+            def close(self):
+                self.stop()
+                self.destroy()
+
         Shell95().mainloop()
 
 
     if __name__ == "__main__":
+        import sys as _sys
         ShellIntegrator95({"init": "The precondition has been initialized.", "powercli Bitpack -t": "On",
                            "1/0,12": "OK.", "0/0,8": "OK.", "restart_prec": "All values have been restored.",
-                           "launch_bitpack": "Launching Bitpack..."})
+                           "launch_bitpack": "Launching Bitpack..."}, "test", admin=True if "--admin" in _sys.argv else None)
     
     # # Commands and simulated messages
     # messages = {
@@ -126964,11 +127991,12 @@ Auto-negotiate: {auto_neg}"""
                 pass
                 
 if disktoolutilityvar == 99999999995555555555:
+    #dpi_report("4. disk tool")
     from random import randint
     from colorsys import hsv_to_rgb
-    from PyQt5 import QtGui, QtCore, QtWidgets
-    from PyQt5.QtWidgets import QApplication
-    from PyQt5.QtCore import QThread, pyqtSignal
+    # from PyQt5 import QtGui, QtCore, QtWidgets
+    # from PyQt5.QtWidgets import QApplication
+    # from PyQt5.QtCore import QThread, pyqtSignal
     import sqlite3, os as _os
     _db_path = "Config/dbo_bitpack.db"
     _has_key = True  # default
@@ -127099,925 +128127,2387 @@ if disktoolutilityvar == 99999999995555555555:
             # Rularea buclei principale
             validation.mainloop()
 
+    #!/usr/bin/env python3
+    # -*- coding: utf-8 -*-
+    """
+    Disk Visualizer 95 - disk space treemap, Windows 95 style (tkinter, no ttk, Pillow + numpy).
 
-    # Node.py
-    class Node:
-        '''A Node in a tree with an arbitrary number of children (an arbitrary
-        branching factor).'''
+    * Map a folder or a whole local drive (Map Drive lists only local disks and removable media; a network
+      drive is chosen by hand with "Network or Other Folder..."). The scan runs in the background (one pass, os.scandir), with progress
+      and Stop; Windows junctions and links are skipped, so nothing is counted twice.
+    * Squarified treemap: every file is a rectangle proportional to its size, folders are framed.
+      Colours by file type (with a legend and the total of every type) or random colours.
+    * Hover a tile: path, size and share in the status bar. Double-click: zoom into that folder;
+      Up / Backspace: back to the parent folder.
+    * The 100 largest files of the current view in the side panel.
+    * Right-click a file: Quick View, Show in Map, Copy Path, Rename, Move, Delete (the map is updated
+      without scanning again).
+    * Quick View opens every file inside the tool, without any Windows program: pictures (fit / 100% / zoom),
+      PDF pages, Word / Excel / PowerPoint text, text and code (UTF-8, UTF-16, ANSI), and a hex view plus
+      file details for everything else.
+    * Gradient and Borders, Screenshot (the map as PNG at full resolution).
 
-        def __init__(self):
-            '''Create a new node with an empty list of children.'''
-            self.children = []
+    In Bitpack: inside `if disktoolutilityvar == 99999999995555555555:` keep the product key part and
+    replace everything from `# Node.py` to the end of the block with the function below and the call:
 
-        def add(self, node):
-            '''Append node as a child to the parent self.'''
-            self.children.append(node)
+        DiskVisualizer95()
 
-        def getChildren(self):
-            '''Return the list of children of the parent self.'''
-            return self.children
-
-
-    # DirNode.py
-    class DirNode(Node):
-        '''DirNode extends the Node class. It creates a DirNode which represents
-        a directory's attributes within a filesystem such as directory path and
-        size.'''
-
-        def __init__(self, path, size):
-            '''Create a new DirNode with an empty list of children and attributes
-            specified by the parameters.'''
-            super(DirNode, self).__init__()
-            self.path = path            # The location of the file
-            self.size = size            # The size of the file (in KB)
-
-        def getPath(self):
-            '''Return the path of the DirNode self.'''
-            return self.path
-
-        def getSize(self):
-            '''Return the size of the DirNode self.'''
-            return self.size
-
-        def setSize(self, size):
-            '''Set the size of the DirNode self.'''
-            self.size = size
+    The PyQt5 imports at the top of the block are no longer needed. Nothing is stored in the database.
+    """
 
 
-    # FileNode.py
-    class FileNode(Node):
-        '''FileNode extends the Node class. It create a FileNode which represents
-        a file's attributes within a filesystem such as the filepath and size. It
-        also contains the following visual representation data: gradient colours
-        and mouse hover colours.'''
+    def DiskVisualizer95():
+        import heapq
+        import os
+        import shutil
+        import stat
+        import threading
+        import time
+        import tkinter as tk
+        import tkinter.font as tkfont
+        import zlib
+        from colorsys import hsv_to_rgb
+        from tkinter import filedialog, messagebox
 
-        def __init__(self, path, size):
-            '''Create a new FileNode with an empty list of children and attributes
-            specified by the parameters.'''
-            super(FileNode, self).__init__()
-            self.path = path            # The location of the file
-            self.size = size            # The size of the file (in KB)
-            self.tColour = None         # The top colour of the gradient
-            self.bColour = None         # The bottom colour of the gradient
-            self.hColour = None         # The mouse hover colour
-            # Set the colours for the FileNode
-            self.__setRandomColours()
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageTk
 
-        def __setRandomColours(self):
-            '''Set the gradient and mouse hover colours using an aesthetically
-            pleasing HSV colour palette. The same hue value is used for all colours
-            with varying degrees of saturation to generate different shades.'''
-            hue = randint(0, 360) / 360
-            self.tColour = tuple(i * 255 for i in hsv_to_rgb(hue, 0.6, 0.95))
-            self.bColour = tuple(i * 255 for i in hsv_to_rgb(hue, 1, 0.95))
-            self.hColour = tuple(i * 255 for i in hsv_to_rgb(hue, 0.05, 0.95))
+        IS_WINDOWS = os.name == "nt"
+        CUSTOM_TITLE_BAR = IS_WINDOWS
+        FACE, SHADOW, NAVY, WHITE, BLACK = "#c0c0c0", "#808080", "#000080", "#ffffff", "#000000"
+        FONT, FONT_BOLD = ("MS Sans Serif", 8), ("MS Sans Serif", 8, "bold")
+        APP = "Disk Visualizer"
+        MAP_BG = (64, 64, 64)
+        MIN_TILE = 2                  # folders smaller than this (px) are drawn as one block
+        TOP_FILES = 100
 
-        def getPath(self):
-            '''Return the path of the FileNode self.'''
-            return self.path
+        CATEGORIES = [  # name, colour, extensions
+            ("Documents", (64, 96, 255), "doc docx xls xlsx xlsm ppt pptx pdf txt rtf odt ods odp csv md htm html xml "
+                                         "json msg eml one vsd vsdx"),
+            ("Pictures", (0, 192, 0), "jpg jpeg png gif bmp tif tiff ico svg webp heic raw psd"),
+            ("Video", (255, 64, 64), "mp4 avi mkv mov wmv flv webm mpg mpeg m4v 3gp"),
+            ("Music", (255, 192, 0), "mp3 wav flac aac ogg wma m4a mid"),
+            ("Archives", (192, 64, 255), "zip rar 7z tar gz bz2 xz cab iso img vhd vhdx wim"),
+            ("Programs", (0, 192, 192), "exe msi bat cmd ps1 com scr appx msix"),
+            ("Code", (255, 128, 0), "py pyc pyd js ts java c cpp h cs php sql rb go rs vb jar class"),
+            ("System", (160, 160, 160), "dll sys tmp log dat ini db sqlite cache bak etl evtx mui cat pf lnk"),
+            ("Other", (224, 224, 160), ""),
+        ]
+        EXT_CATEGORY = {}
+        for _index, (_name, _colour, _exts) in enumerate(CATEGORIES):
+            for _ext in _exts.split():
+                EXT_CATEGORY["." + _ext] = _index
+        OTHER = len(CATEGORIES) - 1
+        BLOCK_COLOUR = (128, 128, 128)
 
-        def getSize(self):
-            '''Return the size of the FileNode self.'''
-            return self.size
+        def human(size):
+            for unit in ("bytes", "KB", "MB", "GB"):
+                if size < 1024 or unit == "GB":
+                    return f"{size:,.0f} {unit}" if unit == "bytes" else f"{size:,.1f} {unit}"
+                size /= 1024.0
+            return f"{size:,.1f} TB"
 
-        def getTColour(self):
-            '''Return the top colour of the FileNode self.'''
-            return self.tColour
+        # ----- the file tree ---------------------------------------------------------------------------------
 
-        def getBColour(self):
-            '''Return the bottom colour of the FileNode self.'''
-            return self.bColour
+        class Node:
+            __slots__ = ("name", "size", "children", "parent", "category", "files")
 
-        def getHColour(self):
-            '''Return the mouse hover colour of the FileNode self.'''
-            return self.hColour
+            def __init__(self, name, parent, size=0, children=None):
+                self.name = name
+                self.parent = parent
+                self.size = size
+                self.children = children            # None for a file, a list for a folder
+                self.files = 0
+                self.category = OTHER
+                if children is None:
+                    self.category = EXT_CATEGORY.get(os.path.splitext(name)[1].lower(), OTHER)
 
+            @property
+            def is_dir(self):
+                return self.children is not None
 
-    # TreemapBuilderThread - Thread pentru construirea treemap-ului
-    class TreemapBuilderThread(QThread):
-        '''Thread pentru construirea treemap-ului cu progress reporting.'''
-        
-        progress = pyqtSignal(int)  # Signal pentru progres (0-100)
-        finished_build = pyqtSignal(object)  # Signal pentru treemap finalizat
-        status_update = pyqtSignal(str)  # Signal pentru actualizarea statusului
-        
-        def __init__(self, directory):
-            super().__init__()
-            self.directory = directory
-            self.total_items = 0
-            self.processed_items = 0
-        
-        def run(self):
-            '''Rulează construirea treemap-ului în thread separat.'''
-            try:
-                self.status_update.emit("Scanning directory structure...")
-                self.progress.emit(0)
-                
-                # Primul pas: numărăm total items pentru progres
-                self.total_items = self._countItems(self.directory)
-                self.processed_items = 0
-                
-                self.status_update.emit("Building treemap...")
-                
-                # Al doilea pas: construim treemap-ul
-                treemap = Treemap()
-                treemap.root = self._buildTree(self.directory)
-                
-                self.progress.emit(100)
-                self.status_update.emit("Treemap completed!")
-                self.finished_build.emit(treemap)
-                
-            except Exception as e:
-                self.status_update.emit(f"Error: {str(e)}")
-                self.finished_build.emit(None)
-        
-        def _countItems(self, path):
-            '''Numără total items pentru calcul progres.'''
-            count = 0
-            try:
-                for item in os.listdir(path):
-                    item_path = os.path.join(path, item)
-                    count += 1
-                    if os.path.isdir(item_path):
+            def path(self):
+                parts, node = [], self
+                while node is not None:
+                    parts.append(node.name)
+                    node = node.parent
+                parts.reverse()
+                return os.path.join(*parts)
+
+        class Scanner(threading.Thread):
+            """One pass with os.scandir; links and Windows junctions are skipped."""
+
+            def __init__(self, folder):
+                super().__init__(daemon=True)
+                self.folder = folder
+                self.stop = False
+                self.files = 0
+                self.bytes = 0
+                self.current = folder
+                self.top_total = 1
+                self.top_done = 0
+                self.root = None
+                self.error = None
+
+            def run(self):
+                try:
+                    root = Node(os.path.abspath(self.folder), None, children=[])
+                    entries = self._entries(root.name)
+                    self.top_total = max(1, sum(1 for e in entries if self._is_real_dir(e)))
+                    self._fill(root, entries, top=True)
+                    self.root = root
+                except Exception as exc:                          # pragma: no cover - reported in the UI
+                    self.error = str(exc)
+
+            def _entries(self, path):
+                try:
+                    with os.scandir(path) as it:
+                        return list(it)
+                except OSError:
+                    return []
+
+            def _is_real_dir(self, entry):
+                try:
+                    if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                        return False
+                    if IS_WINDOWS:
+                        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+                        if attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:      # junctions (Documents and Settings...)
+                            return False
+                    return True
+                except OSError:
+                    return False
+
+            def _fill(self, node, entries, top=False):
+                total = files = 0
+                for entry in entries:
+                    if self.stop:
+                        break
+                    if self._is_real_dir(entry):
+                        child = Node(entry.name, node, children=[])
+                        self.current = entry.path
+                        self._fill(child, self._entries(entry.path))
+                        if top:
+                            self.top_done += 1
+                        if child.size > 0:
+                            node.children.append(child)
+                            total += child.size
+                            files += child.files
+                    else:
                         try:
-                            count += self._countItems(item_path)
-                        except (OSError, PermissionError):
-                            pass
-            except (OSError, PermissionError):
-                pass
-            return count
-        
-        def _buildTree(self, path):
-            '''Construiește recursiv structura de arbore din filesystem.'''
-            total_size = 0
-            dir_node = DirNode(path, 0)
-            
-            try:
-                for item in os.listdir(path):
-                    self.processed_items += 1
-                    progress_percent = int((self.processed_items / max(self.total_items, 1)) * 100)
-                    self.progress.emit(progress_percent)
-                    
-                    item_path = os.path.join(path, item)
-                    
-                    if os.path.isfile(item_path):
-                        try:
-                            size = os.path.getsize(item_path) / 1024  # Size in KB
-                            file_node = FileNode(item_path, size)
-                            dir_node.add(file_node)
-                            total_size += size
+                            if entry.is_symlink():
+                                continue
+                            size = entry.stat(follow_symlinks=False).st_size
                         except OSError:
                             continue
-                            
-                    elif os.path.isdir(item_path):
+                        if size > 0:
+                            node.children.append(Node(entry.name, node, size=size))
+                            total += size
+                            files += 1
+                            self.files += 1
+                            self.bytes += size
+                node.children.sort(key=lambda n: n.size, reverse=True)
+                node.size = total
+                node.files = files
+
+        def update_sizes(node, delta, file_delta):
+            """After a delete or a move: change the sizes up to the root and keep every list sorted."""
+            while node is not None:
+                node.size += delta
+                node.files += file_delta
+                if node.parent is not None:
+                    node.parent.children.sort(key=lambda n: n.size, reverse=True)
+                node = node.parent
+
+        # ----- squarified treemap --------------------------------------------------------------------------------
+
+        def squarify(sizes, x, y, w, h):
+            """Bruls' squarified layout. sizes: sorted biggest first, already scaled to w*h. Returns rectangles."""
+            rects = []
+            i, n = 0, len(sizes)
+            while i < n and w > 0 and h > 0:
+                short = min(w, h)
+                short2 = short * short
+                row_sum = sizes[i]
+                row_max = row_min = sizes[i]
+                worst = max(short2 * row_max / (row_sum * row_sum), (row_sum * row_sum) / (short2 * row_min))
+                j = i + 1
+                while j < n:
+                    s = sizes[j]
+                    new_sum = row_sum + s
+                    new_worst = max(short2 * row_max / (new_sum * new_sum), (new_sum * new_sum) / (short2 * s))
+                    if new_worst > worst:
+                        break
+                    row_sum, row_min, worst = new_sum, s, new_worst
+                    j += 1
+                if w >= h:
+                    strip = row_sum / h
+                    yy = y
+                    for s in sizes[i:j]:
+                        height = s / strip
+                        rects.append((x, yy, strip, height))
+                        yy += height
+                    x += strip
+                    w -= strip
+                else:
+                    strip = row_sum / w
+                    xx = x
+                    for s in sizes[i:j]:
+                        width = s / strip
+                        rects.append((xx, y, width, strip))
+                        xx += width
+                    y += strip
+                    h -= strip
+                i = j
+            return rects
+
+        # ----- widgets ---------------------------------------------------------------------------------------
+
+        def w95_button(parent, text, command, width=None):
+            button = tk.Button(parent, text=text, command=command, font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
+                               disabledforeground=SHADOW, relief="raised", bd=2, padx=6, pady=1, highlightthickness=0,
+                               takefocus=0)
+            if width:
+                button.config(width=width)
+            return button
+
+        def w95_menu(parent):
+            return tk.Menu(parent, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                           activeforeground=WHITE, disabledforeground=SHADOW, selectcolor=BLACK)
+
+        def ask_name(master, title, prompt, initial):
+            dialog = tk.Toplevel(master)
+            dialog.title(title)
+            dialog.configure(bg=FACE)
+            dialog.resizable(False, False)
+            dialog.transient(master)
+            result = {"value": None}
+            var = tk.StringVar(value=initial)
+            tk.Label(dialog, text=prompt, font=FONT, bg=FACE, anchor="w").pack(fill="x", padx=10, pady=(10, 2))
+            entry = tk.Entry(dialog, textvariable=var, font=FONT, bg=WHITE, relief="sunken", bd=2, width=48,
+                             highlightthickness=0)
+            entry.pack(padx=10)
+            stem = os.path.splitext(initial)[0]
+            entry.select_range(0, len(stem))
+            entry.focus_set()
+            buttons = tk.Frame(dialog, bg=FACE)
+            buttons.pack(fill="x", padx=10, pady=10)
+
+            def ok():
+                result["value"] = var.get().strip()
+                dialog.destroy()
+
+            w95_button(buttons, "Cancel", dialog.destroy, width=9).pack(side="right")
+            w95_button(buttons, "OK", ok, width=9).pack(side="right", padx=(0, 6))
+            dialog.bind("<Return>", lambda _e: ok())
+            dialog.bind("<Escape>", lambda _e: dialog.destroy())
+            dialog.update_idletasks()
+            dialog.geometry(f"+{master.winfo_rootx() + 120}+{master.winfo_rooty() + 120}")
+            dialog.grab_set()
+            master.wait_window(dialog)
+            return result["value"]
+
+        # ----- Quick View: every file opened inside the tool -----------------------------------------------------------
+
+        IMAGE_EXT = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".ico", ".webp", ".ppm", ".pcx", ".tga"}
+        TEXT_LIMIT = 2 * 1024 * 1024
+        HEX_CHUNK = 64 * 1024
+
+        def decode_text(data):
+            if data.startswith(b"\xef\xbb\xbf"):
+                return data[3:].decode("utf-8", "replace"), "UTF-8 (BOM)"
+            if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+                return data.decode("utf-16", "replace"), "UTF-16"
+            try:
+                return data.decode("utf-8"), "UTF-8"
+            except UnicodeDecodeError:
+                return data.decode("cp1250", "replace"), "ANSI (Windows-1250)"
+
+        def looks_like_text(data):
+            if not data:
+                return True
+            if data.startswith((b"\xff\xfe", b"\xfe\xff", b"\xef\xbb\xbf")):
+                return True
+            sample = data[:8192]
+            if b"\x00" in sample:
+                return False
+            control = sum(1 for b in sample if b < 9 or 13 < b < 32)
+            return control < len(sample) * 0.02
+
+        def hex_dump(data, offset):
+            lines = []
+            for i in range(0, len(data), 16):
+                row = data[i:i + 16]
+                hexpart = " ".join(f"{b:02X}" for b in row)
+                text = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
+                lines.append(f"{offset + i:08X}  {hexpart:<47}  {text}")
+            return "\n".join(lines)
+
+        class QuickView(tk.Toplevel):
+            """Shows a file inside Disk Visualizer: no external program is ever started."""
+
+            def __init__(self, master, path):
+                super().__init__(master)
+                self.path = path
+                self.name = os.path.basename(path)
+                self.ext = os.path.splitext(path)[1].lower()
+                self.title(f"Quick View - {self.name}")
+                self.configure(bg=FACE)
+                self.geometry(f"820x600+{master.winfo_rootx() + 60}+{master.winfo_rooty() + 40}")
+                self.minsize(420, 300)
+                self.transient(master)
+                self.zoom = None                     # None = fit to the window
+                self.picture = None
+                self.photo = None
+                self.pdf = None
+                self.page = 0
+                self.hex_offset = 0
+                self.mode = None
+                self._build()
+                self.kind = self._detect()
+                self.show("preview" if self.kind in ("image", "pdf", "office", "text") else "hex")
+                self.bind("<Escape>", lambda _e: self.close())
+                self.protocol("WM_DELETE_WINDOW", self.close)
+
+            # ----- layout ----------------------------------------------------------------------------
+
+            def _build(self):
+                bar = tk.Frame(self, bg=FACE, bd=1, relief="raised")
+                bar.pack(side="top", fill="x")
+                inner = tk.Frame(bar, bg=FACE)
+                inner.pack(side="left", padx=3, pady=3)
+                self.tabs = {}
+                for key, text in (("preview", "Preview"), ("text", "Text"), ("hex", "Hex"), ("info", "Info")):
+                    button = w95_button(inner, text, lambda k=key: self.show(k), width=8)
+                    button.pack(side="left", padx=1)
+                    self.tabs[key] = button
+                tk.Frame(inner, width=2, height=22, bd=1, relief="sunken", bg=FACE).pack(side="left", padx=4)
+                self.tools = tk.Frame(inner, bg=FACE)
+                self.tools.pack(side="left")
+                w95_button(bar, "Close", self.close, width=8).pack(side="right", padx=4)
+                self.status = tk.Label(self, text="", font=FONT, bg=FACE, anchor="w", bd=1, relief="sunken", padx=4)
+                self.status.pack(side="bottom", fill="x", padx=2, pady=2)
+                self.body = tk.Frame(self, bd=2, relief="sunken", bg=WHITE)
+                self.body.pack(side="top", fill="both", expand=True, padx=4, pady=(4, 0))
+
+            def _clear_body(self):
+                for widget in self.body.winfo_children():
+                    widget.destroy()
+                for widget in self.tools.winfo_children():
+                    widget.destroy()
+                self.unbind("<Configure>")
+
+            def _text_widget(self, wrap="word", font=("Courier New", 9)):
+                text = tk.Text(self.body, wrap=wrap, font=font, bg=WHITE, fg=BLACK, bd=0, highlightthickness=0,
+                               padx=6, pady=4, selectbackground=NAVY, selectforeground=WHITE)
+                vbar = tk.Scrollbar(self.body, orient="vertical", command=text.yview)
+                text.config(yscrollcommand=vbar.set)
+                vbar.pack(side="right", fill="y")
+                if wrap == "none":
+                    hbar = tk.Scrollbar(self.body, orient="horizontal", command=text.xview)
+                    text.config(xscrollcommand=hbar.set)
+                    hbar.pack(side="bottom", fill="x")
+                text.pack(side="left", fill="both", expand=True)
+                return text
+
+            def _read(self, limit, offset=0):
+                with open(self.path, "rb") as handle:
+                    handle.seek(offset)
+                    return handle.read(limit)
+
+            def _detect(self):
+                if self.ext in IMAGE_EXT:
+                    return "image"
+                if self.ext == ".pdf":
+                    return "pdf"
+                if self.ext in (".docx", ".xlsx", ".xlsm", ".pptx"):
+                    return "office"
+                try:
+                    head = self._read(8192)
+                except OSError:
+                    return "binary"
+                return "text" if looks_like_text(head) else "binary"
+
+            def show(self, mode):
+                self.mode = mode
+                for key, button in self.tabs.items():
+                    button.config(relief="sunken" if key == mode else "raised")
+                self._clear_body()
+                try:
+                    if mode == "preview":
+                        {"image": self._show_image, "pdf": self._show_pdf, "office": self._show_office,
+                         "text": self._show_text}.get(self.kind, self._show_no_preview)()
+                    elif mode == "text":
+                        self._show_text()
+                    elif mode == "hex":
+                        self._show_hex()
+                    else:
+                        self._show_info()
+                except Exception as exc:
+                    self._clear_body()
+                    text = self._text_widget()
+                    text.insert("1.0", f"This file cannot be shown here.\n\n{exc}")
+                    text.config(state="disabled")
+                    self.status.config(text="Use the Hex or Info view.")
+
+            # ----- views -----------------------------------------------------------------------------------
+
+            def _show_no_preview(self):
+                text = self._text_widget(font=FONT)
+                text.insert("1.0", f"There is no preview for this kind of file ({self.ext or 'no extension'}).\n\n"
+                                   "The Hex view shows its bytes, the Info view its details.")
+                text.config(state="disabled")
+                self.status.config(text=self.name)
+
+            def _show_text(self):
+                data = self._read(TEXT_LIMIT)
+                content, encoding = decode_text(data)
+                text = self._text_widget(wrap="none")
+                text.insert("1.0", content)
+                text.config(state="disabled")
+                size = os.path.getsize(self.path)
+                more = f" - first {human(TEXT_LIMIT)} of {human(size)} shown" if size > TEXT_LIMIT else ""
+                self.status.config(text=f"{content.count(chr(10)) + 1:,} lines, {encoding}{more}")
+
+            def _show_hex(self):
+                self.hex_offset = 0
+                self.hex_text = self._text_widget(wrap="none")
+                self._more_hex()
+                w95_button(self.tools, "Show More", self._more_hex, width=10).pack(side="left", padx=1)
+
+            def _more_hex(self):
+                data = self._read(HEX_CHUNK, self.hex_offset)
+                size = os.path.getsize(self.path)
+                if data:
+                    self.hex_text.config(state="normal")
+                    if self.hex_offset:
+                        self.hex_text.insert("end", "\n")
+                    self.hex_text.insert("end", hex_dump(data, self.hex_offset))
+                    self.hex_text.config(state="disabled")
+                    self.hex_offset += len(data)
+                self.status.config(text=f"{human(self.hex_offset)} of {human(size)} shown")
+
+            def _show_info(self):
+                info = os.stat(self.path)
+                rows = [("Name", self.name), ("Folder", os.path.dirname(self.path)),
+                        ("Size", f"{human(info.st_size)}  ({info.st_size:,} bytes)"),
+                        ("Type", CATEGORIES[EXT_CATEGORY.get(self.ext, OTHER)][0] + f"  ({self.ext or 'none'})"),
+                        ("Modified", time.strftime("%d.%m.%Y %H:%M:%S", time.localtime(info.st_mtime))),
+                        ("Created", time.strftime("%d.%m.%Y %H:%M:%S", time.localtime(info.st_ctime))),
+                        ("Accessed", time.strftime("%d.%m.%Y %H:%M:%S", time.localtime(info.st_atime)))]
+                if self.kind == "image":
+                    try:
+                        with Image.open(self.path) as picture:
+                            rows.append(("Picture", f"{picture.width} x {picture.height} px, {picture.mode}"))
+                    except Exception:
+                        pass
+                if self.kind == "pdf":
+                    try:
+                        import fitz
+                        with fitz.open(self.path) as document:
+                            rows.append(("Pages", str(document.page_count)))
+                    except Exception:
+                        pass
+                text = self._text_widget(font=FONT)
+                for label, value in rows:
+                    text.insert("end", f"{label}:", "label")
+                    text.insert("end", f"\t{value}\n")
+                text.tag_config("label", font=FONT_BOLD)
+                text.config(state="disabled", tabs=("90",))
+                self.status.config(text=self.path)
+
+            # pictures
+            def _show_image(self):
+                if self.picture is None:
+                    with Image.open(self.path) as picture:
+                        picture.seek(0)
+                        self.picture = picture.convert("RGBA") if picture.mode in ("P", "LA", "RGBA", "PA") \
+                            else picture.convert("RGB")
+                for text, command in (("Fit", lambda: self._set_zoom(None)), ("100%", lambda: self._set_zoom(1.0)),
+                                      ("+", lambda: self._set_zoom((self.zoom or self._fit()) * 1.25)),
+                                      ("-", lambda: self._set_zoom((self.zoom or self._fit()) / 1.25))):
+                    w95_button(self.tools, text, command, width=4).pack(side="left", padx=1)
+                self.canvas = tk.Canvas(self.body, bg="#808080", bd=0, highlightthickness=0)
+                vbar = tk.Scrollbar(self.body, orient="vertical", command=self.canvas.yview)
+                hbar = tk.Scrollbar(self.body, orient="horizontal", command=self.canvas.xview)
+                self.canvas.config(yscrollcommand=vbar.set, xscrollcommand=hbar.set)
+                vbar.pack(side="right", fill="y")
+                hbar.pack(side="bottom", fill="x")
+                self.canvas.pack(side="left", fill="both", expand=True)
+                self.canvas.bind("<Configure>", lambda _e: self.zoom is None and self._draw_picture())
+                self.canvas.bind("<Control-MouseWheel>", lambda e: self._set_zoom(
+                    (self.zoom or self._fit()) * (1.25 if e.delta > 0 else 0.8)))
+                self.after(30, self._draw_picture)
+
+            def _fit(self):
+                width, height = max(1, self.canvas.winfo_width() - 8), max(1, self.canvas.winfo_height() - 8)
+                return min(1.0, width / self.picture.width, height / self.picture.height)
+
+            def _set_zoom(self, zoom):
+                self.zoom = None if zoom is None else max(0.05, min(16.0, zoom))
+                self._draw_picture()
+
+            def _draw_picture(self):
+                if self.picture is None or not self.canvas.winfo_exists():
+                    return
+                zoom = self.zoom or self._fit()
+                size = (max(1, int(self.picture.width * zoom)), max(1, int(self.picture.height * zoom)))
+                shown = self.picture.resize(size, Image.LANCZOS if zoom < 1 else Image.NEAREST)
+                self.photo = ImageTk.PhotoImage(shown)
+                self.canvas.delete("all")
+                x = max(size[0] // 2 + 4, self.canvas.winfo_width() // 2)
+                y = max(size[1] // 2 + 4, self.canvas.winfo_height() // 2)
+                self.canvas.create_image(x, y, image=self.photo)
+                self.canvas.config(scrollregion=(0, 0, max(size[0] + 8, self.canvas.winfo_width()),
+                                                 max(size[1] + 8, self.canvas.winfo_height())))
+                self.status.config(text=f"{self.picture.width} x {self.picture.height} px   {zoom * 100:.0f}%")
+
+            # PDF
+            def _show_pdf(self):
+                import fitz
+                if self.pdf is None:
+                    self.pdf = fitz.open(self.path)
+                w95_button(self.tools, "< Previous", lambda: self._pdf_page(-1), width=9).pack(side="left", padx=1)
+                w95_button(self.tools, "Next >", lambda: self._pdf_page(1), width=9).pack(side="left", padx=1)
+                self.canvas = tk.Canvas(self.body, bg="#808080", bd=0, highlightthickness=0)
+                vbar = tk.Scrollbar(self.body, orient="vertical", command=self.canvas.yview)
+                self.canvas.config(yscrollcommand=vbar.set)
+                vbar.pack(side="right", fill="y")
+                self.canvas.pack(side="left", fill="both", expand=True)
+                self.canvas.bind("<Configure>", lambda _e: self._draw_pdf())
+                self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+                self.after(30, self._draw_pdf)
+
+            def _pdf_page(self, step):
+                if self.pdf is not None:
+                    self.page = max(0, min(self.pdf.page_count - 1, self.page + step))
+                    self._draw_pdf()
+                    self.canvas.yview_moveto(0)
+
+            def _draw_pdf(self):
+                import fitz
+                if self.pdf is None or not self.canvas.winfo_exists():
+                    return
+                page = self.pdf[self.page]
+                width = max(200, self.canvas.winfo_width() - 24)
+                zoom = width / page.rect.width
+                pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+                picture = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                self.photo = ImageTk.PhotoImage(picture)
+                self.canvas.delete("all")
+                self.canvas.create_image(12, 12, image=self.photo, anchor="nw")
+                self.canvas.config(scrollregion=(0, 0, pix.width + 24, pix.height + 24))
+                self.status.config(text=f"Page {self.page + 1} of {self.pdf.page_count}")
+
+            # Word, Excel, PowerPoint
+            def _show_office(self):
+                lines = []
+                if self.ext == ".docx":
+                    import docx
+                    document = docx.Document(self.path)
+                    for paragraph in document.paragraphs:
+                        lines.append(paragraph.text)
+                    for number, table in enumerate(document.tables, 1):
+                        lines += ["", f"--- Table {number} ---"]
+                        for row in table.rows:
+                            lines.append(" | ".join(cell.text.strip() for cell in row.cells))
+                    info = f"{len(document.paragraphs)} paragraphs, {len(document.tables)} tables"
+                elif self.ext in (".xlsx", ".xlsm"):
+                    import openpyxl
+                    workbook = openpyxl.load_workbook(self.path, read_only=True, data_only=True)
+                    for sheet in workbook.worksheets:
+                        lines += [f"=== {sheet.title} ===", ""]
+                        for count, row in enumerate(sheet.iter_rows(values_only=True)):
+                            if count >= 1000:
+                                lines.append("... (first 1000 rows shown)")
+                                break
+                            lines.append(" | ".join("" if v is None else str(v) for v in row))
+                        lines.append("")
+                    info = f"{len(workbook.sheetnames)} sheet(s)"
+                    workbook.close()
+                else:
+                    from pptx import Presentation
+                    presentation = Presentation(self.path)
+                    for number, slide in enumerate(presentation.slides, 1):
+                        lines += [f"=== Slide {number} ===", ""]
+                        for shape in slide.shapes:
+                            if shape.has_text_frame and shape.text_frame.text.strip():
+                                lines.append(shape.text_frame.text)
+                        lines.append("")
+                    info = f"{len(presentation.slides)} slide(s)"
+                text = self._text_widget(wrap="word", font=("Arial", 10))
+                text.insert("1.0", "\n".join(lines))
+                text.config(state="disabled")
+                self.status.config(text=info)
+
+            def close(self):
+                if self.pdf is not None:
+                    try:
+                        self.pdf.close()
+                    except Exception:
+                        pass
+                self.destroy()
+
+        # ----- main window -----------------------------------------------------------------------------------------
+
+        class App(tk.Tk):
+
+            def __init__(self):
+                super().__init__()
+                self.title(APP)
+                x = max(0, (self.winfo_screenwidth() - 1000) // 2)
+                y = max(0, (self.winfo_screenheight() - 660) // 2)
+                self.geometry(f"1000x660+{x}+{y}")
+                self.minsize(640, 400)
+                self.configure(bg=FACE)
+                if CUSTOM_TITLE_BAR:
+                    self.configure(bd=2, relief="raised")
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.root_node = None              # the scanned folder
+                self.view = None                   # the folder shown now (zoom)
+                self.scanner = None
+                self.file_rects = []               # (x0, y0, x1, y1, node) of the drawn tiles
+                self.buckets = {}
+                self.image = None
+                self.photo = None
+                self.hovered = None
+                self.selected = None
+                self.render_job = None
+                self.top_nodes = []
+                self.var_gradient = tk.BooleanVar(value=True)
+                self.var_borders = tk.BooleanVar(value=True)
+                self.var_colours = tk.StringVar(value="type")
+                self.var_panel = tk.BooleanVar(value=True)
+
+                self._build_titlebar()
+                self._build_menu()
+                self._build_toolbar()
+                self._build_statusbar()
+                self._build_body()
+                self.bind("<F5>", lambda _e: self.refresh())
+                self.bind("<BackSpace>", lambda _e: self.go_up())
+                self.bind("<Control-o>", lambda _e: self.map_folder())
+                self.bind("<Escape>", lambda _e: self.stop_scan())
+                self.bind("<Return>", lambda _e: self.selected is not None and not self.selected.is_dir
+                          and self.open_file(self.selected))
+                self.protocol("WM_DELETE_WINDOW", self.close)
+                if CUSTOM_TITLE_BAR:
+                    self.after(10, self._enable_custom_frame)
+                self.after(50, self.render)
+
+            # ----- Windows 95 frame -------------------------------------------------------------------------
+
+            def _build_titlebar(self):
+                self.caption = tk.Frame(self, bg=NAVY, height=20)
+                self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                self.caption.pack_propagate(False)
+                icon = tk.Canvas(self.caption, width=16, height=16, bg=NAVY, bd=0, highlightthickness=0)
+                icon.create_rectangle(1, 2, 9, 14, fill="#4060ff", outline=BLACK)
+                icon.create_rectangle(9, 2, 15, 8, fill="#00c000", outline=BLACK)
+                icon.create_rectangle(9, 8, 15, 14, fill="#ffc000", outline=BLACK)
+                icon.pack(side="left", padx=(2, 3))
+                self.caption_icon = icon
+                self.caption_title = tk.Label(self.caption, text=APP, font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
+                self.caption_title.pack(side="left", fill="x", expand=True)
+                marlett = "Marlett" in tkfont.families(self)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+
+                def caption_button(key, command):
+                    return tk.Button(self.caption, text=self.glyphs[key], command=command, font=glyph_font,
+                                     image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=FACE,
+                                     fg=BLACK, activebackground=FACE, relief="raised", bd=2, highlightthickness=0,
+                                     takefocus=0)
+
+                caption_button("close", self.close).pack(side="right", padx=(2, 2))
+                self.btn_max = caption_button("max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                caption_button("min", self.minimize).pack(side="right")
+                for widget in (self.caption, self.caption_title, icon):
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+                self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
+                self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
+                self.bind("<Map>", self._on_map)
+
+            def _set_caption_active(self, active):
+                for widget in (self.caption, self.caption_title, self.caption_icon):
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_title.config(fg=WHITE if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                if not IS_WINDOWS:
+                    return
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(self.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                self.withdraw()
+                self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+            def _on_map(self, event):
+                if event.widget is self and self.minimizing and self.state() == "normal":
+                    self.minimizing = False
+                    self.overrideredirect(True)
+                    self.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if CUSTOM_TITLE_BAR:
+                    self.minimizing = True
+                    self.overrideredirect(False)
+                self.iconify()
+
+            def toggle_maximize(self):
+                if self.maximized:
+                    self.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = self.geometry()
+                    x, y, width, height = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                    if IS_WINDOWS:
                         try:
-                            sub_dir = self._buildTree(item_path)
-                            if sub_dir and sub_dir.getSize() > 0:
-                                dir_node.add(sub_dir)
-                                total_size += sub_dir.getSize()
-                        except (OSError, PermissionError):
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    self.geometry(f"{width}x{height}+{x}+{y}")
+                self.maximized = not self.maximized
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self._drag = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+            def _caption_drag(self, event):
+                if CUSTOM_TITLE_BAR and not self.maximized:
+                    self.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
+
+            def _grip_press(self, event):
+                self._resize = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.geometry(f"{max(640, width + event.x_root - x0)}x{max(400, height + event.y_root - y0)}")
+
+            # ----- layout --------------------------------------------------------------------------------------
+
+            def _build_menu(self):
+                bar = tk.Frame(self, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    button = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=WHITE, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    button.pack(side="left")
+                    menu = w95_menu(button)
+                    button.config(menu=menu)
+                    return menu
+
+                menu = menubutton("File")
+                menu.add_command(label="Map Folder...", accelerator="Ctrl+O", command=self.map_folder)
+                self.menu_drives = w95_menu(menu)
+                menu.add_cascade(label="Map Drive", menu=self.menu_drives)
+                menu.add_command(label="Refresh", accelerator="F5", command=self.refresh)
+                menu.add_separator()
+                menu.add_command(label="Save Screenshot...", command=self.screenshot)
+                menu.add_separator()
+                menu.add_command(label="Exit", command=self.close)
+                self.menu_drives.config(postcommand=self._fill_drives)
+                menu = menubutton("View")
+                menu.add_command(label="Up One Folder", accelerator="Backspace", command=self.go_up)
+                menu.add_command(label="Back to Top", command=self.go_top)
+                menu.add_separator()
+                menu.add_radiobutton(label="Colours by File Type", value="type", variable=self.var_colours,
+                                     command=self.render)
+                menu.add_radiobutton(label="Random Colours", value="random", variable=self.var_colours,
+                                     command=self.render)
+                menu.add_separator()
+                menu.add_checkbutton(label="Gradient", variable=self.var_gradient, command=self.render)
+                menu.add_checkbutton(label="Borders", variable=self.var_borders, command=self.render)
+                menu.add_checkbutton(label="Side Panel", variable=self.var_panel, command=self._apply_panel)
+                menu = menubutton("Options")
+                menu.add_command(label="Stop Scan", accelerator="Esc", command=self.stop_scan)
+                menu.add_command(label="Clear Map", command=self.clear_map)
+                menu = menubutton("Help")
+                menu.add_command(label="About Disk Visualizer", command=self.about)
+
+            def _build_toolbar(self):
+                bar = tk.Frame(self, bg=FACE, bd=1, relief="raised")
+                bar.pack(side="top", fill="x")
+                inner = tk.Frame(bar, bg=FACE)
+                inner.pack(side="left", padx=3, pady=3)
+                for entry in (("Map Folder", self.map_folder), ("Refresh", self.refresh), None, ("Up", self.go_up),
+                              ("Top", self.go_top), None, ("Stop", self.stop_scan), None,
+                              ("Screenshot", self.screenshot)):
+                    if entry is None:
+                        tk.Frame(inner, width=2, height=22, bd=1, relief="sunken", bg=FACE).pack(side="left", padx=4)
+                    else:
+                        w95_button(inner, entry[0], entry[1]).pack(side="left", padx=1)
+                tk.Frame(inner, width=2, height=22, bd=1, relief="sunken", bg=FACE).pack(side="left", padx=4)
+                for text, var in (("Gradient", self.var_gradient), ("Borders", self.var_borders)):
+                    tk.Checkbutton(inner, text=text, variable=var, command=self.render, font=FONT, bg=FACE,
+                                   activebackground=FACE, selectcolor=WHITE, highlightthickness=0,
+                                   takefocus=0).pack(side="left", padx=2)
+                address = tk.Frame(self, bg=FACE)
+                address.pack(side="top", fill="x", padx=4, pady=(3, 0))
+                tk.Label(address, text="Address:", font=FONT, bg=FACE).pack(side="left", padx=(0, 4))
+                self.address = tk.Label(address, text="(no folder mapped)", font=FONT, bg=WHITE, fg=BLACK, anchor="w",
+                                        bd=2, relief="sunken", padx=4)
+                self.address.pack(side="left", fill="x", expand=True)
+
+            def _build_statusbar(self):
+                bar = tk.Frame(self, bg=FACE)
+                bar.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(bar, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=WHITE)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                holder = tk.Frame(bar, bd=1, relief="sunken", bg=FACE, width=160, height=18)
+                holder.pack(side="right", padx=1)
+                holder.pack_propagate(False)
+                self.progress = tk.Canvas(holder, bg=FACE, bd=0, highlightthickness=0, height=14)
+                self.progress.pack(fill="both", expand=True, padx=1, pady=1)
+                self.status_total = tk.Label(bar, text="", font=FONT, bg=FACE, anchor="w", bd=1, relief="sunken",
+                                             padx=4, width=30)
+                self.status_total.pack(side="right", padx=1)
+                self.status = tk.Label(bar, text="Please open a folder to map...", font=FONT, bg=FACE, anchor="w",
+                                       bd=1, relief="sunken", padx=4)
+                self.status.pack(side="left", fill="x", expand=True, padx=1)
+
+            def _build_body(self):
+                body = tk.Frame(self, bg=FACE)
+                body.pack(side="top", fill="both", expand=True, padx=4, pady=4)
+                self.panel = tk.Frame(body, bg=FACE, width=250)
+                self.panel.pack(side="right", fill="y", padx=(4, 0))
+                self.panel.pack_propagate(False)
+                legend = tk.LabelFrame(self.panel, text="File Types", font=FONT, bg=FACE, bd=2, relief="groove",
+                                       padx=4, pady=2)
+                legend.pack(side="top", fill="x")
+                self.legend_rows = []
+                for name, colour, _exts in CATEGORIES:
+                    row = tk.Frame(legend, bg=FACE)
+                    row.pack(fill="x")
+                    box = tk.Canvas(row, width=12, height=12, bg=FACE, bd=0, highlightthickness=0)
+                    box.create_rectangle(1, 1, 11, 11, fill="#%02x%02x%02x" % colour, outline=BLACK)
+                    box.pack(side="left", padx=(0, 4))
+                    tk.Label(row, text=name, font=FONT, bg=FACE, anchor="w", width=10).pack(side="left")
+                    value = tk.Label(row, text="", font=FONT, bg=FACE, anchor="e")
+                    value.pack(side="right", fill="x", expand=True)
+                    self.legend_rows.append(value)
+                group = tk.LabelFrame(self.panel, text=f"Largest Files (top {TOP_FILES})", font=FONT, bg=FACE, bd=2,
+                                      relief="groove", padx=2, pady=2)
+                group.pack(side="top", fill="both", expand=True, pady=(4, 0))
+                holder = tk.Frame(group, bd=2, relief="sunken", bg=WHITE)
+                holder.pack(fill="both", expand=True)
+                self.top_list = tk.Listbox(holder, font=("Courier New", 8), bd=0, highlightthickness=0,
+                                           activestyle="none", selectbackground=NAVY, selectforeground=WHITE,
+                                           exportselection=False)
+                scroll = tk.Scrollbar(holder, orient="vertical", command=self.top_list.yview)
+                self.top_list.config(yscrollcommand=scroll.set)
+                scroll.pack(side="right", fill="y")
+                self.top_list.pack(side="left", fill="both", expand=True)
+                self.top_list.bind("<<ListboxSelect>>", self._top_selected)
+                self.top_list.bind("<Double-Button-1>", lambda _e: self.selected and self.open_file(self.selected))
+                self.top_list.bind("<Return>", lambda _e: self.selected and self.open_file(self.selected))
+                self.top_list.bind("<Button-3>", self._top_menu)
+
+                frame = tk.Frame(body, bd=2, relief="sunken", bg=BLACK)
+                frame.pack(side="left", fill="both", expand=True)
+                self.canvas = tk.Canvas(frame, bg="#404040", bd=0, highlightthickness=0, cursor="crosshair")
+                self.canvas.pack(fill="both", expand=True)
+                self.canvas.bind("<Configure>", lambda _e: self.schedule_render())
+                self.canvas.bind("<Motion>", self._hover)
+                self.canvas.bind("<Leave>", lambda _e: self._set_hover(None))
+                self.canvas.bind("<Button-1>", self._click)
+                self.canvas.bind("<Double-Button-1>", self._zoom_in)
+                self.canvas.bind("<Button-3>", self._tile_menu)
+
+            def _apply_panel(self):
+                if self.var_panel.get():
+                    self.panel.pack(side="right", fill="y", padx=(4, 0), before=self.canvas.master)
+                else:
+                    self.panel.pack_forget()
+                self.schedule_render()
+
+            def local_drives(self, kernel32=None):
+                """Only local storage: fixed disks and removable media (USB sticks, cards). Network drives,
+                CD/DVD and RAM disks are left out. Windows is asked for the drive type, so no drive is touched
+                (a disconnected network drive cannot freeze the menu). Returns [(root, kind), ...]."""
+                if kernel32 is None:
+                    if not IS_WINDOWS:
+                        return [("/", "Local Disk")]
+                    import ctypes
+                    kernel32 = ctypes.windll.kernel32
+                DRIVE_REMOVABLE, DRIVE_FIXED = 2, 3
+                mask = kernel32.GetLogicalDrives()
+                drives = []
+                for number in range(26):
+                    if mask & (1 << number):
+                        root = f"{chr(65 + number)}:\\"
+                        kind = kernel32.GetDriveTypeW(root)
+                        if kind == DRIVE_FIXED:
+                            drives.append((root, "Local Disk"))
+                        elif kind == DRIVE_REMOVABLE:
+                            drives.append((root, "Removable"))
+                return drives
+
+            def _fill_drives(self):
+                self.menu_drives.delete(0, "end")
+                old_mode = None
+                if IS_WINDOWS:                      # no "There is no disk in the drive" box for an empty card reader
+                    try:
+                        import ctypes
+                        old_mode = ctypes.windll.kernel32.SetErrorMode(0x0001)
+                    except Exception:
+                        old_mode = None
+                try:
+                    for root, kind in self.local_drives():
+                        try:
+                            usage = shutil.disk_usage(root)
+                        except OSError:
+                            self.menu_drives.add_command(label=f"{root}   {kind}   (no disk)", state="disabled")
                             continue
-                            
-            except (OSError, PermissionError):
-                pass
-                
-            dir_node.setSize(total_size)
-            return dir_node
+                        label = f"{root}   {kind}   {human(usage.used)} used of {human(usage.total)}"
+                        self.menu_drives.add_command(label=label, command=lambda d=root: self.start_scan(d))
+                finally:
+                    if old_mode is not None:
+                        try:
+                            import ctypes
+                            ctypes.windll.kernel32.SetErrorMode(old_mode)
+                        except Exception:
+                            pass
+                self.menu_drives.add_separator()
+                self.menu_drives.add_command(label="Network or Other Folder...", command=self.map_folder)
 
+            # ----- scanning ------------------------------------------------------------------------------------
 
-    # Treemap class
-    class Treemap:
-        '''Treemap class for building filesystem visualization.'''
-        
-        def __init__(self):
-            self.root = None
-        
-        def getRoot(self):
-            '''Return the root node of the treemap.'''
-            return self.root
+            def map_folder(self):
+                folder = filedialog.askdirectory(title="Select a folder to map", parent=self,
+                                                 initialdir=self.root_node.name if self.root_node else None)
+                if folder:
+                    self.start_scan(folder)
 
+            def refresh(self):
+                if self.root_node is not None:
+                    self.start_scan(self.root_node.name, keep_view=self.view.path() if self.view else None)
 
-    # GUIWindow.py
-    class GUIWindow(QtWidgets.QMainWindow):
-        '''GUIWindow the extends the QtWidgets.QMainWindow class. It creates a
-        basic window that contains a MenuBar and a StatusBar, both of which are
-        modifiable. The window includes advanced functionality such as appearing in
-        the center of the screen binding of key and mouse events.'''
+            def start_scan(self, folder, keep_view=None):
+                self.stop_scan(quiet=True)
+                self.scanner = Scanner(folder)
+                self.scanner.keep_view = keep_view
+                self.scan_started = time.time()
+                self.scanner.start()
+                self.address.config(text=os.path.abspath(folder))
+                self._poll_scan()
 
-        def __init__(self, winTitle, winWidth, winHeight, winIcon=None):
-            '''Create a new GUIWindow with a specific window title, width, height
-            and window icon.'''
-            super(GUIWindow, self).__init__()
-            # Exceptions
-            self.__menuExistsException = Exception(
-                'The specified menu already exists!')
-            self.__menuNotFoundException = Exception(
-                'The specified menu was not found!')
-            # GUIWindow variables
-            self.__menubar = self.menuBar()         # Menu Bar
-            self.__menuDict = {}                    # Map of Menus for Menubar
-            self.__statusLabel = QtWidgets.QLabel()  # New Status label
-            self.__keyInputDict = {}                # Map of key events
-            self.__checkableActions = {}            # Map of checkable QActions
-            self.__mouseMoveEvents = []             # List of mouse move events
-            self.__mouseClickEvents = []            # List of mouse click events
-            self.__mouseReleaseEvents = []          # List of mouse release events
-            
-            # Progress bar pentru colțul din dreapta jos
-            self.__progressBar = QtWidgets.QProgressBar()
-            self.__progressBar.setVisible(False)
-            self.__progressBar.setFixedSize(200, 20)
-            
-            # Configure the window's properties
-            self.setGeometry(0, 0, winWidth, winHeight)
-            self.setMinimumSize(int(winWidth / 2), int(winHeight / 2))
-            self.setWindowTitle(winTitle)
-            if winIcon:  # Only set icon if provided
-                self.setWindowIcon(QtGui.QIcon(winIcon))
-            
-            # Bind the QLabel și progress bar to the Status Bar
-            self.statusBar().addWidget(self.__statusLabel, 1)
-            self.statusBar().addPermanentWidget(self.__progressBar)
-            
-            # Set the window to appear in the center of the screen
-            self.__centerOnScreen()
+            def stop_scan(self, quiet=False):
+                if self.scanner is not None and self.scanner.is_alive():
+                    self.scanner.stop = True
+                    if not quiet:
+                        self.status.config(text="Stopping...")
 
-        def showProgressBar(self):
-            '''Afișează progress bar-ul.'''
-            self.__progressBar.setVisible(True)
-            self.__progressBar.setValue(0)
-        
-        def hideProgressBar(self):
-            '''Ascunde progress bar-ul.'''
-            self.__progressBar.setVisible(False)
-        
-        def updateProgressBar(self, value):
-            '''Actualizează valoarea progress bar-ului.'''
-            self.__progressBar.setValue(value)
+            def _poll_scan(self):
+                scanner = self.scanner
+                if scanner is None:
+                    return
+                percent = int(100 * scanner.top_done / scanner.top_total)
+                self._draw_progress(percent)
+                if scanner.is_alive():
+                    current = scanner.current
+                    if len(current) > 70:
+                        current = "..." + current[-67:]
+                    self.status.config(text=f"Scanning {current}")
+                    self.status_total.config(text=f"{scanner.files:,} files, {human(scanner.bytes)}")
+                    self.after(120, self._poll_scan)
+                    return
+                self._draw_progress(None)
+                if scanner.error or scanner.root is None:
+                    self.status.config(text=f"Cannot map the folder: {scanner.error}")
+                    return
+                self.root_node = scanner.root
+                self.view = self.root_node
+                if scanner.keep_view:                                  # Refresh keeps the zoomed folder
+                    node = self.find(scanner.keep_view)
+                    if node is not None and node.is_dir:
+                        self.view = node
+                took = time.time() - self.scan_started
+                text = "Scan stopped - the map shows what was read so far." if scanner.stop else \
+                    f"Mapped in {took:.1f} s. Hover a tile for details, double-click to zoom into a folder."
+                self.scanner = None
+                self.status.config(text=text)
+                self.view_changed()
 
-        def keyPressEvent(self, event):
-            '''Handle and process all key press events.'''
-            eventKey = event.key()
-            if eventKey in self.__keyInputDict:
-                self.__keyInputDict[eventKey][0]()
+            def _draw_progress(self, percent):
+                canvas = self.progress
+                canvas.delete("all")
+                if percent is None:
+                    return
+                width, height = canvas.winfo_width(), canvas.winfo_height()
+                filled = int(width * percent / 100)
+                x = 1
+                while x + 6 <= filled:
+                    canvas.create_rectangle(x, 1, x + 6, height - 1, fill=NAVY, outline=NAVY)
+                    x += 8
 
-        def keyReleaseEvent(self, event):
-            '''Handle and process all key release events.'''
-            eventKey = event.key()
-            if eventKey in self.__keyInputDict:
-                self.__keyInputDict[eventKey][1]()
+            def find(self, path):
+                node = self.root_node
+                if node is None:
+                    return None
+                relative = os.path.relpath(path, node.name)
+                if relative == ".":
+                    return node
+                for part in relative.split(os.sep):
+                    if node is None or not node.is_dir:
+                        return None
+                    node = next((c for c in node.children if c.name == part), None)
+                return node
 
-        def mouseMoveEvent(self, event):
-            '''Handle and process all mouse movement events.'''
-            for func in self.__mouseMoveEvents:
-                func(event)
+            def ensure_folder(self, path):
+                """The folder node for `path` when it lies inside the map, created if it was not on the map
+                (an empty folder, or one made after the scan). None when the path is outside the map."""
+                node = self.root_node
+                if node is None:
+                    return None
+                relative = os.path.relpath(path, node.name)
+                if relative == ".":
+                    return node
+                if relative.startswith(".."):
+                    return None
+                for part in relative.split(os.sep):
+                    child = next((c for c in node.children if c.name == part), None)
+                    if child is None:
+                        child = Node(part, node, children=[])
+                        node.children.append(child)
+                    elif not child.is_dir:
+                        return None
+                    node = child
+                return node
 
-        def mousePressEvent(self, event):
-            '''Handle and process all mouse click events.'''
-            for func in self.__mouseClickEvents:
-                func(event)
+            # ----- views -------------------------------------------------------------------------------------
 
-        def mouseReleaseEvent(self, event):
-            '''Handle and process all mouse release events.'''
-            for func in self.__mouseReleaseEvents:
-                func(event)
+            def view_changed(self):
+                self.selected = None
+                self.address.config(text=self.view.path() if self.view else "(no folder mapped)")
+                self._fill_side_panel()
+                self.render()
 
-        def __centerOnScreen(self):
-            '''Move the position of the window so that it is positioned perfectly
-            in the center of the screen.'''
-            res = QtWidgets.QDesktopWidget().screenGeometry()
-            move_width = (res.width() / 2) - (self.frameSize().width() / 2)
-            move_height = (res.height() / 2) - (self.frameSize().height() / 2)
-            self.move(int(move_width), int(move_height))
+            def go_up(self):
+                if self.view is not None and self.view.parent is not None:
+                    self.view = self.view.parent
+                    self.view_changed()
 
-        def updateMouseEvents(self, moveEvents, clickEvents, releaseEvents):
-            '''Update the mouse event lists for movement, clicking and releasing as
-            specified by the events in the lists from the parameters.'''
-            self.__mouseMoveEvents = moveEvents
-            self.__mouseClickEvents = clickEvents
-            self.__mouseReleaseEvents = releaseEvents
+            def go_top(self):
+                if self.root_node is not None and self.view is not self.root_node:
+                    self.view = self.root_node
+                    self.view_changed()
 
-        def updateKeyBindings(self, keyBindings):
-            '''Change the current value of the keys and their events for keypress
-            and keyrelease to the ones specified by keyBindings.'''
-            self.__keyInputDict = keyBindings.copy()
+            def _zoom_in(self, event):
+                node = self._node_at(event.x, event.y)
+                if node is None:
+                    return
+                clicked = node
+                while node.parent is not None and node.parent is not self.view:     # the child folder of the view
+                    node = node.parent
+                if node.is_dir and node is not self.view:
+                    self.view = node
+                    self.view_changed()
+                elif not clicked.is_dir:
+                    self.open_file(clicked)                                        # a file of this folder: Quick View
 
-        def setStatusBar(self, statusText):
-            '''Change the current value of the StatusBar's text.'''
-            self.__statusLabel.setText(statusText)
+            def _fill_side_panel(self):
+                totals = [0] * len(CATEGORIES)
+                files = []
+                if self.view is not None:
+                    stack = [self.view]
+                    while stack:
+                        node = stack.pop()
+                        for child in node.children:
+                            if child.children is None:
+                                totals[child.category] += child.size
+                                files.append(child)
+                            else:
+                                stack.append(child)
+                whole = max(1, sum(totals))
+                for label, total in zip(self.legend_rows, totals):
+                    label.config(text=f"{human(total)}  {100 * total / whole:4.1f}%" if total else "-")
+                self.top_nodes = heapq.nlargest(TOP_FILES, files, key=lambda n: n.size)
+                self.top_list.delete(0, "end")
+                for node in self.top_nodes:
+                    self.top_list.insert("end", f"{human(node.size):>11}  {node.name}")
+                if self.view is not None:
+                    self.status_total.config(text=f"{self.view.files:,} files, {human(self.view.size)}")
 
-        def addMenu(self, menuTitle):
-            '''Add a new menu with a title specified by menuTitle to the window's
-            MenuBar.'''
-            # Check if menuTitle does not exist (prevent duplicates)
-            if menuTitle in self.__menuDict:
-                raise self.__menuExistsException
-            else:
-                self.__menuDict[menuTitle] = \
-                    self.__menubar.addMenu('&' + menuTitle)
+            # ----- drawing -------------------------------------------------------------------------------------
 
-        def addMenuItem(self, menuTitle, menuItemName, evtFunction=None):
-            '''Add a new menu item to an existing menu with a title specified by
-            menuTitle. Connect an event function to the menu item if the specified
-            value is not None.'''
-            # Check if menuTitle exists
-            if menuTitle in self.__menuDict:
-                # Create the menu item
-                menuItem = QtWidgets.QAction('&' + menuItemName, self)
-                if evtFunction:
-                    menuItem.triggered.connect(lambda: evtFunction())
-                # Add the menu items to the menu item dictionary
-                self.__menuDict[menuTitle].addAction(menuItem)
-            else:
-                raise self.__menuNotFoundException
+            def schedule_render(self):
+                if self.render_job is not None:
+                    self.after_cancel(self.render_job)
+                self.render_job = self.after(150, self.render)
 
-        def addCheckableMenuItem(self, menuTitle, menuItemName, isChecked,
-                                 evtFunction=None):
-            '''Add a new checkable menu item to an existing menu with a title
-            specified by menuTitle. Connect an event function to the checkable menu
-            item if the specified value is not None. The checkable menu item is
-            checked if the value of isChecked is True, unchecked if False.'''
-            # Check if menuTitle exists
-            if menuTitle in self.__menuDict:
-                # Create the checkable menu item and set the check flag
-                menuItem = QtWidgets.QAction(
-                    '&' + menuItemName, self, checkable=True)
-                menuItem.setChecked(isChecked)
-                # Store menu action item
-                self.__checkableActions[menuItemName] = menuItem
-                if evtFunction:
-                    menuItem.triggered.connect(lambda: evtFunction())
-                # Add the menu items to the menu item dictionary
-                self.__menuDict[menuTitle].addAction(menuItem)
-            else:
-                raise self.__menuNotFoundException
+            def colour_of(self, node):
+                if node.children is not None:
+                    return BLOCK_COLOUR
+                if self.var_colours.get() == "random":           # stable per file, like the classic random colours
+                    hue = (zlib.crc32(node.name.encode("utf-8", "replace")) % 360) / 360.0
+                    return tuple(int(c * 255) for c in hsv_to_rgb(hue, 0.6, 0.95))
+                return CATEGORIES[node.category][1]
 
-        def setCheckedMenuItem(self, menuItem, isChecked):
-            '''Set a checkable menu menu item, specified by menuItem to checked
-            if isChecked is True, unchecked if False.'''
-            # Check if checkable menu item exists
-            if menuItem in self.__checkableActions:
-                # Set the checked menu item to the value of isChecked
-                self.__checkableActions[menuItem].setChecked(isChecked)
-            else:
-                raise self.__menuNotFoundException
-
-        def addMenuSeperator(self, menuTitle):
-            '''Add a seperator item to an existing menu with a title specified by
-            menuTitle.'''
-            # Check if menuTitle exists
-            if menuTitle in self.__menuDict:
-                self.__menuDict[menuTitle].addSeparator()
-            else:
-                raise self.__menuNotFoundException
-
-
-    # TileFrame.py
-    class TileFrame(QtWidgets.QFrame):
-        '''TileFrame extends the QtGui.QFrame class. It is used to render the
-        Treemap data structure, each node in the Treemap is rendered as
-        rectanglular tiles with a fixed colour or gradient colours. Hovered tiles
-        are rendered using a lighter fixed colour.'''
-
-        def __init__(self, parentWindow):
-            '''Create a new TileFrame.'''
-            super(TileFrame, self).__init__(parentWindow)
-            # TileFrame variables
-            self.__treemap = None
-            self.__isBorders = True
-            self.__isGradient = False
-            self.__rectNodes = []
-            self.__selectedNode = None
-            self.__borderCol = QtGui.QColor(0, 0, 0)
-            self.__bgCol = QtGui.QColor(64, 64, 64)
-            self.__txtCol = QtGui.QColor(38, 38, 38)
-            self.__txtFont = QtGui.QFont('CopperBlack', 60, QtGui.QFont.Bold)
-            self.__txt = "Disk\nVisualizer"
-            # Set strong policy for focusing keyboard events to Tileframe
-            self.setFocusPolicy(QtCore.Qt.StrongFocus)
-            self.setMouseTracking(True)
-
-        def __buildTiles(self, painter, node, size, location):
-            '''Render the Treemap Node by Node. Render the DirNode as borders
-            with the border colour and render the FileNodes as rectangular tiles.
-            Render the FileNodes with gradient colours iff gradients are enabled
-            and render with a fixed colour otherwise.'''
-            borderRect = QtCore.QRect(int(location[0]),
-                                      int(location[1]),
-                                      int(size[0]),
-                                      int(size[1]))
-            # If rendering borders is enabled
-            if self.__isBorders:
-                # Shift the dimensions of the rectangle
-                location[0] += 1
-                location[1] += 1
-                size[0] -= 2
-                size[1] -= 2
-            totalSize = max(node.getSize(), 1)  # Prevent ZeroDivisionError
-            for item in node.getChildren():
-                percent = item.getSize() / totalSize
-                itemArea = (size[0] * size[1]) * percent
-                # Calculate dimensions of the rectangle
-                if size[1] > size[0]:
-                    width = size[0]
-                    height = itemArea / width
-                    # Draw rectangle
-                    if self.__isGradient:
-                        self.__drawGradientRectangle(painter,
-                                                     item,
-                                                     [width, height],
-                                                     location)
+            def render(self):
+                self.render_job = None
+                width, height = max(1, self.canvas.winfo_width()), max(1, self.canvas.winfo_height())
+                self.canvas.delete("all")
+                self.file_rects, self.buckets = [], {}
+                if self.view is None or self.view.size <= 0:
+                    self.image = None
+                    self.canvas.create_text(width // 2, height // 2, text="Disk\nVisualizer", justify="center",
+                                            fill="#262626", font=("MS Sans Serif", max(18, min(60, width // 12)), "bold"))
+                    return
+                borders = self.var_borders.get()
+                image = Image.new("RGB", (width, height), MAP_BG)
+                draw = ImageDraw.Draw(image)
+                folder_frames = []
+                stack = [(self.view, 0.0, 0.0, float(width), float(height))]
+                while stack:
+                    node, x, y, w, h = stack.pop()
+                    if borders and node is not self.view:
+                        folder_frames.append((x, y, x + w, y + h))
+                        x, y, w, h = x + 1, y + 1, w - 2, h - 2
+                    if w < MIN_TILE or h < MIN_TILE:
+                        continue
+                    children = [c for c in node.children if c.size > 0]
+                    if not children:
+                        continue
+                    scale = (w * h) / sum(c.size for c in children)
+                    rects = squarify([c.size * scale for c in children], x, y, w, h)
+                    for child, (cx, cy, cw, ch) in zip(children, rects):
+                        if cw < 0.5 or ch < 0.5:
+                            continue
+                        if child.children is not None and cw >= MIN_TILE + 2 and ch >= MIN_TILE + 2:
+                            stack.append((child, cx, cy, cw, ch))
+                        else:                                   # a file, or a folder too small to open up
+                            self.file_rects.append((int(cx), int(cy), int(cx + cw), int(cy + ch), child))
+                for x0, y0, x1, y1, node in self.file_rects:
+                    colour = self.colour_of(node)
+                    if x1 - x0 >= 3 and y1 - y0 >= 3 and borders:
+                        edge = tuple(int(c * 0.55) for c in colour)
+                        draw.rectangle([x0, y0, x1 - 1, y1 - 1], fill=colour, outline=edge)
                     else:
-                        self.__drawRectangle(painter,
-                                             item,
-                                             [width, height],
-                                             location)
-                    location[1] += height
+                        draw.rectangle([x0, y0, max(x0, x1 - 1), max(y0, y1 - 1)], fill=colour)
+                if self.var_gradient.get():
+                    image = self._shade(image, width, height)
+                    draw = ImageDraw.Draw(image)
+                for x0, y0, x1, y1 in folder_frames:
+                    draw.rectangle([int(x0), int(y0), int(x1) - 1, int(y1) - 1], outline=(0, 0, 0))
+                self.image = image
+                self.photo = ImageTk.PhotoImage(image)
+                self.canvas.create_image(0, 0, image=self.photo, anchor="nw")
+                self._index_tiles()
+                self.hovered = None
+                self.canvas.create_rectangle(0, 0, 0, 0, outline=WHITE, width=2, state="hidden", tags="hover")
+                self.canvas.create_rectangle(0, 0, 0, 0, outline="#ffff00", width=2, state="hidden", tags="select")
+                if self.selected is not None:
+                    self._mark("select", self.selected)
+
+            def _shade(self, image, width, height):
+                """Vertical gradient on every tile (light at the top, darker at the bottom), done with numpy."""
+                shade = np.ones((height, width), dtype=np.float32)
+                for x0, y0, x1, y1, _node in self.file_rects:
+                    h = y1 - y0
+                    if h >= 4 and x1 - x0 >= 2:
+                        shade[y0:y1, x0:x1] = np.linspace(1.25, 0.75, h, dtype=np.float32)[:, None]
+                pixels = np.asarray(image, dtype=np.float32) * shade[:, :, None]
+                return Image.fromarray(np.clip(pixels, 0, 255).astype(np.uint8))
+
+            def _index_tiles(self):
+                """32x32 px buckets so the tile under the mouse is found at once, even with 100.000 tiles."""
+                buckets = {}
+                for index, (x0, y0, x1, y1, _node) in enumerate(self.file_rects):
+                    for bx in range(x0 // 32, (x1 - 1) // 32 + 1):
+                        for by in range(y0 // 32, (y1 - 1) // 32 + 1):
+                            buckets.setdefault((bx, by), []).append(index)
+                self.buckets = buckets
+
+            def _node_at(self, x, y):
+                for index in self.buckets.get((x // 32, y // 32), ()):
+                    x0, y0, x1, y1, node = self.file_rects[index]
+                    if x0 <= x < x1 and y0 <= y < y1:
+                        return node
+                return None
+
+            def _rect_of(self, target):
+                for x0, y0, x1, y1, node in self.file_rects:
+                    if node is target:
+                        return x0, y0, x1, y1
+                node = target.parent                                      # a file too small: show its block
+                while node is not None:
+                    for x0, y0, x1, y1, other in self.file_rects:
+                        if other is node:
+                            return x0, y0, x1, y1
+                    node = node.parent
+                return None
+
+            def _mark(self, tag, node):
+                rect = self._rect_of(node) if node is not None else None
+                if rect is None:
+                    self.canvas.itemconfig(tag, state="hidden")
                 else:
-                    height = size[1]
-                    width = itemArea / height
-                    # Draw rectangle
-                    if self.__isGradient:
-                        self.__drawGradientRectangle(painter,
-                                                     item,
-                                                     [width, height],
-                                                     location)
-                    else:
-                        self.__drawRectangle(painter,
-                                             item,
-                                             [width, height],
-                                             location)
-                    location[0] += width
-            # If rendering borders is enabled
-            if self.__isBorders:
-                # Draw the border around the rectangle
-                painter.setBrush(QtCore.Qt.NoBrush)
-                painter.setPen(self.__borderCol)
-                painter.drawRect(borderRect)
+                    x0, y0, x1, y1 = rect
+                    self.canvas.coords(tag, x0 + 1, y0 + 1, x1 - 1, y1 - 1)
+                    self.canvas.itemconfig(tag, state="normal")
+                    self.canvas.tag_raise(tag)
 
-        def __drawGradientRectangle(self, painter, node, size, location):
-            '''Render a Node of type FileNode as a rectangular gradient
-            proportional to the size of the file represented by FileNode. Render
-            the FileNode with its hover colour iff it's mouse hovered, otherwise
-            render the FileNode with the top and bottom gradient colours.'''
-            if isinstance(node, FileNode):
-                # Obtain the components of a rectangle
-                x1 = location[0]
-                y1 = location[1]
-                x2 = size[0] + 1
-                y2 = size[1] + 1
-                # Store a map of the file nodes and their display rectangle tiles
-                rect = QtCore.QRect(int(x1), int(y1), int(x2), int(y2))
-                self.__rectNodes.append((rect, node))
-                # Set the top and bottom gradient colours to the Node's hover
-                # colours if the file's node is selected, otherwise obtain the top
-                # and bottom gradient colours from node
-                if self.__selectedNode == node:
-                    topCol = botCol = node.getHColour()
+            # ----- mouse -------------------------------------------------------------------------------------
+
+            def _hover(self, event):
+                if self.scanner is not None:
+                    return
+                self._set_hover(self._node_at(event.x, event.y))
+
+            def _set_hover(self, node):
+                if node is self.hovered:
+                    return
+                self.hovered = node
+                self._mark("hover", node)
+                if node is None:
+                    self.canvas.config(cursor="crosshair")
+                    return
+                self.canvas.config(cursor="hand2")
+                share = 100 * node.size / max(1, self.view.size)
+                kind = f"folder, {node.files:,} files" if node.is_dir else CATEGORIES[node.category][0]
+                self.status.config(text=f"{node.path()}   {human(node.size)}  ({share:.2f}%)  [{kind}]")
+
+            def _click(self, event):
+                node = self._node_at(event.x, event.y)
+                self.selected = node
+                self._mark("select", node)
+                self.top_list.selection_clear(0, "end")
+                if node in self.top_nodes:
+                    index = self.top_nodes.index(node)
+                    self.top_list.selection_set(index)
+                    self.top_list.see(index)
+
+            def _top_selected(self, _event):
+                selection = self.top_list.curselection()
+                if selection:
+                    self.selected = self.top_nodes[selection[0]]
+                    self._mark("select", self.selected)
+                    node = self.selected
+                    self.status.config(text=f"{node.path()}   {human(node.size)}  "
+                                            f"({100 * node.size / max(1, self.view.size):.2f}%)")
+
+            def _tile_menu(self, event):
+                node = self._node_at(event.x, event.y)
+                if node is not None:
+                    self.selected = node
+                    self._mark("select", node)
+                    self._file_menu(node, event.x_root, event.y_root)
+
+            def _top_menu(self, event):
+                index = self.top_list.nearest(event.y)
+                if 0 <= index < len(self.top_nodes):
+                    self.top_list.selection_clear(0, "end")
+                    self.top_list.selection_set(index)
+                    self._top_selected(None)
+                    self._file_menu(self.top_nodes[index], event.x_root, event.y_root)
+
+            def _file_menu(self, node, x, y):
+                menu = w95_menu(self)
+                if node.is_dir:
+                    menu.add_command(label="Zoom Into Folder", command=lambda: self._zoom_to(node))
+                    menu.add_command(label="Copy Path", command=lambda: self.copy_path(node))
                 else:
-                    topCol = node.getTColour()
-                    botCol = node.getBColour()
-                # Obtain the components of rectanglular gradient
-                gradX1 = location[0]
-                gradY1 = location[1] + size[0]
-                gradX2 = (location[0] + size[0]) - size[0]
-                gradY2 = location[1] + size[1]
-                # Render the tile as a gradient
-                grad = QtGui.QLinearGradient(gradX1, gradY1, gradX2, gradY2)
-                grad.setColorAt(0.0, QtGui.QColor(int(topCol[0]), int(topCol[1]), int(topCol[2])))
-                grad.setColorAt(1.0, QtGui.QColor(int(botCol[0]), int(botCol[1]), int(botCol[2])))
-                painter.setPen(QtCore.Qt.NoPen)
-                painter.setBrush(QtGui.QBrush(grad))
-                painter.drawRect(rect)
-            # Recursively render the next tile in the Treemap
-            self.__buildTiles(painter, node, size, location[:])
+                    menu.add_command(label="Quick View", font=FONT_BOLD, command=lambda: self.open_file(node))
+                    menu.add_command(label="Show in Map", command=lambda: self.show_in_map(node))
+                    menu.add_command(label="Copy Path", command=lambda: self.copy_path(node))
+                    menu.add_separator()
+                    menu.add_command(label="Rename...", command=lambda: self.rename(node))
+                    menu.add_command(label="Move...", command=lambda: self.move(node))
+                    menu.add_command(label="Delete...", command=lambda: self.delete(node))
+                self._menu = menu
+                try:
+                    menu.tk_popup(x, y)
+                finally:
+                    menu.grab_release()
 
-        def __drawRectangle(self, painter, node, size, location):
-            '''Render a Node of type FileNode as a rectangular tile proportional to
-            the size of file represented by the FileNode. Render the FileNode with
-            its hover colour iff it's mouse hovered, otherwise render the FileNode
-            with the top gradient colour.'''
-            if isinstance(node, FileNode):
-                # Obtain the components of a rectangle
-                x1 = location[0]
-                x2 = location[1]
-                y1 = size[0] + 1
-                y2 = size[1] + 1
-                # Store a map of the file nodes and their display rectangle tiles
-                rect = QtCore.QRect(int(x1), int(x2), int(y1), int(y2))
-                self.__rectNodes.append((rect, node))
-                # Obtain the file's hover colour if it is selected otherwise obtain
-                # it's regular top gradient colour
-                if self.__selectedNode == node:
-                    col = node.getHColour()
-                else:
-                    col = node.getTColour()
-                painter.fillRect(rect, QtGui.QColor(
-                    int(col[0]),
-                    int(col[1]),
-                    int(col[2])))
-            # Recursively render the next tile in the Treemap
-            self.__buildTiles(painter, node, size, location[:])
+            def _zoom_to(self, node):
+                self.view = node
+                self.view_changed()
 
-        def getHoveredNodePath(self, mousePos):
-            '''Return the path of a file, as a string, from a Node that is mouse
-            hovered.'''
-            mX = mousePos.x()
-            mY = mousePos.y() - self.y()  # Account for location of widget
-            # Iterate through all the rectangles
-            for item in self.__rectNodes:
-                rX = item[0].x()
-                rY = item[0].y()
-                rW = item[0].width()
-                rH = item[0].height()
-                if (mX >= rX and mX <= (rX + rW)) and (mY >= rY and mY <= (rY +
-                                                                           rH)):
-                    # Store the hovered node as the selected node and update
-                    self.__selectedNode = item[1]
-                    self.update()
-                    # Return the path of the file represented by the FileNode
-                    return item[1].getPath()
+            # ----- file actions ------------------------------------------------------------------------------
 
-        def isMapped(self):
-            '''Return true if Treemap exists, False otherwise.'''
-            return self.__treemap
+            def open_file(self, node):
+                """Quick View, inside this tool: no Windows program is started."""
+                path = node.path()
+                if not os.path.isfile(path):
+                    messagebox.showerror(APP, f"The file is no longer there:\n{path}", parent=self)
+                    return
+                QuickView(self, path)
 
-        def toggleBorders(self):
-            '''Enable drawing of borders if drawing borders was dissabled and
-            dissable drawing of borders if it was previously enabled.'''
-            if self.isMapped():
-                # Toggle borders and update the tile rendering
-                self.__isBorders = not self.__isBorders
-                self.update()
+            def show_in_map(self, node):
+                """Zoom the map to the file's folder and select the file."""
+                self.view = node.parent
+                self.view_changed()
+                self.selected = node
+                self._mark("select", node)
+                if node in self.top_nodes:
+                    index = self.top_nodes.index(node)
+                    self.top_list.selection_set(index)
+                    self.top_list.see(index)
 
-        def toggleGradient(self):
-            '''Enable drawing of gradients if drawing gradients was dissabled and
-            dissable drawing of gradients if they were previously enabled.'''
-            if self.isMapped():
-                # Toggle gradient and update the tile rendering
-                self.__isGradient = not self.__isGradient
-                self.update()
+            def copy_path(self, node):
+                self.clipboard_clear()
+                self.clipboard_append(node.path())
+                self.status.config(text=f"Copied: {node.path()}")
 
-        def screenshot(self, filename):
-            '''Obtain a pixel map of the current window and save it as a .PNG
-            file with the name specified by filename.'''
-            QApplication.primaryScreen().grabWindow(self.winId()).save(filename, 'png')
+            def _after_change(self, text):
+                self.selected = None
+                if self.view is not None and self.view.size <= 0 and self.view.parent is not None:
+                    self.view = self.view.parent
+                self._fill_side_panel()
+                self.render()
+                self.status.config(text=text)
 
-        def clearMap(self):
-            '''Reset the visual map variables and clear the Treemap.'''
-            # Reset the toggle variables
-            self.__isBorders = True
-            self.__isGradient = False
-            # Clear the node rectangles
-            self.__rectNodes = []
-            # Clear the Treemap
-            self.__treemap = None
+            def rename(self, node):
+                name = ask_name(self, "Rename", f"New name for {node.name}:", node.name)
+                if not name or name == node.name:
+                    return
+                if any(ch in name for ch in '\\/:*?"<>|'):
+                    messagebox.showerror(APP, 'A file name cannot contain \\ / : * ? " < > |', parent=self)
+                    return
+                old_path = node.path()
+                new_path = os.path.join(os.path.dirname(old_path), name)
+                if os.path.exists(new_path):
+                    messagebox.showerror(APP, f"{name} already exists.", parent=self)
+                    return
+                try:
+                    os.rename(old_path, new_path)
+                except OSError as exc:
+                    messagebox.showerror(APP, f"Cannot rename the file:\n{exc}", parent=self)
+                    return
+                node.name = name
+                node.category = EXT_CATEGORY.get(os.path.splitext(name)[1].lower(), OTHER)
+                self._after_change(f"Renamed to {name}")
 
-        def setTreemap(self, treemap):
-            '''Setează treemap-ul construit.'''
-            self.__treemap = treemap
-            self.update()
+            def move(self, node):
+                folder = filedialog.askdirectory(title=f"Move {node.name} to", parent=self)
+                if not folder:
+                    return
+                target = os.path.join(folder, node.name)
+                if os.path.exists(target):
+                    messagebox.showerror(APP, f"{node.name} already exists in that folder.", parent=self)
+                    return
+                try:
+                    shutil.move(node.path(), target)
+                except (OSError, shutil.Error) as exc:
+                    messagebox.showerror(APP, f"Cannot move the file:\n{exc}", parent=self)
+                    return
+                parent = node.parent
+                parent.children.remove(node)
+                update_sizes(parent, -node.size, -1)
+                destination = self.ensure_folder(os.path.abspath(folder))
+                if destination is not None:                               # moved inside the map: put it there
+                    node.parent = destination
+                    destination.children.append(node)
+                    update_sizes(destination, node.size, 1)
+                    destination.children.sort(key=lambda n: n.size, reverse=True)
+                self._after_change(f"Moved {node.name} to {folder}")
 
-        def paintEvent(self, event):
-            '''Handle and process all of the drawing for the Treemap. Render the
-            Treemap if it's loaded, otherwise render a grey background with darker
-            grey text centered on the window.'''
-            self.__rectNodes = []  # Clear all the rectangle node list
-            painter = QtGui.QPainter(self)  # Used to draw on the frame
-            # Clear all drawings on the TileFrame
-            painter.eraseRect(0, 0, self.width(), self.height())
-            if self.isMapped():
-                # Set the initial conditions and render the Treemap
-                size = [self.width(), self.height()]
-                location = [0, 0]
-                self.__buildTiles(painter,
-                                  self.__treemap.getRoot(),
-                                  size,
-                                  location)
-            else:
-                # Draw the default background
-                painter.fillRect(0, 0, self.width(), self.height(), self.__bgCol)
-                # Draw the default text
-                painter.setPen(self.__txtCol)
-                painter.setFont(self.__txtFont)
-                painter.drawText(event.rect(), QtCore.Qt.AlignCenter, self.__txt)
+            def delete(self, node):
+                if not messagebox.askyesno(APP, f"Delete this file for good?\n\n{node.path()}\n{human(node.size)}",
+                                           icon="warning", parent=self):
+                    return
+                try:
+                    os.remove(node.path())
+                except OSError as exc:
+                    messagebox.showerror(APP, f"Cannot delete the file:\n{exc}", parent=self)
+                    return
+                parent = node.parent
+                parent.children.remove(node)
+                update_sizes(parent, -node.size, -1)
+                self._after_change(f"Deleted {node.name} ({human(node.size)} freed)")
+
+            # ----- other ----------------------------------------------------------------------------------------
+
+            def screenshot(self):
+                if self.image is None:
+                    messagebox.showinfo(APP, "Map a folder first.", parent=self)
+                    return
+                name = os.path.basename(self.view.name.rstrip("\\/")) or "disk"
+                path = filedialog.asksaveasfilename(title="Save Screenshot", parent=self, defaultextension=".png",
+                                                    initialfile=f"{name}_map.png", filetypes=[("PNG image", "*.png")])
+                if path:
+                    try:
+                        self.image.save(path, "PNG")
+                        self.status.config(text=f"Saved {path}")
+                    except OSError as exc:
+                        messagebox.showerror(APP, f"Cannot save the picture:\n{exc}", parent=self)
+
+            def clear_map(self):
+                if self.root_node is None:
+                    return
+                if messagebox.askyesno(APP, "Clear the visualization map?", parent=self):
+                    self.stop_scan(quiet=True)
+                    self.root_node = self.view = self.selected = None
+                    self.top_nodes = []
+                    self.top_list.delete(0, "end")
+                    for label in self.legend_rows:
+                        label.config(text="")
+                    self.address.config(text="(no folder mapped)")
+                    self.status.config(text="Please open a folder to map...")
+                    self.status_total.config(text="")
+                    self.render()
+
+            def about(self):
+                messagebox.showinfo("About", "Disk Space Visualization Utility\n\nCreated by Tudor Marmureanu", parent=self)
+
+            def close(self):
+                self.stop_scan(quiet=True)
+                self.destroy()
+
+        App().mainloop()
 
 
-    # DiskmapApp.py
-    class DiskmapApp(QtWidgets.QApplication):
-        '''DiskmapApp extends the QtWidgets.QApplication class. This class creates
-        the GUI for the Diskmap application and provides functions for all of the
-        application's events. It uses TileFrame and GUIWindow to create a window,
-        menu, status bar and the frame where the Treemap tiles are rendered.'''
+    if __name__ == "__main__":
+        DiskVisualizer95()
+    # # Node.py
+    # class Node:
+        # '''A Node in a tree with an arbitrary number of children (an arbitrary
+        # branching factor).'''
 
-        def __init__(self, args):
-            '''Create a new DiskmapApp with arguments specified by args.'''
-            super(DiskmapApp, self).__init__(args)
-            # Application variables
-            self.__defaultStatus = "Please open a folder to map..."
-            self.__mappedDir = ''
-            self.__currentFile = ''
-            self.__builderThread = None
-            
-            # Configure the GUIWindow (removed icon dependency)
-            self.__window = GUIWindow('Disk Visualization Utility',
-                                      640,
-                                      360)
-            # Configure the Tileframe
-            self.__tileframe = TileFrame(self.__window)
-            self.__window.setCentralWidget(self.__tileframe)
-            self.__window.setMouseTracking(True)
-            # Setup remaining GUI elements
-            self.__setupMenu()
-            self.__setupMouseEvents()
-            self.__setupMenuItems()
-            self.__window.setStatusBar(self.__defaultStatus)
-            # Render the window
-            self.__window.show()
+        # def __init__(self):
+            # '''Create a new node with an empty list of children.'''
+            # self.children = []
 
-        def __setupMenu(self):
-            '''Add all the menus used in the application to GUIWindow.'''
-            self.__window.addMenu('File')
-            self.__window.addMenu('Options')
-            self.__window.addMenu('Settings')
-            self.__window.addMenu('Help')
+        # def add(self, node):
+            # '''Append node as a child to the parent self.'''
+            # self.children.append(node)
 
-        def __setupMouseEvents(self):
-            '''Bind event functions for mouse movement, mouse click and mouse
-            release events to GUIWindow.'''
-            moveEvents = []
-            clickEvents = []
-            releaseEvents = []
-            # Add function to mouse event lists
-            moveEvents.append(self.__eventUpdateStatus)
-            clickEvents.append(self.__eventPopupMenu)
-            # Bind the mouse functions to the mouse events
-            self.__window.updateMouseEvents(moveEvents, clickEvents, releaseEvents)
+        # def getChildren(self):
+            # '''Return the list of children of the parent self.'''
+            # return self.children
 
-        def __setupMenuItems(self):
-            '''Add all the menu items, along with their event functions, used in
-            the application to GUIWindow.'''
-            # Setup File menu items
-            self.__window.addMenuItem('File', 'Map Folder', self.__eventMapFolder)
-            self.__window.addMenuSeperator('File')
-            self.__window.addMenuItem('File', 'Quit', self.__window.close)
-            # Setup Option menu items
-            self.__window.addMenuItem('Options',
-                                      'Screenshot',
-                                      self.__eventScreenshot)
-            self.__window.addMenuItem('Options', 'Clear Map', self.__eventClearMap)
-            # Setup Settings menu items
-            self.__window.addCheckableMenuItem('Settings',
-                                               'Gradient',
-                                               False,
-                                               self.__eventToggleGradient)
-            self.__window.addCheckableMenuItem('Settings',
-                                               'Borders',
-                                               True,
-                                               self.__eventToggleBorders)
-            # Setup Help menu items
-            self.__window.addMenuItem('Help', 'About', self.__eventAbout)
 
-        def __showException(self, exception):
-            '''Show a popup message box with the exception that occured.'''
-            message = "An unexpected error occured:\n\n {}".format(str(exception))
-            QtWidgets.QMessageBox.critical(self.__window,
-                                           'Error',
-                                           message,
-                                           buttons=QtWidgets.QMessageBox.Ok)
+    # # DirNode.py
+    # class DirNode(Node):
+        # '''DirNode extends the Node class. It creates a DirNode which represents
+        # a directory's attributes within a filesystem such as directory path and
+        # size.'''
 
-        def __eventUpdateStatus(self, event):
-            '''Set the status bar text to the file path of the currently mouse
-            hovered FileNode from the TileFrame. Set the mouse cursor to a hand
-            pointer if a path exists, set the mouse cursor to the standard
-            arrow otherwise.'''
-            # Nu actualiza statusul dacă se încarcă un folder
-            if self.__builderThread and self.__builderThread.isRunning():
-                return
+        # def __init__(self, path, size):
+            # '''Create a new DirNode with an empty list of children and attributes
+            # specified by the parameters.'''
+            # super(DirNode, self).__init__()
+            # self.path = path            # The location of the file
+            # self.size = size            # The size of the file (in KB)
+
+        # def getPath(self):
+            # '''Return the path of the DirNode self.'''
+            # return self.path
+
+        # def getSize(self):
+            # '''Return the size of the DirNode self.'''
+            # return self.size
+
+        # def setSize(self, size):
+            # '''Set the size of the DirNode self.'''
+            # self.size = size
+
+
+    # # FileNode.py
+    # class FileNode(Node):
+        # '''FileNode extends the Node class. It create a FileNode which represents
+        # a file's attributes within a filesystem such as the filepath and size. It
+        # also contains the following visual representation data: gradient colours
+        # and mouse hover colours.'''
+
+        # def __init__(self, path, size):
+            # '''Create a new FileNode with an empty list of children and attributes
+            # specified by the parameters.'''
+            # super(FileNode, self).__init__()
+            # self.path = path            # The location of the file
+            # self.size = size            # The size of the file (in KB)
+            # self.tColour = None         # The top colour of the gradient
+            # self.bColour = None         # The bottom colour of the gradient
+            # self.hColour = None         # The mouse hover colour
+            # # Set the colours for the FileNode
+            # self.__setRandomColours()
+
+        # def __setRandomColours(self):
+            # '''Set the gradient and mouse hover colours using an aesthetically
+            # pleasing HSV colour palette. The same hue value is used for all colours
+            # with varying degrees of saturation to generate different shades.'''
+            # hue = randint(0, 360) / 360
+            # self.tColour = tuple(i * 255 for i in hsv_to_rgb(hue, 0.6, 0.95))
+            # self.bColour = tuple(i * 255 for i in hsv_to_rgb(hue, 1, 0.95))
+            # self.hColour = tuple(i * 255 for i in hsv_to_rgb(hue, 0.05, 0.95))
+
+        # def getPath(self):
+            # '''Return the path of the FileNode self.'''
+            # return self.path
+
+        # def getSize(self):
+            # '''Return the size of the FileNode self.'''
+            # return self.size
+
+        # def getTColour(self):
+            # '''Return the top colour of the FileNode self.'''
+            # return self.tColour
+
+        # def getBColour(self):
+            # '''Return the bottom colour of the FileNode self.'''
+            # return self.bColour
+
+        # def getHColour(self):
+            # '''Return the mouse hover colour of the FileNode self.'''
+            # return self.hColour
+
+
+    # # TreemapBuilderThread - Thread pentru construirea treemap-ului
+    # class TreemapBuilderThread(QThread):
+        # '''Thread pentru construirea treemap-ului cu progress reporting.'''
+        
+        # progress = pyqtSignal(int)  # Signal pentru progres (0-100)
+        # finished_build = pyqtSignal(object)  # Signal pentru treemap finalizat
+        # status_update = pyqtSignal(str)  # Signal pentru actualizarea statusului
+        
+        # def __init__(self, directory):
+            # super().__init__()
+            # self.directory = directory
+            # self.total_items = 0
+            # self.processed_items = 0
+        
+        # def run(self):
+            # '''Rulează construirea treemap-ului în thread separat.'''
+            # try:
+                # self.status_update.emit("Scanning directory structure...")
+                # self.progress.emit(0)
                 
-            path = self.__tileframe.getHoveredNodePath(event)
-            if path:
-                # Set the cursor to pointing hand cursor
-                self.setOverrideCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
-                # Replace the backslash with forward slash in the file path
-                self.__filename = path.replace('\\', '/')
-                self.__window.setStatusBar(self.__filename)
-            else:
-                # Restore cursor back to arrow cursor
-                self.setOverrideCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
-
-        def __eventPopupMenu(self, event):
-            '''Create a popup menu iff a visualization map exists and the right
-            mouse click event occured. The popup menu contains options to rename,
-            move and delete the currently selected file.'''
-            # If mouse right click and map is created
-            if event.button() == QtCore.Qt.RightButton and \
-               self.__tileframe.isMapped():
-                menu = QtWidgets.QMenu()
-                # Create menu items and bind events to them
-                renameFileAction = QtWidgets.QAction('Rename', self)
-                moveFileAction = QtWidgets.QAction('Move', self)
-                deleteFileAction = QtWidgets.QAction('Delete', self)
-                renameFileAction.triggered.connect(self.__eventMenuRenameFile)
-                moveFileAction.triggered.connect(self.__eventMenuMoveFile)
-                deleteFileAction.triggered.connect(self.__eventMenuDeleteFile)
-                # Add actions to menu and create menu
-                menu.addAction(renameFileAction)
-                menu.addAction(moveFileAction)
-                menu.addAction(deleteFileAction)
-                menu.exec_(self.__window.mapToGlobal(event.pos()))
-
-        def __getOnlyFilename(self):
-            '''Return the name of the file, as a string, from the file's full
-            path.'''
-            return self.__filename[self.__filename.rfind('/') + 1:]
-
-        def __getOnlyParentFolder(self):
-            '''Return the path of the file up to the parent directory, as a string,
-            from the file's full path.'''
-            return self.__filename[:self.__filename.rfind('/')]
-
-        def __eventMenuRenameFile(self):
-            '''Rename a selected file to a new specified name.'''
-            message = 'Enter a new name for file: ' + self.__getOnlyFilename()
-            text, result = QtWidgets.QInputDialog.getText(self.__window,
-                                                          'Message',
-                                                          message)
-            # If ok was selected and text is no empty
-            if result and text:
-                # Rename the file and remap the directory
-                newFilename = self.__getOnlyParentFolder() + '/' + text
-                try:
-                    os.rename(self.__filename, newFilename)
-                    self.__eventMapFolderAsync(self.__mappedDir)
-                except OSError as error:
-                    # Exception raised, display message and terminate
-                    self.__showException(error)
-
-        def __eventMenuMoveFile(self):
-            '''Move a selected file to a new specified folder.'''
-            flags = QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.\
-                DontUseNativeDialog
-            folder = QtWidgets.QFileDialog.getExistingDirectory(None,
-                                                                'Select a folder:',
-                                                                'C:\\', flags)
-            # If a folder was selected
-            if folder:
-                # Move the file to the new destination and remap the directory
-                newFileDestination = folder + '/' + self.__getOnlyFilename()
-                try:
-                    os.rename(self.__filename, newFileDestination)
-                    self.__eventMapFolderAsync(self.__mappedDir)
-                except OSError as error:
-                    # Exception raised, display message and terminate
-                    self.__showException(error)
-
-        def __eventMenuDeleteFile(self):
-            '''Delete a selected file.'''
-            message = 'Are you sure you want to delete ' + \
-                self.__getOnlyFilename() + '?'
-            result = QtWidgets.QMessageBox.question(self.__window,
-                                                    'Message',
-                                                    message,
-                                                    QtWidgets.QMessageBox.Yes,
-                                                    QtWidgets.QMessageBox.No)
-            if result == QtWidgets.QMessageBox.Yes:
-                try:
-                    # Delete the file and remap the directory
-                    os.remove(self.__filename)
-                    self.__eventMapFolderAsync(self.__mappedDir)
-                except OSError as error:
-                    # Exception raised, display message and terminate
-                    self.__showException(error)
-
-        def __eventToggleBorders(self):
-            '''Toggle rendering borders in the TileFrame.'''
-            self.__tileframe.toggleBorders()
-
-        def __eventToggleGradient(self):
-            '''Toggle rendering gradients in the TileFrame.'''
-            self.__tileframe.toggleGradient()
-
-        def __eventScreenshot(self):
-            '''Prompt the user to save a screenshot of the visualization map and
-            save the screenshot as a .PNG file.'''
-            # If a map is created
-            if self.__tileframe.isMapped():
-                fname, _ = QtWidgets.QFileDialog.getSaveFileName(
-                    self.__window,
-                    'Save Screenshot',
-                    '',
-                    'Images (*.png)',
-                    options=QtWidgets.QFileDialog.DontUseNativeDialog)
-                if fname:
-                    if not fname.endswith('.png'):
-                        fname += '.png'
-                    self.__tileframe.screenshot(fname)
-
-        def __onProgressUpdate(self, value):
-            '''Callback pentru actualizarea progress bar-ului.'''
-            self.__window.updateProgressBar(value)
-
-        def __onStatusUpdate(self, status):
-            '''Callback pentru actualizarea statusului.'''
-            self.__window.setStatusBar(status)
-
-        def __onBuildComplete(self, treemap):
-            '''Callback pentru finalizarea construirii treemap-ului.'''
-            self.__window.hideProgressBar()
+                # # Primul pas: numărăm total items pentru progres
+                # self.total_items = self._countItems(self.directory)
+                # self.processed_items = 0
+                
+                # self.status_update.emit("Building treemap...")
+                
+                # # Al doilea pas: construim treemap-ul
+                # treemap = Treemap()
+                # treemap.root = self._buildTree(self.directory)
+                
+                # self.progress.emit(100)
+                # self.status_update.emit("Treemap completed!")
+                # self.finished_build.emit(treemap)
+                
+            # except Exception as e:
+                # self.status_update.emit(f"Error: {str(e)}")
+                # self.finished_build.emit(None)
+        
+        # def _countItems(self, path):
+            # '''Numără total items pentru calcul progres.'''
+            # count = 0
+            # try:
+                # for item in os.listdir(path):
+                    # item_path = os.path.join(path, item)
+                    # count += 1
+                    # if os.path.isdir(item_path):
+                        # try:
+                            # count += self._countItems(item_path)
+                        # except (OSError, PermissionError):
+                            # pass
+            # except (OSError, PermissionError):
+                # pass
+            # return count
+        
+        # def _buildTree(self, path):
+            # '''Construiește recursiv structura de arbore din filesystem.'''
+            # total_size = 0
+            # dir_node = DirNode(path, 0)
             
-            if treemap and treemap.getRoot():
-                self.__tileframe.setTreemap(treemap)
-                self.__window.setStatusBar("")
-            else:
-                self.__window.setStatusBar("Failed to build treemap")
-            
-            # Curăță thread-ul
-            if self.__builderThread:
-                self.__builderThread.deleteLater()
-                self.__builderThread = None
-
-        def __eventMapFolderAsync(self, folder):
-            '''Construiește treemap-ul asincron cu progress bar.'''
-            # Dacă mai există un thread în execuție, îl oprim
-            if self.__builderThread and self.__builderThread.isRunning():
-                self.__builderThread.terminate()
-                self.__builderThread.wait()
-            
-            # Curăță map-ul anterior
-            self.__tileframe.clearMap()
-            
-            # Reset checkable menu items
-            self.__window.setCheckedMenuItem('Gradient', False)
-            self.__window.setCheckedMenuItem('Borders', True)
-            
-            # Afișează progress bar-ul
-            self.__window.showProgressBar()
-            
-            # Creează și pornește thread-ul
-            self.__builderThread = TreemapBuilderThread(folder)
-            self.__builderThread.progress.connect(self.__onProgressUpdate)
-            self.__builderThread.status_update.connect(self.__onStatusUpdate)
-            self.__builderThread.finished_build.connect(self.__onBuildComplete)
-            self.__builderThread.start()
-
-        def __eventMapFolder(self):
-            '''Prompt the user to select a folder to use for creating the
-            visualization map. Build the visualization if the user has selected a
-            valid folder.'''
-            flags = QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.\
-                DontUseNativeDialog
-            folder = QtWidgets.QFileDialog.getExistingDirectory(None,
-                                                                'Select a folder:',
-                                                                'C:\\', flags)
-            # If a folder was selected
-            if folder:
-                # Store the mapped folder
-                self.__mappedDir = folder
-                # Construiește treemap-ul asincron
-                self.__eventMapFolderAsync(folder)
-
-        def __eventClearMap(self):
-            '''Prompt the user to clear the visualization map. Clear the map, reset
-            the checkable menu items and set the default status text iff the user
-            confirmed Yes to the message prompt.'''
-            # If a map is created
-            if self.__tileframe.isMapped():
-                message = 'Are you sure you want to clear the visualization map?'
-                result = QtWidgets.QMessageBox.question(self.__window,
-                                                        'Message',
-                                                        message,
-                                                        QtWidgets.QMessageBox.Yes,
-                                                        QtWidgets.QMessageBox.No)
-                if result == QtWidgets.QMessageBox.Yes:
-                    # Oprește thread-ul dacă rulează
-                    if self.__builderThread and self.__builderThread.isRunning():
-                        self.__builderThread.terminate()
-                        self.__builderThread.wait()
+            # try:
+                # for item in os.listdir(path):
+                    # self.processed_items += 1
+                    # progress_percent = int((self.processed_items / max(self.total_items, 1)) * 100)
+                    # self.progress.emit(progress_percent)
                     
-                    # Reset checkable menu items
-                    self.__window.setCheckedMenuItem('Gradient', False)
-                    self.__window.setCheckedMenuItem('Borders', True)
-                    self.__tileframe.clearMap()
-                    self.__window.hideProgressBar()
-                    self.__window.setStatusBar(self.__defaultStatus)
+                    # item_path = os.path.join(path, item)
+                    
+                    # if os.path.isfile(item_path):
+                        # try:
+                            # size = os.path.getsize(item_path) / 1024  # Size in KB
+                            # file_node = FileNode(item_path, size)
+                            # dir_node.add(file_node)
+                            # total_size += size
+                        # except OSError:
+                            # continue
+                            
+                    # elif os.path.isdir(item_path):
+                        # try:
+                            # sub_dir = self._buildTree(item_path)
+                            # if sub_dir and sub_dir.getSize() > 0:
+                                # dir_node.add(sub_dir)
+                                # total_size += sub_dir.getSize()
+                        # except (OSError, PermissionError):
+                            # continue
+                            
+            # except (OSError, PermissionError):
+                # pass
+                
+            # dir_node.setSize(total_size)
+            # return dir_node
 
-        def __eventAbout(self):
-            '''Display an information dialog about the program languages and tools
-            used to create this application and the name of the developer.'''
-            message = 'Disk Space Visualization Utility\n\n' + \
-                '\nCreated by Tudor Marmureanu'
-            # Render the message box
-            QtWidgets.QMessageBox.information(self.__window,
-                                              'About',
-                                              message,
-                                              buttons=QtWidgets.QMessageBox.Ok)
+
+    # # Treemap class
+    # class Treemap:
+        # '''Treemap class for building filesystem visualization.'''
+        
+        # def __init__(self):
+            # self.root = None
+        
+        # def getRoot(self):
+            # '''Return the root node of the treemap.'''
+            # return self.root
 
 
-    if __name__ == '__main__':
-        # Pass command line arguments into application
-        myApp = DiskmapApp(sys.argv)
-        sys.exit(myApp.exec_())
+    # # GUIWindow.py
+    # class GUIWindow(QtWidgets.QMainWindow):
+        # '''GUIWindow the extends the QtWidgets.QMainWindow class. It creates a
+        # basic window that contains a MenuBar and a StatusBar, both of which are
+        # modifiable. The window includes advanced functionality such as appearing in
+        # the center of the screen binding of key and mouse events.'''
+
+        # def __init__(self, winTitle, winWidth, winHeight, winIcon=None):
+            # '''Create a new GUIWindow with a specific window title, width, height
+            # and window icon.'''
+            # super(GUIWindow, self).__init__()
+            # # Exceptions
+            # self.__menuExistsException = Exception(
+                # 'The specified menu already exists!')
+            # self.__menuNotFoundException = Exception(
+                # 'The specified menu was not found!')
+            # # GUIWindow variables
+            # self.__menubar = self.menuBar()         # Menu Bar
+            # self.__menuDict = {}                    # Map of Menus for Menubar
+            # self.__statusLabel = QtWidgets.QLabel()  # New Status label
+            # self.__keyInputDict = {}                # Map of key events
+            # self.__checkableActions = {}            # Map of checkable QActions
+            # self.__mouseMoveEvents = []             # List of mouse move events
+            # self.__mouseClickEvents = []            # List of mouse click events
+            # self.__mouseReleaseEvents = []          # List of mouse release events
+            
+            # # Progress bar pentru colțul din dreapta jos
+            # self.__progressBar = QtWidgets.QProgressBar()
+            # self.__progressBar.setVisible(False)
+            # self.__progressBar.setFixedSize(200, 20)
+            
+            # # Configure the window's properties
+            # self.setGeometry(0, 0, winWidth, winHeight)
+            # self.setMinimumSize(int(winWidth / 2), int(winHeight / 2))
+            # self.setWindowTitle(winTitle)
+            # if winIcon:  # Only set icon if provided
+                # self.setWindowIcon(QtGui.QIcon(winIcon))
+            
+            # # Bind the QLabel și progress bar to the Status Bar
+            # self.statusBar().addWidget(self.__statusLabel, 1)
+            # self.statusBar().addPermanentWidget(self.__progressBar)
+            
+            # # Set the window to appear in the center of the screen
+            # self.__centerOnScreen()
+
+        # def showProgressBar(self):
+            # '''Afișează progress bar-ul.'''
+            # self.__progressBar.setVisible(True)
+            # self.__progressBar.setValue(0)
+        
+        # def hideProgressBar(self):
+            # '''Ascunde progress bar-ul.'''
+            # self.__progressBar.setVisible(False)
+        
+        # def updateProgressBar(self, value):
+            # '''Actualizează valoarea progress bar-ului.'''
+            # self.__progressBar.setValue(value)
+
+        # def keyPressEvent(self, event):
+            # '''Handle and process all key press events.'''
+            # eventKey = event.key()
+            # if eventKey in self.__keyInputDict:
+                # self.__keyInputDict[eventKey][0]()
+
+        # def keyReleaseEvent(self, event):
+            # '''Handle and process all key release events.'''
+            # eventKey = event.key()
+            # if eventKey in self.__keyInputDict:
+                # self.__keyInputDict[eventKey][1]()
+
+        # def mouseMoveEvent(self, event):
+            # '''Handle and process all mouse movement events.'''
+            # for func in self.__mouseMoveEvents:
+                # func(event)
+
+        # def mousePressEvent(self, event):
+            # '''Handle and process all mouse click events.'''
+            # for func in self.__mouseClickEvents:
+                # func(event)
+
+        # def mouseReleaseEvent(self, event):
+            # '''Handle and process all mouse release events.'''
+            # for func in self.__mouseReleaseEvents:
+                # func(event)
+
+        # def __centerOnScreen(self):
+            # '''Move the position of the window so that it is positioned perfectly
+            # in the center of the screen.'''
+            # res = QtWidgets.QDesktopWidget().screenGeometry()
+            # move_width = (res.width() / 2) - (self.frameSize().width() / 2)
+            # move_height = (res.height() / 2) - (self.frameSize().height() / 2)
+            # self.move(int(move_width), int(move_height))
+
+        # def updateMouseEvents(self, moveEvents, clickEvents, releaseEvents):
+            # '''Update the mouse event lists for movement, clicking and releasing as
+            # specified by the events in the lists from the parameters.'''
+            # self.__mouseMoveEvents = moveEvents
+            # self.__mouseClickEvents = clickEvents
+            # self.__mouseReleaseEvents = releaseEvents
+
+        # def updateKeyBindings(self, keyBindings):
+            # '''Change the current value of the keys and their events for keypress
+            # and keyrelease to the ones specified by keyBindings.'''
+            # self.__keyInputDict = keyBindings.copy()
+
+        # def setStatusBar(self, statusText):
+            # '''Change the current value of the StatusBar's text.'''
+            # self.__statusLabel.setText(statusText)
+
+        # def addMenu(self, menuTitle):
+            # '''Add a new menu with a title specified by menuTitle to the window's
+            # MenuBar.'''
+            # # Check if menuTitle does not exist (prevent duplicates)
+            # if menuTitle in self.__menuDict:
+                # raise self.__menuExistsException
+            # else:
+                # self.__menuDict[menuTitle] = \
+                    # self.__menubar.addMenu('&' + menuTitle)
+
+        # def addMenuItem(self, menuTitle, menuItemName, evtFunction=None):
+            # '''Add a new menu item to an existing menu with a title specified by
+            # menuTitle. Connect an event function to the menu item if the specified
+            # value is not None.'''
+            # # Check if menuTitle exists
+            # if menuTitle in self.__menuDict:
+                # # Create the menu item
+                # menuItem = QtWidgets.QAction('&' + menuItemName, self)
+                # if evtFunction:
+                    # menuItem.triggered.connect(lambda: evtFunction())
+                # # Add the menu items to the menu item dictionary
+                # self.__menuDict[menuTitle].addAction(menuItem)
+            # else:
+                # raise self.__menuNotFoundException
+
+        # def addCheckableMenuItem(self, menuTitle, menuItemName, isChecked,
+                                 # evtFunction=None):
+            # '''Add a new checkable menu item to an existing menu with a title
+            # specified by menuTitle. Connect an event function to the checkable menu
+            # item if the specified value is not None. The checkable menu item is
+            # checked if the value of isChecked is True, unchecked if False.'''
+            # # Check if menuTitle exists
+            # if menuTitle in self.__menuDict:
+                # # Create the checkable menu item and set the check flag
+                # menuItem = QtWidgets.QAction(
+                    # '&' + menuItemName, self, checkable=True)
+                # menuItem.setChecked(isChecked)
+                # # Store menu action item
+                # self.__checkableActions[menuItemName] = menuItem
+                # if evtFunction:
+                    # menuItem.triggered.connect(lambda: evtFunction())
+                # # Add the menu items to the menu item dictionary
+                # self.__menuDict[menuTitle].addAction(menuItem)
+            # else:
+                # raise self.__menuNotFoundException
+
+        # def setCheckedMenuItem(self, menuItem, isChecked):
+            # '''Set a checkable menu menu item, specified by menuItem to checked
+            # if isChecked is True, unchecked if False.'''
+            # # Check if checkable menu item exists
+            # if menuItem in self.__checkableActions:
+                # # Set the checked menu item to the value of isChecked
+                # self.__checkableActions[menuItem].setChecked(isChecked)
+            # else:
+                # raise self.__menuNotFoundException
+
+        # def addMenuSeperator(self, menuTitle):
+            # '''Add a seperator item to an existing menu with a title specified by
+            # menuTitle.'''
+            # # Check if menuTitle exists
+            # if menuTitle in self.__menuDict:
+                # self.__menuDict[menuTitle].addSeparator()
+            # else:
+                # raise self.__menuNotFoundException
+
+
+    # # TileFrame.py
+    # class TileFrame(QtWidgets.QFrame):
+        # '''TileFrame extends the QtGui.QFrame class. It is used to render the
+        # Treemap data structure, each node in the Treemap is rendered as
+        # rectanglular tiles with a fixed colour or gradient colours. Hovered tiles
+        # are rendered using a lighter fixed colour.'''
+
+        # def __init__(self, parentWindow):
+            # '''Create a new TileFrame.'''
+            # super(TileFrame, self).__init__(parentWindow)
+            # # TileFrame variables
+            # self.__treemap = None
+            # self.__isBorders = True
+            # self.__isGradient = False
+            # self.__rectNodes = []
+            # self.__selectedNode = None
+            # self.__borderCol = QtGui.QColor(0, 0, 0)
+            # self.__bgCol = QtGui.QColor(64, 64, 64)
+            # self.__txtCol = QtGui.QColor(38, 38, 38)
+            # self.__txtFont = QtGui.QFont('CopperBlack', 60, QtGui.QFont.Bold)
+            # self.__txt = "Disk\nVisualizer"
+            # # Set strong policy for focusing keyboard events to Tileframe
+            # self.setFocusPolicy(QtCore.Qt.StrongFocus)
+            # self.setMouseTracking(True)
+
+        # def __buildTiles(self, painter, node, size, location):
+            # '''Render the Treemap Node by Node. Render the DirNode as borders
+            # with the border colour and render the FileNodes as rectangular tiles.
+            # Render the FileNodes with gradient colours iff gradients are enabled
+            # and render with a fixed colour otherwise.'''
+            # borderRect = QtCore.QRect(int(location[0]),
+                                      # int(location[1]),
+                                      # int(size[0]),
+                                      # int(size[1]))
+            # # If rendering borders is enabled
+            # if self.__isBorders:
+                # # Shift the dimensions of the rectangle
+                # location[0] += 1
+                # location[1] += 1
+                # size[0] -= 2
+                # size[1] -= 2
+            # totalSize = max(node.getSize(), 1)  # Prevent ZeroDivisionError
+            # for item in node.getChildren():
+                # percent = item.getSize() / totalSize
+                # itemArea = (size[0] * size[1]) * percent
+                # # Calculate dimensions of the rectangle
+                # if size[1] > size[0]:
+                    # width = size[0]
+                    # height = itemArea / width
+                    # # Draw rectangle
+                    # if self.__isGradient:
+                        # self.__drawGradientRectangle(painter,
+                                                     # item,
+                                                     # [width, height],
+                                                     # location)
+                    # else:
+                        # self.__drawRectangle(painter,
+                                             # item,
+                                             # [width, height],
+                                             # location)
+                    # location[1] += height
+                # else:
+                    # height = size[1]
+                    # width = itemArea / height
+                    # # Draw rectangle
+                    # if self.__isGradient:
+                        # self.__drawGradientRectangle(painter,
+                                                     # item,
+                                                     # [width, height],
+                                                     # location)
+                    # else:
+                        # self.__drawRectangle(painter,
+                                             # item,
+                                             # [width, height],
+                                             # location)
+                    # location[0] += width
+            # # If rendering borders is enabled
+            # if self.__isBorders:
+                # # Draw the border around the rectangle
+                # painter.setBrush(QtCore.Qt.NoBrush)
+                # painter.setPen(self.__borderCol)
+                # painter.drawRect(borderRect)
+
+        # def __drawGradientRectangle(self, painter, node, size, location):
+            # '''Render a Node of type FileNode as a rectangular gradient
+            # proportional to the size of the file represented by FileNode. Render
+            # the FileNode with its hover colour iff it's mouse hovered, otherwise
+            # render the FileNode with the top and bottom gradient colours.'''
+            # if isinstance(node, FileNode):
+                # # Obtain the components of a rectangle
+                # x1 = location[0]
+                # y1 = location[1]
+                # x2 = size[0] + 1
+                # y2 = size[1] + 1
+                # # Store a map of the file nodes and their display rectangle tiles
+                # rect = QtCore.QRect(int(x1), int(y1), int(x2), int(y2))
+                # self.__rectNodes.append((rect, node))
+                # # Set the top and bottom gradient colours to the Node's hover
+                # # colours if the file's node is selected, otherwise obtain the top
+                # # and bottom gradient colours from node
+                # if self.__selectedNode == node:
+                    # topCol = botCol = node.getHColour()
+                # else:
+                    # topCol = node.getTColour()
+                    # botCol = node.getBColour()
+                # # Obtain the components of rectanglular gradient
+                # gradX1 = location[0]
+                # gradY1 = location[1] + size[0]
+                # gradX2 = (location[0] + size[0]) - size[0]
+                # gradY2 = location[1] + size[1]
+                # # Render the tile as a gradient
+                # grad = QtGui.QLinearGradient(gradX1, gradY1, gradX2, gradY2)
+                # grad.setColorAt(0.0, QtGui.QColor(int(topCol[0]), int(topCol[1]), int(topCol[2])))
+                # grad.setColorAt(1.0, QtGui.QColor(int(botCol[0]), int(botCol[1]), int(botCol[2])))
+                # painter.setPen(QtCore.Qt.NoPen)
+                # painter.setBrush(QtGui.QBrush(grad))
+                # painter.drawRect(rect)
+            # # Recursively render the next tile in the Treemap
+            # self.__buildTiles(painter, node, size, location[:])
+
+        # def __drawRectangle(self, painter, node, size, location):
+            # '''Render a Node of type FileNode as a rectangular tile proportional to
+            # the size of file represented by the FileNode. Render the FileNode with
+            # its hover colour iff it's mouse hovered, otherwise render the FileNode
+            # with the top gradient colour.'''
+            # if isinstance(node, FileNode):
+                # # Obtain the components of a rectangle
+                # x1 = location[0]
+                # x2 = location[1]
+                # y1 = size[0] + 1
+                # y2 = size[1] + 1
+                # # Store a map of the file nodes and their display rectangle tiles
+                # rect = QtCore.QRect(int(x1), int(x2), int(y1), int(y2))
+                # self.__rectNodes.append((rect, node))
+                # # Obtain the file's hover colour if it is selected otherwise obtain
+                # # it's regular top gradient colour
+                # if self.__selectedNode == node:
+                    # col = node.getHColour()
+                # else:
+                    # col = node.getTColour()
+                # painter.fillRect(rect, QtGui.QColor(
+                    # int(col[0]),
+                    # int(col[1]),
+                    # int(col[2])))
+            # # Recursively render the next tile in the Treemap
+            # self.__buildTiles(painter, node, size, location[:])
+
+        # def getHoveredNodePath(self, mousePos):
+            # '''Return the path of a file, as a string, from a Node that is mouse
+            # hovered.'''
+            # mX = mousePos.x()
+            # mY = mousePos.y() - self.y()  # Account for location of widget
+            # # Iterate through all the rectangles
+            # for item in self.__rectNodes:
+                # rX = item[0].x()
+                # rY = item[0].y()
+                # rW = item[0].width()
+                # rH = item[0].height()
+                # if (mX >= rX and mX <= (rX + rW)) and (mY >= rY and mY <= (rY +
+                                                                           # rH)):
+                    # # Store the hovered node as the selected node and update
+                    # self.__selectedNode = item[1]
+                    # self.update()
+                    # # Return the path of the file represented by the FileNode
+                    # return item[1].getPath()
+
+        # def isMapped(self):
+            # '''Return true if Treemap exists, False otherwise.'''
+            # return self.__treemap
+
+        # def toggleBorders(self):
+            # '''Enable drawing of borders if drawing borders was dissabled and
+            # dissable drawing of borders if it was previously enabled.'''
+            # if self.isMapped():
+                # # Toggle borders and update the tile rendering
+                # self.__isBorders = not self.__isBorders
+                # self.update()
+
+        # def toggleGradient(self):
+            # '''Enable drawing of gradients if drawing gradients was dissabled and
+            # dissable drawing of gradients if they were previously enabled.'''
+            # if self.isMapped():
+                # # Toggle gradient and update the tile rendering
+                # self.__isGradient = not self.__isGradient
+                # self.update()
+
+        # def screenshot(self, filename):
+            # '''Obtain a pixel map of the current window and save it as a .PNG
+            # file with the name specified by filename.'''
+            # QApplication.primaryScreen().grabWindow(self.winId()).save(filename, 'png')
+
+        # def clearMap(self):
+            # '''Reset the visual map variables and clear the Treemap.'''
+            # # Reset the toggle variables
+            # self.__isBorders = True
+            # self.__isGradient = False
+            # # Clear the node rectangles
+            # self.__rectNodes = []
+            # # Clear the Treemap
+            # self.__treemap = None
+
+        # def setTreemap(self, treemap):
+            # '''Setează treemap-ul construit.'''
+            # self.__treemap = treemap
+            # self.update()
+
+        # def paintEvent(self, event):
+            # '''Handle and process all of the drawing for the Treemap. Render the
+            # Treemap if it's loaded, otherwise render a grey background with darker
+            # grey text centered on the window.'''
+            # self.__rectNodes = []  # Clear all the rectangle node list
+            # painter = QtGui.QPainter(self)  # Used to draw on the frame
+            # # Clear all drawings on the TileFrame
+            # painter.eraseRect(0, 0, self.width(), self.height())
+            # if self.isMapped():
+                # # Set the initial conditions and render the Treemap
+                # size = [self.width(), self.height()]
+                # location = [0, 0]
+                # self.__buildTiles(painter,
+                                  # self.__treemap.getRoot(),
+                                  # size,
+                                  # location)
+            # else:
+                # # Draw the default background
+                # painter.fillRect(0, 0, self.width(), self.height(), self.__bgCol)
+                # # Draw the default text
+                # painter.setPen(self.__txtCol)
+                # painter.setFont(self.__txtFont)
+                # painter.drawText(event.rect(), QtCore.Qt.AlignCenter, self.__txt)
+
+
+    # # DiskmapApp.py
+    # class DiskmapApp(QtWidgets.QApplication):
+        # '''DiskmapApp extends the QtWidgets.QApplication class. This class creates
+        # the GUI for the Diskmap application and provides functions for all of the
+        # application's events. It uses TileFrame and GUIWindow to create a window,
+        # menu, status bar and the frame where the Treemap tiles are rendered.'''
+
+        # def __init__(self, args):
+            # '''Create a new DiskmapApp with arguments specified by args.'''
+            # super(DiskmapApp, self).__init__(args)
+            # # Application variables
+            # self.__defaultStatus = "Please open a folder to map..."
+            # self.__mappedDir = ''
+            # self.__currentFile = ''
+            # self.__builderThread = None
+            
+            # # Configure the GUIWindow (removed icon dependency)
+            # self.__window = GUIWindow('Disk Visualization Utility',
+                                      # 640,
+                                      # 360)
+            # # Configure the Tileframe
+            # self.__tileframe = TileFrame(self.__window)
+            # self.__window.setCentralWidget(self.__tileframe)
+            # self.__window.setMouseTracking(True)
+            # # Setup remaining GUI elements
+            # self.__setupMenu()
+            # self.__setupMouseEvents()
+            # self.__setupMenuItems()
+            # self.__window.setStatusBar(self.__defaultStatus)
+            # # Render the window
+            # self.__window.show()
+
+        # def __setupMenu(self):
+            # '''Add all the menus used in the application to GUIWindow.'''
+            # self.__window.addMenu('File')
+            # self.__window.addMenu('Options')
+            # self.__window.addMenu('Settings')
+            # self.__window.addMenu('Help')
+
+        # def __setupMouseEvents(self):
+            # '''Bind event functions for mouse movement, mouse click and mouse
+            # release events to GUIWindow.'''
+            # moveEvents = []
+            # clickEvents = []
+            # releaseEvents = []
+            # # Add function to mouse event lists
+            # moveEvents.append(self.__eventUpdateStatus)
+            # clickEvents.append(self.__eventPopupMenu)
+            # # Bind the mouse functions to the mouse events
+            # self.__window.updateMouseEvents(moveEvents, clickEvents, releaseEvents)
+
+        # def __setupMenuItems(self):
+            # '''Add all the menu items, along with their event functions, used in
+            # the application to GUIWindow.'''
+            # # Setup File menu items
+            # self.__window.addMenuItem('File', 'Map Folder', self.__eventMapFolder)
+            # self.__window.addMenuSeperator('File')
+            # self.__window.addMenuItem('File', 'Quit', self.__window.close)
+            # # Setup Option menu items
+            # self.__window.addMenuItem('Options',
+                                      # 'Screenshot',
+                                      # self.__eventScreenshot)
+            # self.__window.addMenuItem('Options', 'Clear Map', self.__eventClearMap)
+            # # Setup Settings menu items
+            # self.__window.addCheckableMenuItem('Settings',
+                                               # 'Gradient',
+                                               # False,
+                                               # self.__eventToggleGradient)
+            # self.__window.addCheckableMenuItem('Settings',
+                                               # 'Borders',
+                                               # True,
+                                               # self.__eventToggleBorders)
+            # # Setup Help menu items
+            # self.__window.addMenuItem('Help', 'About', self.__eventAbout)
+
+        # def __showException(self, exception):
+            # '''Show a popup message box with the exception that occured.'''
+            # message = "An unexpected error occured:\n\n {}".format(str(exception))
+            # QtWidgets.QMessageBox.critical(self.__window,
+                                           # 'Error',
+                                           # message,
+                                           # buttons=QtWidgets.QMessageBox.Ok)
+
+        # def __eventUpdateStatus(self, event):
+            # '''Set the status bar text to the file path of the currently mouse
+            # hovered FileNode from the TileFrame. Set the mouse cursor to a hand
+            # pointer if a path exists, set the mouse cursor to the standard
+            # arrow otherwise.'''
+            # # Nu actualiza statusul dacă se încarcă un folder
+            # if self.__builderThread and self.__builderThread.isRunning():
+                # return
+                
+            # path = self.__tileframe.getHoveredNodePath(event)
+            # if path:
+                # # Set the cursor to pointing hand cursor
+                # self.setOverrideCursor(QtGui.QCursor(QtCore.Qt.PointingHandCursor))
+                # # Replace the backslash with forward slash in the file path
+                # self.__filename = path.replace('\\', '/')
+                # self.__window.setStatusBar(self.__filename)
+            # else:
+                # # Restore cursor back to arrow cursor
+                # self.setOverrideCursor(QtGui.QCursor(QtCore.Qt.ArrowCursor))
+
+        # def __eventPopupMenu(self, event):
+            # '''Create a popup menu iff a visualization map exists and the right
+            # mouse click event occured. The popup menu contains options to rename,
+            # move and delete the currently selected file.'''
+            # # If mouse right click and map is created
+            # if event.button() == QtCore.Qt.RightButton and \
+               # self.__tileframe.isMapped():
+                # menu = QtWidgets.QMenu()
+                # # Create menu items and bind events to them
+                # renameFileAction = QtWidgets.QAction('Rename', self)
+                # moveFileAction = QtWidgets.QAction('Move', self)
+                # deleteFileAction = QtWidgets.QAction('Delete', self)
+                # renameFileAction.triggered.connect(self.__eventMenuRenameFile)
+                # moveFileAction.triggered.connect(self.__eventMenuMoveFile)
+                # deleteFileAction.triggered.connect(self.__eventMenuDeleteFile)
+                # # Add actions to menu and create menu
+                # menu.addAction(renameFileAction)
+                # menu.addAction(moveFileAction)
+                # menu.addAction(deleteFileAction)
+                # menu.exec_(self.__window.mapToGlobal(event.pos()))
+
+        # def __getOnlyFilename(self):
+            # '''Return the name of the file, as a string, from the file's full
+            # path.'''
+            # return self.__filename[self.__filename.rfind('/') + 1:]
+
+        # def __getOnlyParentFolder(self):
+            # '''Return the path of the file up to the parent directory, as a string,
+            # from the file's full path.'''
+            # return self.__filename[:self.__filename.rfind('/')]
+
+        # def __eventMenuRenameFile(self):
+            # '''Rename a selected file to a new specified name.'''
+            # message = 'Enter a new name for file: ' + self.__getOnlyFilename()
+            # text, result = QtWidgets.QInputDialog.getText(self.__window,
+                                                          # 'Message',
+                                                          # message)
+            # # If ok was selected and text is no empty
+            # if result and text:
+                # # Rename the file and remap the directory
+                # newFilename = self.__getOnlyParentFolder() + '/' + text
+                # try:
+                    # os.rename(self.__filename, newFilename)
+                    # self.__eventMapFolderAsync(self.__mappedDir)
+                # except OSError as error:
+                    # # Exception raised, display message and terminate
+                    # self.__showException(error)
+
+        # def __eventMenuMoveFile(self):
+            # '''Move a selected file to a new specified folder.'''
+            # flags = QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.\
+                # DontUseNativeDialog
+            # folder = QtWidgets.QFileDialog.getExistingDirectory(None,
+                                                                # 'Select a folder:',
+                                                                # 'C:\\', flags)
+            # # If a folder was selected
+            # if folder:
+                # # Move the file to the new destination and remap the directory
+                # newFileDestination = folder + '/' + self.__getOnlyFilename()
+                # try:
+                    # os.rename(self.__filename, newFileDestination)
+                    # self.__eventMapFolderAsync(self.__mappedDir)
+                # except OSError as error:
+                    # # Exception raised, display message and terminate
+                    # self.__showException(error)
+
+        # def __eventMenuDeleteFile(self):
+            # '''Delete a selected file.'''
+            # message = 'Are you sure you want to delete ' + \
+                # self.__getOnlyFilename() + '?'
+            # result = QtWidgets.QMessageBox.question(self.__window,
+                                                    # 'Message',
+                                                    # message,
+                                                    # QtWidgets.QMessageBox.Yes,
+                                                    # QtWidgets.QMessageBox.No)
+            # if result == QtWidgets.QMessageBox.Yes:
+                # try:
+                    # # Delete the file and remap the directory
+                    # os.remove(self.__filename)
+                    # self.__eventMapFolderAsync(self.__mappedDir)
+                # except OSError as error:
+                    # # Exception raised, display message and terminate
+                    # self.__showException(error)
+
+        # def __eventToggleBorders(self):
+            # '''Toggle rendering borders in the TileFrame.'''
+            # self.__tileframe.toggleBorders()
+
+        # def __eventToggleGradient(self):
+            # '''Toggle rendering gradients in the TileFrame.'''
+            # self.__tileframe.toggleGradient()
+
+        # def __eventScreenshot(self):
+            # '''Prompt the user to save a screenshot of the visualization map and
+            # save the screenshot as a .PNG file.'''
+            # # If a map is created
+            # if self.__tileframe.isMapped():
+                # fname, _ = QtWidgets.QFileDialog.getSaveFileName(
+                    # self.__window,
+                    # 'Save Screenshot',
+                    # '',
+                    # 'Images (*.png)',
+                    # options=QtWidgets.QFileDialog.DontUseNativeDialog)
+                # if fname:
+                    # if not fname.endswith('.png'):
+                        # fname += '.png'
+                    # self.__tileframe.screenshot(fname)
+
+        # def __onProgressUpdate(self, value):
+            # '''Callback pentru actualizarea progress bar-ului.'''
+            # self.__window.updateProgressBar(value)
+
+        # def __onStatusUpdate(self, status):
+            # '''Callback pentru actualizarea statusului.'''
+            # self.__window.setStatusBar(status)
+
+        # def __onBuildComplete(self, treemap):
+            # '''Callback pentru finalizarea construirii treemap-ului.'''
+            # self.__window.hideProgressBar()
+            
+            # if treemap and treemap.getRoot():
+                # self.__tileframe.setTreemap(treemap)
+                # self.__window.setStatusBar("")
+            # else:
+                # self.__window.setStatusBar("Failed to build treemap")
+            
+            # # Curăță thread-ul
+            # if self.__builderThread:
+                # self.__builderThread.deleteLater()
+                # self.__builderThread = None
+
+        # def __eventMapFolderAsync(self, folder):
+            # '''Construiește treemap-ul asincron cu progress bar.'''
+            # # Dacă mai există un thread în execuție, îl oprim
+            # if self.__builderThread and self.__builderThread.isRunning():
+                # self.__builderThread.terminate()
+                # self.__builderThread.wait()
+            
+            # # Curăță map-ul anterior
+            # self.__tileframe.clearMap()
+            
+            # # Reset checkable menu items
+            # self.__window.setCheckedMenuItem('Gradient', False)
+            # self.__window.setCheckedMenuItem('Borders', True)
+            
+            # # Afișează progress bar-ul
+            # self.__window.showProgressBar()
+            
+            # # Creează și pornește thread-ul
+            # self.__builderThread = TreemapBuilderThread(folder)
+            # self.__builderThread.progress.connect(self.__onProgressUpdate)
+            # self.__builderThread.status_update.connect(self.__onStatusUpdate)
+            # self.__builderThread.finished_build.connect(self.__onBuildComplete)
+            # self.__builderThread.start()
+
+        # def __eventMapFolder(self):
+            # '''Prompt the user to select a folder to use for creating the
+            # visualization map. Build the visualization if the user has selected a
+            # valid folder.'''
+            # flags = QtWidgets.QFileDialog.ShowDirsOnly | QtWidgets.QFileDialog.\
+                # DontUseNativeDialog
+            # folder = QtWidgets.QFileDialog.getExistingDirectory(None,
+                                                                # 'Select a folder:',
+                                                                # 'C:\\', flags)
+            # # If a folder was selected
+            # if folder:
+                # # Store the mapped folder
+                # self.__mappedDir = folder
+                # # Construiește treemap-ul asincron
+                # self.__eventMapFolderAsync(folder)
+
+        # def __eventClearMap(self):
+            # '''Prompt the user to clear the visualization map. Clear the map, reset
+            # the checkable menu items and set the default status text iff the user
+            # confirmed Yes to the message prompt.'''
+            # # If a map is created
+            # if self.__tileframe.isMapped():
+                # message = 'Are you sure you want to clear the visualization map?'
+                # result = QtWidgets.QMessageBox.question(self.__window,
+                                                        # 'Message',
+                                                        # message,
+                                                        # QtWidgets.QMessageBox.Yes,
+                                                        # QtWidgets.QMessageBox.No)
+                # if result == QtWidgets.QMessageBox.Yes:
+                    # # Oprește thread-ul dacă rulează
+                    # if self.__builderThread and self.__builderThread.isRunning():
+                        # self.__builderThread.terminate()
+                        # self.__builderThread.wait()
+                    
+                    # # Reset checkable menu items
+                    # self.__window.setCheckedMenuItem('Gradient', False)
+                    # self.__window.setCheckedMenuItem('Borders', True)
+                    # self.__tileframe.clearMap()
+                    # self.__window.hideProgressBar()
+                    # self.__window.setStatusBar(self.__defaultStatus)
+
+        # def __eventAbout(self):
+            # '''Display an information dialog about the program languages and tools
+            # used to create this application and the name of the developer.'''
+            # message = 'Disk Space Visualization Utility\n\n' + \
+                # '\nCreated by Tudor Marmureanu'
+            # # Render the message box
+            # QtWidgets.QMessageBox.information(self.__window,
+                                              # 'About',
+                                              # message,
+                                              # buttons=QtWidgets.QMessageBox.Ok)
+
+
+    # if __name__ == '__main__':
+        # # Pass command line arguments into application
+        # myApp = DiskmapApp(sys.argv)
+        # sys.exit(myApp.exec_())
         
 if calculatorvarrr == 11111111111111111111:
     import math
