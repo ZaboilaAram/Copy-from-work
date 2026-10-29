@@ -675,6 +675,35 @@ def setup_database_ALL():
             )
         ''')
         
+    # Tabele pentru Password Generator (passfig1 == 5) - setarile implicite si istoricul parolelor
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='passgen_settings'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE passgen_settings (
+                id INTEGER PRIMARY KEY,
+                password_length INTEGER,
+                include_uppercase INTEGER,
+                include_numbers INTEGER,
+                include_special_chars INTEGER
+            )
+        ''')
+    # randul cu setarile (id=1) trebuie sa existe: fara el, setarile nu se salvau
+    cursor.execute('''
+        INSERT OR IGNORE INTO passgen_settings
+            (id, password_length, include_uppercase, include_numbers, include_special_chars)
+        VALUES (1, 12, 0, 0, 0)
+    ''')
+
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='passgen_history'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE passgen_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                password TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='kb_entries'")
     if cursor.fetchone() is None:
         cursor.execute('''
@@ -1688,6 +1717,35 @@ def setup_database_INSTANCE():
                 tags TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+    # Tabele pentru Password Generator (passfig1 == 5) - setarile implicite si istoricul parolelor
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='passgen_settings'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE passgen_settings (
+                id INTEGER PRIMARY KEY,
+                password_length INTEGER,
+                include_uppercase INTEGER,
+                include_numbers INTEGER,
+                include_special_chars INTEGER
+            )
+        ''')
+    # randul cu setarile (id=1) trebuie sa existe: fara el, setarile nu se salvau
+    cursor.execute('''
+        INSERT OR IGNORE INTO passgen_settings
+            (id, password_length, include_uppercase, include_numbers, include_special_chars)
+        VALUES (1, 12, 0, 0, 0)
+    ''')
+
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='passgen_history'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE passgen_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                password TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -12872,23 +12930,57 @@ def bpk_checker():
 
 bpk_checker()
 
+class Win95ProgressBar(tk.Frame):
+    """Replaces ttk.Progressbar: progress['value'] = 0..100 draws Windows 95 navy blocks."""
+
+    def __init__(self, parent, length=400, **_ignored):
+        super().__init__(parent, bd=2, relief='sunken', bg='white', width=length, height=22)
+        self.pack_propagate(False)
+        self.canvas = tk.Canvas(self, bg='white', highlightthickness=0, bd=0)
+        self.canvas.pack(fill='both', expand=True, padx=2, pady=2)
+        self._value = 0.0
+        self.canvas.bind('<Configure>', lambda e: self._draw())
+
+    def __setitem__(self, key, value):
+        if key == 'value':
+            self._value = float(value)
+            self._draw()
+        else:
+            super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        if key == 'value':
+            return self._value
+        return super().__getitem__(key)
+
+    def _draw(self):
+        self.canvas.delete('all')
+        width, height = self.canvas.winfo_width(), self.canvas.winfo_height()
+        filled = int(width * self._value / 100)
+        x = 0
+        while x + 8 <= filled:
+            self.canvas.create_rectangle(x, 0, x + 8, height, fill='#000080', outline='#000080')
+            x += 10
+
 class Windows95Installer:
     def __init__(self):
         self.root9955 = tk.Tk()
         self.root9955.title("Bitpack Setup")
-        self.root9955.geometry("640x480")
-        self.root9955.configure(bg='#c0c0c0')
+        self.root9955.configure(bg='black')
         self.root9955.resizable(False, False)
         
         # Remove title bar
         self.root9955.overrideredirect(True)
         
-        # Center the window
-        self.center_window()
+        # Windows 95 look for all the buttons, entries and check boxes created from now on
+        self.apply_win95_style()
         
         # Fullscreen state
         self.is_fullscreen = False
         self.normal_geometry = "640x480"
+        self.special_screen = False      # restart / boot screens: Esc and Enter do nothing
+        self.default_button = None       # the bold button pressed by Enter
+        self.dialog_pos = (0, 0)
         
         # Get actual system info
         self.actual_user = getpass.getuser()
@@ -12902,20 +12994,251 @@ class Windows95Installer:
         self.workgroup = tk.StringVar(value="WORKGROUP")
         self.timezone = tk.StringVar(value="(GMT-08:00) Pacific Time (US & Canada)")
         
-        # Create main frame
-        self.main_frame = tk.Frame(self.root9955, bg='#c0c0c0', relief='raised', bd=2)
+        # Blue Setup background (full screen) and the Setup window with its title bar
+        self.background = tk.Canvas(self.root9955, bg='black', highlightthickness=0, bd=0)
+        self.background.pack(fill='both', expand=True)
+        self.background.bind('<Configure>', lambda e: self.draw_background())
+        self.dialog = tk.Frame(self.background, bg='#c0c0c0', relief='raised', bd=2)
+        self.caption_bar(self.dialog, "Bitpack Setup", self.cancel, draggable=True)
+        
+        # Create main frame (the pages are drawn here, as before)
+        self.main_frame = tk.Frame(self.dialog, bg='#c0c0c0')
         self.main_frame.pack(fill='both', expand=True, padx=2, pady=2)
         
         # Start installation
         self.show_welcome_screen()
         
-        # Bind escape key to toggle fullscreen
+        # Bind escape key to toggle fullscreen, Enter to the default button
         self.root9955.bind('<Escape>', self.toggle_fullscreen)
+        self.root9955.bind('<Return>', self.press_default)
         
         self.toggle_fullscreen()
+    # def __init__(self):
+        # self.root9955 = tk.Tk()
+        # self.root9955.title("Bitpack Setup")
+        # self.root9955.geometry("640x480")
+        # self.root9955.configure(bg='#c0c0c0')
+        # self.root9955.resizable(False, False)
+        
+        # # Remove title bar
+        # self.root9955.overrideredirect(True)
+        
+        # # Center the window
+        # self.center_window()
+        
+        # # Fullscreen state
+        # self.is_fullscreen = False
+        # self.normal_geometry = "640x480"
+        
+        # # Get actual system info
+        # self.actual_user = getpass.getuser()
+        # self.actual_computer = socket.gethostname()
+        
+        # # Variables with actual system values
+        # self.current_step = 0
+        # self.progress_value = 0
+        # self.user_name = tk.StringVar(value=self.actual_user)
+        # self.computer_name = tk.StringVar(value=self.actual_computer)
+        # self.workgroup = tk.StringVar(value="WORKGROUP")
+        # self.timezone = tk.StringVar(value="(GMT-08:00) Pacific Time (US & Canada)")
+        
+        # # Create main frame
+        # self.main_frame = tk.Frame(self.root9955, bg='#c0c0c0', relief='raised', bd=2)
+        # self.main_frame.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        # # Start installation
+        # self.show_welcome_screen()
+        
+        # # Bind escape key to toggle fullscreen
+        # self.root9955.bind('<Escape>', self.toggle_fullscreen)
+        
+        # self.toggle_fullscreen()
         
     def EXITO(self):
         sys.exit(0)
+    
+    def _pixel_pen(self, canvas, origin_x, origin_y, size):
+        """Draws Windows 95 style pixel art: px(x, y, w, h, colour) in 'big pixels' of the given size."""
+        def px(x, y, w, h, colour):
+            canvas.create_rectangle(origin_x + x * size, origin_y + y * size,
+                                    origin_x + (x + w) * size, origin_y + (y + h) * size,
+                                    fill=colour, outline='')
+        return px
+
+    def _pixel_disc(self, px, cx, cy, radius, hole_colour):
+        """A pixel CD-ROM, like the Windows 95 CD icon: black rim, silver body, rainbow shine, hub."""
+        rainbow = ['#ff0000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff']
+        for y in range(-radius, radius + 1):
+            for x in range(-radius, radius + 1):
+                d = (x * x + y * y) ** 0.5
+                if d > radius + 0.3:
+                    continue
+                if d > radius - 0.7:
+                    colour = '#000000'
+                elif d < 1.6:
+                    colour = hole_colour
+                elif d < 2.6:
+                    colour = '#808080'
+                elif x > 0 and y < 0 and radius - 3.2 < d < radius - 0.7:
+                    colour = rainbow[(x - y) % len(rainbow)]
+                else:
+                    colour = '#ffffff' if x + y < 0 else '#c0c0c0'
+                px(cx + x, cy + y, 1, 1, colour)
+    
+    def apply_win95_style(self):
+        """Windows 95 look for every widget created after this call (buttons, entries, check boxes)."""
+        r = self.root9955
+        for name, value in (("*Button.background", "#c0c0c0"), ("*Button.activeBackground", "#c0c0c0"),
+                            ("*Button.relief", "raised"), ("*Button.borderWidth", 2),
+                            ("*Button.highlightThickness", 0), ("*Button.disabledForeground", "#808080"),
+                            ("*Entry.background", "white"), ("*Entry.relief", "sunken"),
+                            ("*Entry.borderWidth", 2), ("*Entry.highlightThickness", 0),
+                            ("*Checkbutton.selectColor", "white"), ("*Checkbutton.activeBackground", "#c0c0c0"),
+                            ("*Checkbutton.highlightThickness", 0),
+                            ("*Radiobutton.selectColor", "white"), ("*Radiobutton.activeBackground", "#c0c0c0"),
+                            ("*Radiobutton.highlightThickness", 0),
+                            ("*Text.relief", "sunken"), ("*Text.borderWidth", 2), ("*Text.highlightThickness", 0)):
+            r.option_add(name, value)
+
+    def caption_bar(self, window, title, close_command, draggable=False):
+        """Windows 95 title bar: icon, bold title, X button."""
+        import tkinter.font as tkfont
+        bar = tk.Frame(window, bg='#000080', height=20)
+        bar.pack(side='top', fill='x', padx=1, pady=(1, 0))
+        bar.pack_propagate(False)
+        icon = tk.Canvas(bar, width=16, height=16, bg='#000080', highlightthickness=0, bd=0)
+        icon.create_rectangle(2, 2, 13, 10, fill='#c0c0c0', outline='black')
+        icon.create_rectangle(4, 4, 11, 8, fill='#008080', outline='#008080')
+        icon.create_rectangle(4, 11, 11, 14, fill='#c0c0c0', outline='black')
+        icon.pack(side='left', padx=(2, 3))
+        text = tk.Label(bar, text=title, bg='#000080', fg='white', font=('MS Sans Serif', 8, 'bold'), anchor='w')
+        text.pack(side='left', fill='x', expand=True)
+        marlett = "Marlett" in tkfont.families(window)
+        if not hasattr(self, '_pixel'):
+            self._pixel = tk.PhotoImage(width=1, height=1)
+        tk.Button(bar, text='r' if marlett else 'X', command=close_command,
+                  font=('Marlett', 7) if marlett else ('MS Sans Serif', 7, 'bold'), image=self._pixel,
+                  compound='center', width=12, height=10, padx=0, pady=0, bg='#c0c0c0', fg='black',
+                  activebackground='#c0c0c0', relief='raised', bd=2, highlightthickness=0,
+                  takefocus=0).pack(side='right', padx=2)
+        if draggable:
+            for widget in (bar, text, icon):
+                widget.bind('<ButtonPress-1>', self._drag_start)
+                widget.bind('<B1-Motion>', self._drag_move)
+        return bar
+
+    def draw_icon(self, canvas, kind):
+        """Windows 95 message box icons: error, warning, info, question."""
+        if kind == 'error':
+            canvas.create_oval(2, 2, 30, 30, fill='#ff0000', outline='#800000')
+            canvas.create_line(10, 10, 22, 22, fill='white', width=3)
+            canvas.create_line(22, 10, 10, 22, fill='white', width=3)
+        elif kind == 'warning':
+            canvas.create_polygon(16, 2, 30, 29, 2, 29, fill='#ffff00', outline='black')
+            canvas.create_text(16, 19, text='!', fill='black', font=('Times New Roman', 15, 'bold'))
+        else:
+            canvas.create_oval(2, 2, 30, 30, fill='white', outline='black')
+            canvas.create_text(16, 16, text='?' if kind == 'question' else 'i', fill='#0000ff',
+                               font=('Times New Roman', 16, 'bold'))
+
+    def win95_dialog(self, title, message, icon='info', buttons=('OK',), default=0):
+        """Modal Windows 95 message box. Returns the text of the pressed button (None if closed)."""
+        result = {'value': None}
+        dialog = tk.Toplevel(self.root9955)
+        dialog.overrideredirect(True)
+        dialog.configure(bg='#c0c0c0', bd=2, relief='raised')
+        dialog.transient(self.root9955)
+
+        def close(value=None):
+            result['value'] = value
+            dialog.destroy()
+
+        self.caption_bar(dialog, title, lambda: close(buttons[-1] if len(buttons) > 1 else None))
+        body = tk.Frame(dialog, bg='#c0c0c0')
+        body.pack(fill='both', expand=True, padx=14, pady=(14, 8))
+        picture = tk.Canvas(body, width=32, height=32, bg='#c0c0c0', highlightthickness=0, bd=0)
+        self.draw_icon(picture, icon)
+        picture.pack(side='left', anchor='n', padx=(0, 14))
+        tk.Label(body, text=message, bg='#c0c0c0', font=('MS Sans Serif', 8), justify='left',
+                 wraplength=340).pack(side='left', fill='both', expand=True)
+        row = tk.Frame(dialog, bg='#c0c0c0')
+        row.pack(pady=(4, 12))
+        for index, text in enumerate(buttons):
+            tk.Button(row, text=text, command=lambda t=text: close(t), width=10,
+                      font=('MS Sans Serif', 8, 'bold') if index == default else ('MS Sans Serif', 8),
+                      bg='#c0c0c0', activebackground='#c0c0c0', relief='raised', bd=2,
+                      highlightthickness=1 if index == default else 0,
+                      highlightbackground='black').pack(side='left', padx=4)
+        dialog.bind('<Return>', lambda e: close(buttons[default]))
+        dialog.bind('<Escape>', lambda e: close(buttons[-1]))
+        dialog.update_idletasks()
+        width, height = max(dialog.winfo_reqwidth(), 300), dialog.winfo_reqheight()
+        x = (dialog.winfo_screenwidth() - width) // 2
+        y = (dialog.winfo_screenheight() - height) // 2
+        dialog.geometry(f"{width}x{height}+{x}+{y}")
+        dialog.lift()
+        try:
+            dialog.wait_visibility()
+            dialog.grab_set()
+        except tk.TclError:
+            pass
+        dialog.focus_force()
+        self.root9955.wait_window(dialog)
+        return result['value']
+
+    def cancel(self):
+        """Cancel button / X: ask first, like Windows 95 Setup."""
+        if self.special_screen:
+            return
+        answer = self.win95_dialog("Exit Setup", "Setup is not complete. If you quit now, Bitpack will not be "
+                                                 "configured.\n\nAre you sure you want to quit Setup?",
+                                   'warning', ('Yes', 'No'), default=1)
+        if answer == 'Yes':
+            self.EXITO()
+
+    def press_default(self, event=None):
+        """Enter presses the bold default button (Next >, Finish, Close Setup)."""
+        if event is not None and isinstance(event.widget, tk.Text):
+            return None
+        button = self.default_button
+        if button is not None and not self.special_screen and button.winfo_exists() \
+                and str(button['state']) == 'normal':
+            button.invoke()
+        return 'break'
+
+    def draw_background(self):
+        """Full screen: the Windows 95 Setup blue, fading to black, with the Setup title."""
+        if self.special_screen:
+            return
+        canvas = self.background
+        canvas.delete('bg')
+        if not self.is_fullscreen:
+            return
+        width, height = canvas.winfo_width(), canvas.winfo_height()
+        bands = 96
+        for i in range(bands):
+            level = int(0xb0 * (1 - i / bands))
+            y0, y1 = int(height * i / bands), int(height * (i + 1) / bands) + 1
+            canvas.create_rectangle(0, y0, width, y1, fill=f"#0000{level:02x}", outline='', tags='bg')
+        canvas.create_text(33, 27, text="Bitpack Setup", anchor='nw', fill='black',
+                           font=('Times New Roman', 30, 'bold italic'), tags='bg')
+        canvas.create_text(30, 24, text="Bitpack Setup", anchor='nw', fill='white',
+                           font=('Times New Roman', 30, 'bold italic'), tags='bg')
+        canvas.tag_lower('bg')
+
+    def _drag_start(self, event):
+        self._drag = (event.x_root, event.y_root, self.dialog_pos, self.root9955.winfo_x(), self.root9955.winfo_y())
+
+    def _drag_move(self, event):
+        x0, y0, (dx, dy), wx, wy = self._drag
+        if self.is_fullscreen:
+            sw, sh = self.root9955.winfo_screenwidth(), self.root9955.winfo_screenheight()
+            nx = max(0, min(sw - 640, dx + event.x_root - x0))
+            ny = max(0, min(sh - 480, dy + event.y_root - y0))
+            self.dialog_pos = (nx, ny)
+            self.dialog.place(x=nx, y=ny, width=640, height=480)
+        else:
+            self.root9955.geometry(f"+{wx + event.x_root - x0}+{wy + event.y_root - y0}")
     
     def show_product_activation(self):
         """Show Windows 95 style product activation as part of the installation flow"""
@@ -13027,134 +13350,196 @@ class Windows95Installer:
 
     def show_activation_error(self):
         """Show Windows 95 style error dialog for activation"""
-        error_root = tk.Toplevel(self.root9955)
-        error_root.title("Bitpack Setup")
-        error_root.geometry("400x180")
-        error_root.configure(bg='#c0c0c0')
-        error_root.resizable(False, False)
-        error_root.overrideredirect(True)
+        self.win95_dialog("Bitpack Setup", "The product key you entered is invalid.\n\n"
+                                           "Please check your product key and try again.", 'error')
+    # def show_activation_error(self):
+        # """Show Windows 95 style error dialog for activation"""
+        # error_root = tk.Toplevel(self.root9955)
+        # error_root.title("Bitpack Setup")
+        # error_root.geometry("400x180")
+        # error_root.configure(bg='#c0c0c0')
+        # error_root.resizable(False, False)
+        # error_root.overrideredirect(True)
         
-        # Center the error window
-        error_root.update_idletasks()
-        x = (error_root.winfo_screenwidth() // 2) - (400 // 2)
-        y = (error_root.winfo_screenheight() // 2) - (180 // 2)
-        error_root.geometry(f"400x180+{x}+{y}")
+        # # Center the error window
+        # error_root.update_idletasks()
+        # x = (error_root.winfo_screenwidth() // 2) - (400 // 2)
+        # y = (error_root.winfo_screenheight() // 2) - (180 // 2)
+        # error_root.geometry(f"400x180+{x}+{y}")
         
-        # Main frame
-        main_frame = tk.Frame(error_root, bg='#c0c0c0', relief='raised', bd=2)
-        main_frame.pack(fill='both', expand=True, padx=2, pady=2)
+        # # Main frame
+        # main_frame = tk.Frame(error_root, bg='#c0c0c0', relief='raised', bd=2)
+        # main_frame.pack(fill='both', expand=True, padx=2, pady=2)
         
-        # Header
-        header_frame = tk.Frame(main_frame, bg='#000080', height=30)
-        header_frame.pack(fill='x')
-        header_frame.pack_propagate(False)
+        # # Header
+        # header_frame = tk.Frame(main_frame, bg='#000080', height=30)
+        # header_frame.pack(fill='x')
+        # header_frame.pack_propagate(False)
         
-        title_label = tk.Label(header_frame, text="Bitpack Setup - Activation Error", bg='#000080', fg='white', 
-                              font=('MS Sans Serif', 10, 'bold'))
-        title_label.pack(anchor='w', padx=10, pady=5)
+        # title_label = tk.Label(header_frame, text="Bitpack Setup - Activation Error", bg='#000080', fg='white', 
+                              # font=('MS Sans Serif', 10, 'bold'))
+        # title_label.pack(anchor='w', padx=10, pady=5)
         
-        # Content
-        content_frame = tk.Frame(main_frame, bg='#c0c0c0')
-        content_frame.pack(fill='both', expand=True, padx=20, pady=15)
+        # # Content
+        # content_frame = tk.Frame(main_frame, bg='#c0c0c0')
+        # content_frame.pack(fill='both', expand=True, padx=20, pady=15)
         
-        # Error icon and message
-        msg_frame = tk.Frame(content_frame, bg='#c0c0c0')
-        msg_frame.pack(expand=True)
+        # # Error icon and message
+        # msg_frame = tk.Frame(content_frame, bg='#c0c0c0')
+        # msg_frame.pack(expand=True)
         
-        # Error icon (using text)
-        icon_label = tk.Label(msg_frame, text="X", bg='#c0c0c0', fg='red', 
-                             font=('MS Sans Serif', 24, 'bold'))
-        icon_label.pack(side='left', padx=(0, 15))
+        # # Error icon (using text)
+        # icon_label = tk.Label(msg_frame, text="X", bg='#c0c0c0', fg='red', 
+                             # font=('MS Sans Serif', 24, 'bold'))
+        # icon_label.pack(side='left', padx=(0, 15))
         
-        # Error message
-        error_msg = tk.Label(msg_frame, text="The product key you entered is invalid.\n\nPlease check your product key and try again.", 
-                            bg='#c0c0c0', font=('MS Sans Serif', 9), justify='left')
-        error_msg.pack(side='left')
+        # # Error message
+        # error_msg = tk.Label(msg_frame, text="The product key you entered is invalid.\n\nPlease check your product key and try again.", 
+                            # bg='#c0c0c0', font=('MS Sans Serif', 9), justify='left')
+        # error_msg.pack(side='left')
         
-        # Button
-        button_frame = tk.Frame(main_frame, bg='#c0c0c0')
-        button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        # # Button
+        # button_frame = tk.Frame(main_frame, bg='#c0c0c0')
+        # button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
         
-        ok_button = tk.Button(button_frame, text='OK', command=error_root.destroy,
-                             width=10, height=1, font=('MS Sans Serif', 8))
-        ok_button.pack(side='right', padx=5)
+        # ok_button = tk.Button(button_frame, text='OK', command=error_root.destroy,
+                             # width=10, height=1, font=('MS Sans Serif', 8))
+        # ok_button.pack(side='right', padx=5)
         
-        # Bind ESC to close
-        error_root.bind('<Escape>', lambda e: error_root.destroy())
-    
+        # # Bind ESC to close
+        # error_root.bind('<Escape>', lambda e: error_root.destroy())
+
     def create_logo(self, parent_frame):
-        """Create a 3D retro PC logo similar to Windows 95 style"""
+        """Windows 95 style 'My Computer' picture: monitor, desktop case, keyboard and a CD-ROM"""
         logo_canvas = tk.Canvas(parent_frame, width=120, height=150, bg='#c0c0c0', 
                                highlightthickness=0)
         logo_canvas.pack(side='right', anchor='ne', padx=(20, 5), pady=10)
         
-        # Draw PC case (tower) - 3D effect
-        # Main front face
-        logo_canvas.create_rectangle(20, 25, 50, 75, fill='#e0e0e0', outline='#808080', width=1)
-        # Top face (3D)
-        logo_canvas.create_polygon(20, 25, 25, 20, 55, 20, 50, 25, fill='#f0f0f0', outline='#808080')
-        # Right face (3D)
-        logo_canvas.create_polygon(50, 25, 55, 20, 55, 70, 50, 75, fill='#d0d0d0', outline='#808080')
+        K, D, L, W = '#000000', '#808080', '#c0c0c0', '#ffffff'
+        T, C, N = '#008080', '#00ffff', '#000080'
+        px = self._pixel_pen(logo_canvas, 12, 2, 3)
         
-        # Draw floppy drive slot
-        logo_canvas.create_rectangle(25, 30, 45, 35, fill='#404040', outline='#202020')
+        # Monitor: black outline, grey body with white light (top, left) and dark shadow (bottom, right)
+        px(4, 0, 24, 18, K)
+        px(5, 1, 22, 16, L)
+        px(5, 1, 22, 1, W)
+        px(5, 1, 1, 16, W)
+        px(5, 16, 22, 1, D)
+        px(26, 1, 1, 16, D)
+        # Screen: black bezel, teal desktop, a small window with a navy title bar
+        px(7, 3, 18, 11, K)
+        px(8, 4, 16, 9, T)
+        px(8, 4, 2, 1, C)
+        px(8, 4, 1, 2, C)
+        px(11, 6, 10, 6, K)
+        px(12, 7, 8, 4, L)
+        px(12, 7, 8, 1, N)
+        px(13, 9, 6, 1, W)
+        px(24, 15, 1, 1, '#00ff00')                       # power LED
+        # Stand
+        px(13, 18, 6, 1, K)
+        px(14, 18, 4, 1, D)
+        px(10, 19, 12, 2, K)
+        px(11, 19, 10, 1, L)
         
-        # Draw CD-ROM drive
-        logo_canvas.create_rectangle(25, 40, 45, 45, fill='#606060', outline='#404040')
-        logo_canvas.create_rectangle(42, 41, 44, 44, fill='#808080', outline='#606060')
+        # Desktop case with floppy drive and lights
+        px(2, 21, 28, 7, K)
+        px(3, 22, 26, 5, L)
+        px(3, 22, 26, 1, W)
+        px(3, 22, 1, 5, W)
+        px(3, 26, 26, 1, D)
+        px(28, 22, 1, 5, D)
+        px(6, 24, 9, 1, K)
+        px(6, 25, 9, 1, D)
+        px(12, 23, 2, 1, D)
+        px(22, 24, 2, 1, '#00ff00')
+        px(25, 24, 2, 1, '#ffff00')
         
-        # Draw power button
-        logo_canvas.create_oval(40, 50, 45, 55, fill='#ff4040', outline='#cc0000')
+        # Keyboard
+        px(3, 29, 26, 5, K)
+        px(4, 30, 24, 3, L)
+        px(4, 30, 24, 1, W)
+        for i in range(11):
+            px(5 + i * 2, 31, 1, 1, D)
+        for i in range(10):
+            px(6 + i * 2, 32, 1, 1, D)
         
-        # Draw some ventilation lines
-        for i in range(3):
-            y = 60 + i * 3
-            logo_canvas.create_line(25, y, 45, y, fill='#a0a0a0', width=1)
+        # CD-ROM
+        self._pixel_disc(px, 16, 41, 6, L)
+
+    # def create_logo(self, parent_frame):
+        # """Create a 3D retro PC logo similar to Windows 95 style"""
+        # logo_canvas = tk.Canvas(parent_frame, width=120, height=150, bg='#c0c0c0', 
+                               # highlightthickness=0)
+        # logo_canvas.pack(side='right', anchor='ne', padx=(20, 5), pady=10)
         
-        # Draw monitor
-        # Monitor base/stand
-        logo_canvas.create_rectangle(65, 70, 85, 75, fill='#c0c0c0', outline='#808080')
-        # Monitor screen (3D)
-        logo_canvas.create_rectangle(60, 30, 90, 60, fill='#f0f0f0', outline='#808080', width=1)
-        # Top face
-        logo_canvas.create_polygon(60, 30, 65, 25, 95, 25, 90, 30, fill='#ffffff', outline='#808080')
-        # Right face
-        logo_canvas.create_polygon(90, 30, 95, 25, 95, 55, 90, 60, fill='#e0e0e0', outline='#808080')
+        # # Draw PC case (tower) - 3D effect
+        # # Main front face
+        # logo_canvas.create_rectangle(20, 25, 50, 75, fill='#e0e0e0', outline='#808080', width=1)
+        # # Top face (3D)
+        # logo_canvas.create_polygon(20, 25, 25, 20, 55, 20, 50, 25, fill='#f0f0f0', outline='#808080')
+        # # Right face (3D)
+        # logo_canvas.create_polygon(50, 25, 55, 20, 55, 70, 50, 75, fill='#d0d0d0', outline='#808080')
         
-        # Draw screen content (blue desktop)
-        logo_canvas.create_rectangle(65, 35, 85, 55, fill='#008080', outline='#008080')
+        # # Draw floppy drive slot
+        # logo_canvas.create_rectangle(25, 30, 45, 35, fill='#404040', outline='#202020')
         
-        # Draw small window on screen
-        logo_canvas.create_rectangle(68, 38, 80, 48, fill='#c0c0c0', outline='#808080')
-        logo_canvas.create_rectangle(68, 38, 80, 42, fill='#000080', outline='#000080')
+        # # Draw CD-ROM drive
+        # logo_canvas.create_rectangle(25, 40, 45, 45, fill='#606060', outline='#404040')
+        # logo_canvas.create_rectangle(42, 41, 44, 44, fill='#808080', outline='#606060')
         
-        # Draw keyboard (simple 3D)
-        logo_canvas.create_rectangle(55, 78, 95, 88, fill='#f0f0f0', outline='#808080')
-        logo_canvas.create_polygon(55, 78, 60, 73, 100, 73, 95, 78, fill='#ffffff', outline='#808080')
-        logo_canvas.create_polygon(95, 78, 100, 73, 100, 83, 95, 88, fill='#e0e0e0', outline='#808080')
+        # # Draw power button
+        # logo_canvas.create_oval(40, 50, 45, 55, fill='#ff4040', outline='#cc0000')
         
-        # Draw some keys
-        for x in range(4):
-            for y in range(2):
-                kx = 58 + x * 8
-                ky = 80 + y * 3
-                logo_canvas.create_rectangle(kx, ky, kx+5, ky+2, fill='#e8e8e8', outline='#c0c0c0')
+        # # Draw some ventilation lines
+        # for i in range(3):
+            # y = 60 + i * 3
+            # logo_canvas.create_line(25, y, 45, y, fill='#a0a0a0', width=1)
+        
+        # # Draw monitor
+        # # Monitor base/stand
+        # logo_canvas.create_rectangle(65, 70, 85, 75, fill='#c0c0c0', outline='#808080')
+        # # Monitor screen (3D)
+        # logo_canvas.create_rectangle(60, 30, 90, 60, fill='#f0f0f0', outline='#808080', width=1)
+        # # Top face
+        # logo_canvas.create_polygon(60, 30, 65, 25, 95, 25, 90, 30, fill='#ffffff', outline='#808080')
+        # # Right face
+        # logo_canvas.create_polygon(90, 30, 95, 25, 95, 55, 90, 60, fill='#e0e0e0', outline='#808080')
+        
+        # # Draw screen content (blue desktop)
+        # logo_canvas.create_rectangle(65, 35, 85, 55, fill='#008080', outline='#008080')
+        
+        # # Draw small window on screen
+        # logo_canvas.create_rectangle(68, 38, 80, 48, fill='#c0c0c0', outline='#808080')
+        # logo_canvas.create_rectangle(68, 38, 80, 42, fill='#000080', outline='#000080')
+        
+        # # Draw keyboard (simple 3D)
+        # logo_canvas.create_rectangle(55, 78, 95, 88, fill='#f0f0f0', outline='#808080')
+        # logo_canvas.create_polygon(55, 78, 60, 73, 100, 73, 95, 78, fill='#ffffff', outline='#808080')
+        # logo_canvas.create_polygon(95, 78, 100, 73, 100, 83, 95, 88, fill='#e0e0e0', outline='#808080')
+        
+        # # Draw some keys
+        # for x in range(4):
+            # for y in range(2):
+                # kx = 58 + x * 8
+                # ky = 80 + y * 3
+                # logo_canvas.create_rectangle(kx, ky, kx+5, ky+2, fill='#e8e8e8', outline='#c0c0c0')
                 
-        # === CD/DVD (middle) ===
-        # CD main circle
-        logo_canvas.create_oval(55, 105, 95, 135, fill='#e0e0ff', outline='#8080c0', width=2)
-        # Inner hole
-        logo_canvas.create_oval(72, 117, 78, 123, fill='#c0c0c0', outline='#808080', width=2)
-        # CD reflective rings
-        logo_canvas.create_oval(58, 108, 92, 132, fill='', outline='#c0c0ff', width=1)
-        logo_canvas.create_oval(61, 111, 89, 129, fill='', outline='#a0a0ff', width=1)
-        logo_canvas.create_oval(64, 114, 86, 126, fill='', outline='#8080ff', width=1)
-        # CD label area
-        logo_canvas.create_arc(58, 108, 92, 125, start=45, extent=90, fill='#ffffff', outline='#cccccc', width=1)
-        # CD rainbow reflection effect
-        logo_canvas.create_arc(60, 110, 90, 130, start=0, extent=30, outline='#ff80ff', width=1)
-        logo_canvas.create_arc(60, 110, 90, 130, start=30, extent=30, outline='#80ff80', width=1)
-        logo_canvas.create_arc(60, 110, 90, 130, start=60, extent=30, outline='#8080ff', width=1)
+        # # === CD/DVD (middle) ===
+        # # CD main circle
+        # logo_canvas.create_oval(55, 105, 95, 135, fill='#e0e0ff', outline='#8080c0', width=2)
+        # # Inner hole
+        # logo_canvas.create_oval(72, 117, 78, 123, fill='#c0c0c0', outline='#808080', width=2)
+        # # CD reflective rings
+        # logo_canvas.create_oval(58, 108, 92, 132, fill='', outline='#c0c0ff', width=1)
+        # logo_canvas.create_oval(61, 111, 89, 129, fill='', outline='#a0a0ff', width=1)
+        # logo_canvas.create_oval(64, 114, 86, 126, fill='', outline='#8080ff', width=1)
+        # # CD label area
+        # logo_canvas.create_arc(58, 108, 92, 125, start=45, extent=90, fill='#ffffff', outline='#cccccc', width=1)
+        # # CD rainbow reflection effect
+        # logo_canvas.create_arc(60, 110, 90, 130, start=0, extent=30, outline='#ff80ff', width=1)
+        # logo_canvas.create_arc(60, 110, 90, 130, start=30, extent=30, outline='#80ff80', width=1)
+        # logo_canvas.create_arc(60, 110, 90, 130, start=60, extent=30, outline='#8080ff', width=1)
         # # CD main circle
         # logo_canvas.create_oval(50, 95, 100, 145, fill='#e0e0ff', outline='#8080c0', width=2)
         # # Inner hole
@@ -13192,102 +13577,156 @@ class Windows95Installer:
         # logo_canvas.create_arc(25, 110, 55, 130, start=60, extent=30, outline='#8080ff', width=1)        
         
     def create_usb_logo(self, parent_frame):
-        """Create a realistic USB stick logo in Windows 95 style"""
+        """Windows 95 style Startup Disk picture: a 3.5" floppy, an arrow and a USB stick"""
         logo_canvas = tk.Canvas(parent_frame, width=180, height=160, bg='#c0c0c0', 
                                highlightthickness=0)
         logo_canvas.pack(side='right', anchor='ne', padx=(0, 5), pady=10)
         
-        # === USB STICK (top) ===
-        # Main USB body
-        logo_canvas.create_rectangle(50, 15, 100, 30, fill='#2060d0', outline='#1040a0', width=1)
-        # Top face (3D)
-        logo_canvas.create_polygon(50, 15, 53, 12, 103, 12, 100, 15, fill='#4080ff', outline='#1040a0')
-        # Right face (3D)
-        logo_canvas.create_polygon(100, 15, 103, 12, 103, 27, 100, 30, fill='#1040a0', outline='#003080')
+        K, D, L, W = '#000000', '#808080', '#c0c0c0', '#ffffff'
+        N, B, R = '#000080', '#0000ff', '#ff0000'
+        
+        # 3.5" floppy disk (the Windows 95 Startup Disk)
+        px = self._pixel_pen(logo_canvas, 8, 20, 4)
+        px(0, 0, 16, 16, K)
+        px(1, 1, 1, 14, D)
+        px(4, 0, 8, 6, L)
+        px(4, 0, 8, 1, W)
+        px(11, 1, 1, 5, D)
+        px(8, 1, 2, 4, K)
+        px(2, 8, 12, 7, W)
+        px(3, 10, 10, 1, B)
+        px(3, 12, 10, 1, B)
+        px(15, 0, 1, 1, L)                                # cut corner
+        
+        # Arrow: floppy -> USB stick
+        px = self._pixel_pen(logo_canvas, 80, 44, 4)
+        px(0, 3, 5, 2, K)
+        px(5, 1, 1, 6, K)
+        px(6, 2, 1, 4, K)
+        px(7, 3, 1, 2, K)
+        
+        # USB stick: navy body with light, red LED, white label, metal connector
+        px = self._pixel_pen(logo_canvas, 116, 36, 4)
+        px(0, 0, 12, 9, K)
+        px(1, 1, 10, 7, N)
+        px(1, 1, 10, 1, B)
+        px(1, 1, 1, 7, B)
+        px(2, 4, 1, 1, R)
+        px(4, 3, 6, 3, W)
+        px(5, 4, 4, 1, D)
+        px(12, 1, 3, 7, K)
+        px(12, 2, 2, 5, L)
+        px(12, 2, 2, 1, W)
+        px(13, 3, 1, 1, K)
+        px(13, 5, 1, 1, K)
+        
+        # Captions
+        logo_canvas.create_text(40, 100, text="Startup Disk", fill='#000080', font=('MS Sans Serif', 8, 'bold'))
+        logo_canvas.create_text(146, 100, text="USB", fill='#000080', font=('MS Sans Serif', 8, 'bold'))
+    # def create_usb_logo(self, parent_frame):
+        # """Create a realistic USB stick logo in Windows 95 style"""
+        # logo_canvas = tk.Canvas(parent_frame, width=180, height=160, bg='#c0c0c0', 
+                               # highlightthickness=0)
+        # logo_canvas.pack(side='right', anchor='ne', padx=(0, 5), pady=10)
+        
+        # # === USB STICK (top) ===
+        # # Main USB body
+        # logo_canvas.create_rectangle(50, 15, 100, 30, fill='#2060d0', outline='#1040a0', width=1)
+        # # Top face (3D)
+        # logo_canvas.create_polygon(50, 15, 53, 12, 103, 12, 100, 15, fill='#4080ff', outline='#1040a0')
+        # # Right face (3D)
+        # logo_canvas.create_polygon(100, 15, 103, 12, 103, 27, 100, 30, fill='#1040a0', outline='#003080')
 
-        # USB connector
-        logo_canvas.create_rectangle(100, 17, 110, 28, fill='#c0c0c0', outline='#808080', width=1)
-        logo_canvas.create_polygon(100, 17, 102, 15, 112, 15, 110, 17, fill='#e0e0e0', outline='#808080')
-        logo_canvas.create_polygon(110, 17, 112, 15, 112, 26, 110, 28, fill='#a0a0a0', outline='#808080')
+        # # USB connector
+        # logo_canvas.create_rectangle(100, 17, 110, 28, fill='#c0c0c0', outline='#808080', width=1)
+        # logo_canvas.create_polygon(100, 17, 102, 15, 112, 15, 110, 17, fill='#e0e0e0', outline='#808080')
+        # logo_canvas.create_polygon(110, 17, 112, 15, 112, 26, 110, 28, fill='#a0a0a0', outline='#808080')
 
-        # USB connector interior and contacts
-        logo_canvas.create_rectangle(107, 19, 109, 26, fill='#404040', outline='#202020')
-        logo_canvas.create_rectangle(107, 20, 108, 25, fill='#ffd700', outline='#ccaa00')
+        # # USB connector interior and contacts
+        # logo_canvas.create_rectangle(107, 19, 109, 26, fill='#404040', outline='#202020')
+        # logo_canvas.create_rectangle(107, 20, 108, 25, fill='#ffd700', outline='#ccaa00')
 
-        # USB logo
-        logo_canvas.create_rectangle(65, 18, 75, 27, fill='#ffffff', outline='#cccccc')
-        logo_canvas.create_line(70, 20, 70, 25, fill='#000000', width=2)
-        logo_canvas.create_line(70, 21, 68, 20, fill='#000000', width=1)
-        logo_canvas.create_line(70, 21, 72, 20, fill='#000000', width=1)
-        logo_canvas.create_oval(67, 19, 69, 21, fill='#000000')
-        logo_canvas.create_rectangle(71, 19, 73, 21, fill='#000000')
+        # # USB logo
+        # logo_canvas.create_rectangle(65, 18, 75, 27, fill='#ffffff', outline='#cccccc')
+        # logo_canvas.create_line(70, 20, 70, 25, fill='#000000', width=2)
+        # logo_canvas.create_line(70, 21, 68, 20, fill='#000000', width=1)
+        # logo_canvas.create_line(70, 21, 72, 20, fill='#000000', width=1)
+        # logo_canvas.create_oval(67, 19, 69, 21, fill='#000000')
+        # logo_canvas.create_rectangle(71, 19, 73, 21, fill='#000000')
 
-        # USB LED
-        logo_canvas.create_oval(55, 20, 58, 23, fill='#ff0000', outline='#cc0000')
+        # # USB LED
+        # logo_canvas.create_oval(55, 20, 58, 23, fill='#ff0000', outline='#cc0000')
         
     def show_validation_error(self, error_type):
         """Show Windows 95 style validation error dialog"""
-        error_root = tk.Tk()
-        error_root.title("Bitpack Setup")
-        error_root.geometry("450x180")
-        error_root.configure(bg='#c0c0c0')
-        error_root.resizable(False, False)
-        error_root.overrideredirect(True)
-        
-        # Center the error window
-        error_root.update_idletasks()
-        x = (error_root.winfo_screenwidth() // 2) - (450 // 2)
-        y = (error_root.winfo_screenheight() // 2) - (180 // 2)
-        error_root.geometry(f"450x200+{x}+{y}")
-        
-        # Main frame
-        main_frame = tk.Frame(error_root, bg='#c0c0c0', relief='raised', bd=2)
-        main_frame.pack(fill='both', expand=True, padx=2, pady=2)
-        
-        # Header
-        header_frame = tk.Frame(main_frame, bg='#000080', height=30)
-        header_frame.pack(fill='x')
-        header_frame.pack_propagate(False)
-        
-        title_label = tk.Label(header_frame, text="Bitpack Setup - Validation Error", bg='#000080', fg='white', 
-                              font=('MS Sans Serif', 10, 'bold'))
-        title_label.pack(anchor='w', padx=10, pady=5)
-        
-        # Content
-        content_frame = tk.Frame(main_frame, bg='#c0c0c0')
-        content_frame.pack(fill='both', expand=True, padx=20, pady=15)
-        
-        # Error icon and message
-        msg_frame = tk.Frame(content_frame, bg='#c0c0c0')
-        msg_frame.pack(expand=True)
-        
-        # Error icon
-        icon_label = tk.Label(msg_frame, text="X", bg='#c0c0c0', fg='red', 
-                             font=('MS Sans Serif', 24))
-        icon_label.pack(side='left', padx=(0, 15))
-        
-        # Error message based on type
         if error_type == "user":
             error_text = f"Invalid user name!\n\nThe entered user name does not match\nthe current system user: {self.actual_user}\n\nPlease enter the correct user name."
         else:  # computer
             error_text = f"Invalid computer name!\n\nThe entered computer name does not match\nthe current system name: {self.actual_computer}\n\nPlease enter the correct computer name."
+        self.win95_dialog("Bitpack Setup", error_text, 'error')
+    # def show_validation_error(self, error_type):
+        # """Show Windows 95 style validation error dialog"""
+        # error_root = tk.Tk()
+        # error_root.title("Bitpack Setup")
+        # error_root.geometry("450x180")
+        # error_root.configure(bg='#c0c0c0')
+        # error_root.resizable(False, False)
+        # error_root.overrideredirect(True)
         
-        error_msg = tk.Label(msg_frame, text=error_text, 
-                            bg='#c0c0c0', font=('MS Sans Serif', 9), justify='left')
-        error_msg.pack(side='left')
+        # # Center the error window
+        # error_root.update_idletasks()
+        # x = (error_root.winfo_screenwidth() // 2) - (450 // 2)
+        # y = (error_root.winfo_screenheight() // 2) - (180 // 2)
+        # error_root.geometry(f"450x200+{x}+{y}")
         
-        # Button
-        button_frame = tk.Frame(main_frame, bg='#c0c0c0')
-        button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        # # Main frame
+        # main_frame = tk.Frame(error_root, bg='#c0c0c0', relief='raised', bd=2)
+        # main_frame.pack(fill='both', expand=True, padx=2, pady=2)
         
-        ok_button = tk.Button(button_frame, text='OK', command=error_root.destroy,
-                             width=10, height=1, font=('MS Sans Serif', 8))
-        ok_button.pack(side='right', padx=5)
+        # # Header
+        # header_frame = tk.Frame(main_frame, bg='#000080', height=30)
+        # header_frame.pack(fill='x')
+        # header_frame.pack_propagate(False)
         
-        # Bind ESC to close
-        error_root.bind('<Escape>', lambda e: error_root.destroy())
+        # title_label = tk.Label(header_frame, text="Bitpack Setup - Validation Error", bg='#000080', fg='white', 
+                              # font=('MS Sans Serif', 10, 'bold'))
+        # title_label.pack(anchor='w', padx=10, pady=5)
         
-        error_root.mainloop()
+        # # Content
+        # content_frame = tk.Frame(main_frame, bg='#c0c0c0')
+        # content_frame.pack(fill='both', expand=True, padx=20, pady=15)
+        
+        # # Error icon and message
+        # msg_frame = tk.Frame(content_frame, bg='#c0c0c0')
+        # msg_frame.pack(expand=True)
+        
+        # # Error icon
+        # icon_label = tk.Label(msg_frame, text="X", bg='#c0c0c0', fg='red', 
+                             # font=('MS Sans Serif', 24))
+        # icon_label.pack(side='left', padx=(0, 15))
+        
+        # # Error message based on type
+        # if error_type == "user":
+            # error_text = f"Invalid user name!\n\nThe entered user name does not match\nthe current system user: {self.actual_user}\n\nPlease enter the correct user name."
+        # else:  # computer
+            # error_text = f"Invalid computer name!\n\nThe entered computer name does not match\nthe current system name: {self.actual_computer}\n\nPlease enter the correct computer name."
+        
+        # error_msg = tk.Label(msg_frame, text=error_text, 
+                            # bg='#c0c0c0', font=('MS Sans Serif', 9), justify='left')
+        # error_msg.pack(side='left')
+        
+        # # Button
+        # button_frame = tk.Frame(main_frame, bg='#c0c0c0')
+        # button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        
+        # ok_button = tk.Button(button_frame, text='OK', command=error_root.destroy,
+                             # width=10, height=1, font=('MS Sans Serif', 8))
+        # ok_button.pack(side='right', padx=5)
+        
+        # # Bind ESC to close
+        # error_root.bind('<Escape>', lambda e: error_root.destroy())
+        
+        # error_root.mainloop()
     
 
     def show_validation_error_USB(self):
@@ -13304,66 +13743,83 @@ class Windows95Installer:
             return True
         
         # No USB found, show error dialog
-        error_root_USB = tk.Tk()
-        error_root_USB.title("Bitpack Setup")
-        error_root_USB.geometry("450x180")
-        error_root_USB.configure(bg='#c0c0c0')
-        error_root_USB.resizable(False, False)
-        error_root_USB.overrideredirect(True)
-        
-        # Center the error window
-        error_root_USB.update_idletasks()
-        x = (error_root_USB.winfo_screenwidth() // 2) - (450 // 2)
-        y = (error_root_USB.winfo_screenheight() // 2) - (180 // 2)
-        error_root_USB.geometry(f"450x200+{x}+{y}")
-        
-        # Main frame
-        main_frame = tk.Frame(error_root_USB, bg='#c0c0c0', relief='raised', bd=2)
-        main_frame.pack(fill='both', expand=True, padx=2, pady=2)
-        
-        # Header
-        header_frame = tk.Frame(main_frame, bg='#000080', height=30)
-        header_frame.pack(fill='x')
-        header_frame.pack_propagate(False)
-        
-        title_label = tk.Label(header_frame, text="Bitpack Setup - USB Detection Error", 
-                              bg='#000080', fg='white', font=('MS Sans Serif', 10, 'bold'))
-        title_label.pack(anchor='w', padx=10, pady=5)
-        
-        # Content
-        content_frame = tk.Frame(main_frame, bg='#c0c0c0')
-        content_frame.pack(fill='both', expand=True, padx=20, pady=15)
-        
-        # Error icon and message
-        msg_frame = tk.Frame(content_frame, bg='#c0c0c0')
-        msg_frame.pack(expand=True)
-        
-        # Error icon
-        icon_label = tk.Label(msg_frame, text="X", bg='#c0c0c0', fg='red', 
-                             font=('MS Sans Serif', 24))
-        icon_label.pack(side='left', padx=(0, 15))
-        
-        # Error message for USB
-        error_text = "No USB devices found.\n\nPlease connect a USB device and\ntry again to continue with the setup."
-        
-        error_msg = tk.Label(msg_frame, text=error_text, 
-                            bg='#c0c0c0', font=('MS Sans Serif', 9), justify='left')
-        error_msg.pack(side='left')
-        
-        # Button
-        button_frame = tk.Frame(main_frame, bg='#c0c0c0')
-        button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
-        
-        ok_button = tk.Button(button_frame, text='OK', command=error_root_USB.destroy,
-                             width=10, height=1, font=('MS Sans Serif', 8))
-        ok_button.pack(side='right', padx=5)
-        
-        # Bind ESC to close
-        error_root_USB.bind('<Escape>', lambda e: error_root_USB.destroy())
-        
-        error_root_USB.mainloop()
-        
+        self.win95_dialog("Bitpack Setup", "No USB devices found.\n\nPlease connect a USB device and\n"
+                                           "try again to continue with the setup.", 'error')
         return False
+    # def show_validation_error_USB(self):
+        # """Show Windows 95 style validation error dialog for USB detection"""
+        # # Check for USB devices
+        # usb_devices = [partition for partition in psutil.disk_partitions() 
+                       # if 'removable' in partition.opts]
+        
+        # if usb_devices:
+            # # USB found, rename it to BITPACK
+            # for device in usb_devices:
+                # drive_letter = device.device.rstrip('\\')
+                # self.rename_usb_to_multiapp(drive_letter)
+            # return True
+        
+        # # No USB found, show error dialog
+        # error_root_USB = tk.Tk()
+        # error_root_USB.title("Bitpack Setup")
+        # error_root_USB.geometry("450x180")
+        # error_root_USB.configure(bg='#c0c0c0')
+        # error_root_USB.resizable(False, False)
+        # error_root_USB.overrideredirect(True)
+        
+        # # Center the error window
+        # error_root_USB.update_idletasks()
+        # x = (error_root_USB.winfo_screenwidth() // 2) - (450 // 2)
+        # y = (error_root_USB.winfo_screenheight() // 2) - (180 // 2)
+        # error_root_USB.geometry(f"450x200+{x}+{y}")
+        
+        # # Main frame
+        # main_frame = tk.Frame(error_root_USB, bg='#c0c0c0', relief='raised', bd=2)
+        # main_frame.pack(fill='both', expand=True, padx=2, pady=2)
+        
+        # # Header
+        # header_frame = tk.Frame(main_frame, bg='#000080', height=30)
+        # header_frame.pack(fill='x')
+        # header_frame.pack_propagate(False)
+        
+        # title_label = tk.Label(header_frame, text="Bitpack Setup - USB Detection Error", 
+                              # bg='#000080', fg='white', font=('MS Sans Serif', 10, 'bold'))
+        # title_label.pack(anchor='w', padx=10, pady=5)
+        
+        # # Content
+        # content_frame = tk.Frame(main_frame, bg='#c0c0c0')
+        # content_frame.pack(fill='both', expand=True, padx=20, pady=15)
+        
+        # # Error icon and message
+        # msg_frame = tk.Frame(content_frame, bg='#c0c0c0')
+        # msg_frame.pack(expand=True)
+        
+        # # Error icon
+        # icon_label = tk.Label(msg_frame, text="X", bg='#c0c0c0', fg='red', 
+                             # font=('MS Sans Serif', 24))
+        # icon_label.pack(side='left', padx=(0, 15))
+        
+        # # Error message for USB
+        # error_text = "No USB devices found.\n\nPlease connect a USB device and\ntry again to continue with the setup."
+        
+        # error_msg = tk.Label(msg_frame, text=error_text, 
+                            # bg='#c0c0c0', font=('MS Sans Serif', 9), justify='left')
+        # error_msg.pack(side='left')
+        
+        # # Button
+        # button_frame = tk.Frame(main_frame, bg='#c0c0c0')
+        # button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        
+        # ok_button = tk.Button(button_frame, text='OK', command=error_root_USB.destroy,
+                             # width=10, height=1, font=('MS Sans Serif', 8))
+        # ok_button.pack(side='right', padx=5)
+        
+        # # Bind ESC to close
+        # error_root_USB.bind('<Escape>', lambda e: error_root_USB.destroy())
+        
+        # error_root_USB.mainloop()
+        
+        # return False
 
     def rename_usb_to_multiapp(self, drive_letter):
         """Rename USB drive to BITPACK using Windows label command"""
@@ -13395,57 +13851,126 @@ class Windows95Installer:
         self.show_components()
     
     def toggle_fullscreen(self, event=None):
-        """Toggle between fullscreen and windowed mode"""
+        """Esc: full screen (blue Setup background) or only the 640x480 Setup window"""
+        if self.special_screen:
+            return
+        screen_width = self.root9955.winfo_screenwidth()
+        screen_height = self.root9955.winfo_screenheight()
         if self.is_fullscreen:
-            # Exit fullscreen - restore to exact original state
-            self.root9955.state('normal')  # First normalize the window
-            self.root9955.geometry(self.normal_geometry)  # Restore size
-            self.center_window()  # Center it
             self.is_fullscreen = False
+            x = (screen_width - 640) // 2
+            y = (screen_height - 480) // 2
+            self.root9955.geometry(f"640x480+{x}+{y}")
+            self.dialog.place(x=0, y=0, width=640, height=480)
         else:
-            # Enter fullscreen - save current state and maximize without title bar
-            self.normal_geometry = self.root9955.geometry()
-            # Get screen dimensions
-            screen_width = self.root9955.winfo_screenwidth()
-            screen_height = self.root9955.winfo_screenheight()
-            # Set to full screen size without title bar
-            self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
             self.is_fullscreen = True
-    
+            self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
+            self.dialog_pos = ((screen_width - 640) // 2, (screen_height - 480) // 2)
+            self.dialog.place(x=self.dialog_pos[0], y=self.dialog_pos[1], width=640, height=480)
+        self.root9955.after(20, self.draw_background)
+    # def toggle_fullscreen(self, event=None):
+        # """Toggle between fullscreen and windowed mode"""
+        # if self.is_fullscreen:
+            # # Exit fullscreen - restore to exact original state
+            # self.root9955.state('normal')  # First normalize the window
+            # self.root9955.geometry(self.normal_geometry)  # Restore size
+            # self.center_window()  # Center it
+            # self.is_fullscreen = False
+        # else:
+            # # Enter fullscreen - save current state and maximize without title bar
+            # self.normal_geometry = self.root9955.geometry()
+            # # Get screen dimensions
+            # screen_width = self.root9955.winfo_screenwidth()
+            # screen_height = self.root9955.winfo_screenheight()
+            # # Set to full screen size without title bar
+            # self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
+            # self.is_fullscreen = True
+
     def center_window(self):
-        self.root9955.update_idletasks()
-        x = (self.root9955.winfo_screenwidth() // 2) - (640 // 2)
-        y = (self.root9955.winfo_screenheight() // 2) - (480 // 2)
-        self.root9955.geometry(f"640x480+{x}+{y}")
+        if not self.is_fullscreen:
+            self.root9955.update_idletasks()
+            x = (self.root9955.winfo_screenwidth() // 2) - (640 // 2)
+            y = (self.root9955.winfo_screenheight() // 2) - (480 // 2)
+            self.root9955.geometry(f"640x480+{x}+{y}")
+    # def center_window(self):
+        # self.root9955.update_idletasks()
+        # x = (self.root9955.winfo_screenwidth() // 2) - (640 // 2)
+        # y = (self.root9955.winfo_screenheight() // 2) - (480 // 2)
+        # self.root9955.geometry(f"640x480+{x}+{y}")
     
     def clear_frame(self):
         for widget in self.main_frame.winfo_children():
             widget.destroy()
-    
+
     def create_header(self, title, subtitle=""):
-        header_frame = tk.Frame(self.main_frame, bg='#000080', height=60)
-        header_frame.pack(fill='x', pady=(0, 10))
-        header_frame.pack_propagate(False)
+        """Windows 95 wizard page title (bold text), instead of the navy band"""
+        text = title if title not in ("Bitpack", "Bitpack Setup") else (subtitle or title)
+        tk.Label(self.main_frame, text=text, bg='#c0c0c0', fg='black',
+                 font=('MS Sans Serif', 10, 'bold'), anchor='w').pack(fill='x', padx=20, pady=(12, 0))    
+    # def create_header(self, title, subtitle=""):
+        # header_frame = tk.Frame(self.main_frame, bg='#000080', height=60)
+        # header_frame.pack(fill='x', pady=(0, 10))
+        # header_frame.pack_propagate(False)
         
-        title_label = tk.Label(header_frame, text=title, bg='#000080', fg='white', 
-                              font=('MS Sans Serif', 14, 'bold'))
-        title_label.pack(anchor='w', padx=10, pady=(8, 0))
+        # title_label = tk.Label(header_frame, text=title, bg='#000080', fg='white', 
+                              # font=('MS Sans Serif', 14, 'bold'))
+        # title_label.pack(anchor='w', padx=10, pady=(8, 0))
         
-        if subtitle:
-            subtitle_label = tk.Label(header_frame, text=subtitle, bg='#000080', fg='white', 
-                                    font=('MS Sans Serif', 8))
-            subtitle_label.pack(anchor='w', padx=10)
-    
+        # if subtitle:
+            # subtitle_label = tk.Label(header_frame, text=subtitle, bg='#000080', fg='white', 
+                                    # font=('MS Sans Serif', 8))
+            # subtitle_label.pack(anchor='w', padx=10)
+
     def create_buttons(self, buttons_config):
+        """Windows 95 order on every page: < Back, Next >, Cancel ('Exit' is shown as Cancel)"""
         button_frame = tk.Frame(self.main_frame, bg='#c0c0c0')
-        button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        button_frame.pack(side='bottom', fill='x', padx=10, pady=(6, 10))
+        tk.Frame(self.main_frame, bg='white', height=1).pack(side='bottom', fill='x', padx=10)
+        tk.Frame(self.main_frame, bg='#808080', height=1).pack(side='bottom', fill='x', padx=10)
         
+        back_command = None
+        next_config = None
+        show_cancel = False
+        left_buttons = []
         for btn_config in buttons_config:
-            btn = tk.Button(button_frame, text=btn_config['text'], 
-                           command=btn_config['command'],
-                           width=10, height=1,
-                           font=('MS Sans Serif', 8))
-            btn.pack(side=btn_config.get('side', 'right'), padx=5)
+            if btn_config['text'] == '< Back':
+                back_command = btn_config['command']
+            elif btn_config['text'] == 'Exit':
+                show_cancel = True
+            elif btn_config.get('side') == 'left':
+                left_buttons.append(btn_config)
+            else:
+                next_config = btn_config
+        
+        for btn_config in left_buttons:
+            tk.Button(button_frame, text=btn_config['text'], command=btn_config['command'],
+                      width=12, height=1, font=('MS Sans Serif', 8)).pack(side='left')
+        
+        right_frame = tk.Frame(button_frame, bg='#c0c0c0')
+        right_frame.pack(side='right')
+        if back_command is not None or (next_config is not None and next_config['text'] == 'Next >'):
+            tk.Button(right_frame, text='< Back', command=back_command or (lambda: None),
+                      state='normal' if back_command else 'disabled',
+                      width=10, height=1, font=('MS Sans Serif', 8)).pack(side='left')
+        self.default_button = None
+        if next_config is not None:
+            self.default_button = tk.Button(right_frame, text=next_config['text'], command=next_config['command'],
+                                            width=10, height=1, font=('MS Sans Serif', 8, 'bold'),
+                                            highlightthickness=1, highlightbackground='black')
+            self.default_button.pack(side='left', padx=(0, 8))
+        if show_cancel:
+            tk.Button(right_frame, text='Cancel', command=self.cancel,
+                      width=10, height=1, font=('MS Sans Serif', 8)).pack(side='left')    
+    # def create_buttons(self, buttons_config):
+        # button_frame = tk.Frame(self.main_frame, bg='#c0c0c0')
+        # button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
+        
+        # for btn_config in buttons_config:
+            # btn = tk.Button(button_frame, text=btn_config['text'], 
+                           # command=btn_config['command'],
+                           # width=10, height=1,
+                           # font=('MS Sans Serif', 8))
+            # btn.pack(side=btn_config.get('side', 'right'), padx=5)
     
     def show_welcome_screen(self):
        #dpi_report("2. welcome")
@@ -13457,12 +13982,12 @@ class Windows95Installer:
        self.create_logo(content_frame)
        
        welcome_text = """Welcome to Bitpack Setup.
-    This Setup program will configure Bitpack on your computer.
-    - To continue configuring Bitpack, click Next.
-    - To learn more about Bitpack before continuing, 
-     read the documentation.
-    - To quit Setup without configuring Bitpack, click Exit.
-    - Press ESC to switch between full screen and minimized window size."""
+This Setup program will configure Bitpack on your computer.
+- To continue configuring Bitpack, click Next.
+- To learn more about Bitpack before continuing, 
+ read the documentation.
+- To quit Setup without configuring Bitpack, click Exit.
+- Press ESC to switch between full screen and minimized window size."""
        
        text_label = tk.Label(content_frame, text=welcome_text, bg='#c0c0c0', 
                             font=('MS Sans Serif', 9), justify='left', 
@@ -13477,7 +14002,9 @@ class Windows95Installer:
        #logo_label = tk.Label(logo_frame, text="Multiapp\n95\nProfessional", bg='#c0c0c0', 
        #                     font=('Arial', 18, 'bold'), fg='#000080')
        logo_label = tk.Label(logo_frame, text="Bitpack", bg='#c0c0c0', 
-                            font=('Arial', 18, 'bold'), fg='#000080')
+                            font=('Times New Roman', 22, 'bold italic'), fg='#000080')
+       # logo_label = tk.Label(logo_frame, text="Bitpack", bg='#c0c0c0', 
+                            # font=('Arial', 18, 'bold'), fg='#000080')
        logo_label.pack()
        
        self.create_buttons([
@@ -13582,8 +14109,11 @@ class Windows95Installer:
         scrollbar.pack(side='right', fill='y')
         
         license_text = tk.Text(text_frame, bg='white', fg='black', 
-                              font=('MS Sans Serif', 8),
+                              font=('MS Sans Serif', 8), height=14,
                               yscrollcommand=scrollbar.set, wrap='word')
+        # license_text = tk.Text(text_frame, bg='white', fg='black', 
+                              # font=('MS Sans Serif', 8),
+                              # yscrollcommand=scrollbar.set, wrap='word')
 
         license_content = """
 BITPACK SOFTWARE LICENSE TERMS
@@ -13727,17 +14257,30 @@ All rights reserved.
         button_frame = tk.Frame(agreement_frame, bg='#c0c0c0')
         button_frame.pack(side='right')
         
-        # Create all buttons in the agreement frame
+        # Windows 95 order: < Back, Next >, Cancel (packed from the right)
+        tk.Button(button_frame, text='Cancel', command=self.cancel,
+                 width=10, height=1, font=('MS Sans Serif', 8)).pack(side='right', padx=2)
+        
         self.next_button = tk.Button(button_frame, text='Next >', command=self.show_product_activation,
                                    width=10, height=1, state='disabled',
-                                   font=('MS Sans Serif', 8))
-        self.next_button.pack(side='right', padx=2)
-        
-        tk.Button(button_frame, text='Exit', command=self.EXITO,
-                 width=10, height=1, font=('MS Sans Serif', 8)).pack(side='right', padx=2)
+                                   font=('MS Sans Serif', 8, 'bold'),
+                                   highlightthickness=1, highlightbackground='black')
+        self.next_button.pack(side='right', padx=(2, 8))
+        self.default_button = self.next_button
         
         tk.Button(button_frame, text='< Back', command=self.show_welcome_screen,
                  width=10, height=1, font=('MS Sans Serif', 8)).pack(side='right', padx=2)
+        # # Create all buttons in the agreement frame
+        # self.next_button = tk.Button(button_frame, text='Next >', command=self.show_product_activation,
+                                   # width=10, height=1, state='disabled',
+                                   # font=('MS Sans Serif', 8))
+        # self.next_button.pack(side='right', padx=2)
+        
+        # tk.Button(button_frame, text='Exit', command=self.EXITO,
+                 # width=10, height=1, font=('MS Sans Serif', 8)).pack(side='right', padx=2)
+        
+        # tk.Button(button_frame, text='< Back', command=self.show_welcome_screen,
+                 # width=10, height=1, font=('MS Sans Serif', 8)).pack(side='right', padx=2)
     
     def toggle_next_button(self):
         if hasattr(self, 'next_button'):
@@ -13778,130 +14321,172 @@ All rights reserved.
             {'text': 'Next >', 'command': self.validate_and_continue_from_user_info, 'side': 'right'},
             {'text': 'Exit', 'command': self.EXITO, 'side': 'right'}
         ])
-    
+
     def create_key_logo(self, parent_frame):
-        """Create a pixelated yellow key logo"""
+        """Windows 95 style key picture (like the Passwords icon) for the Product Key page"""
         logo_canvas = tk.Canvas(parent_frame, width=120, height=100, bg='#c0c0c0', 
                                highlightthickness=0)
         logo_canvas.pack(side='right', anchor='ne', padx=(0, 20), pady=10)
         
-        # Pixel colors
-        key_yellow = '#FFD700'  # Golden yellow
-        key_dark = '#B8860B'    # Dark goldenrod
-        key_light = '#FFFF00'   # Bright yellow
-        key_shadow = '#8B6914'  # Darker shadow
+        K, W, Y, O = '#000000', '#ffffff', '#ffff00', '#808000'
+        px = self._pixel_pen(logo_canvas, 12, 14, 3)
         
-        # Pixel size
-        pixel_size = 4
+        # Key ring: black outline, yellow metal, white shine (top left), dark shade (bottom right)
+        for y in range(-6, 7):
+            for x in range(-6, 7):
+                d = (x * x + y * y) ** 0.5
+                if d > 6.3 or d < 2.2:
+                    continue
+                if d > 5.4 or d < 3.0:
+                    colour = K
+                elif x + y < -4:
+                    colour = W
+                elif x + y > 3:
+                    colour = O
+                else:
+                    colour = Y
+                px(7 + x, 8 + y, 1, 1, colour)
         
-        # Key head - pixelated circle shape
-        # This is a 2D array representing our pixel art
-        # 0 = empty, 1 = shadow, 2 = dark, 3 = main color, 4 = highlight
-        key_head = [
-            [0, 0, 0, 1, 2, 2, 2, 1, 0, 0, 0],
-            [0, 0, 2, 2, 3, 3, 3, 2, 2, 0, 0],
-            [0, 2, 2, 3, 3, 3, 3, 3, 2, 2, 0],
-            [1, 2, 3, 3, 2, 2, 2, 3, 3, 2, 1],
-            [2, 3, 3, 2, 0, 0, 0, 2, 3, 3, 2],
-            [2, 3, 3, 2, 0, 0, 0, 2, 3, 3, 2],
-            [2, 3, 3, 2, 0, 0, 0, 2, 3, 3, 2],
-            [1, 2, 3, 3, 2, 2, 2, 3, 3, 2, 1],
-            [0, 2, 2, 3, 3, 3, 3, 3, 2, 2, 0],
-            [0, 0, 2, 2, 3, 3, 3, 2, 2, 0, 0],
-            [0, 0, 0, 1, 2, 2, 2, 1, 0, 0, 0]
-        ]
+        # Shaft
+        px(12, 6, 18, 5, K)
+        px(12, 7, 17, 3, Y)
+        px(12, 7, 17, 1, W)
+        px(12, 9, 17, 1, O)
+        # Teeth
+        px(19, 11, 3, 4, K)
+        px(20, 11, 1, 3, Y)
+        px(24, 11, 3, 3, K)
+        px(25, 11, 1, 2, Y)
+        px(28, 11, 2, 2, K)
         
-        # Key shaft and teeth - pixelated rectangle shape
-        key_shaft = [
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 4, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 4, 4, 0, 0],
-            [0, 0, 0, 4, 4, 4, 4, 4, 3, 2, 2, 3, 4, 4, 0],
-            [0, 0, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2],
-            [0, 0, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2],
-            [0, 0, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2],
-            [0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-        ]
-        
-        # Draw the key head pixels
-        for y, row in enumerate(key_head):
-            for x, pixel in enumerate(row):
-                if pixel != 0:  # If not empty
-                    color = key_shadow if pixel == 1 else key_dark if pixel == 2 else key_yellow if pixel == 3 else key_light
-                    logo_canvas.create_rectangle(
-                        20 + x * pixel_size, 
-                        30 + y * pixel_size, 
-                        20 + (x+1) * pixel_size, 
-                        30 + (y+1) * pixel_size, 
-                        fill=color, outline=''
-                    )
-        
-        # Draw the key shaft pixels
-        for y, row in enumerate(key_shaft):
-            for x, pixel in enumerate(row):
-                if pixel != 0:  # If not empty
-                    color = key_shadow if pixel == 1 else key_dark if pixel == 2 else key_yellow if pixel == 3 else key_light
-                    logo_canvas.create_rectangle(
-                        46 + x * pixel_size, 
-                        34 + y * pixel_size, 
-                        46 + (x+1) * pixel_size, 
-                        34 + (y+1) * pixel_size, 
-                        fill=color, outline=''
-                    )
-        
-        # Draw "95" text in a pixelated style
-        # "9" pixelated
-        nine_pixels = [
-            [0, 1, 1, 0],
-            [1, 0, 0, 1],
-            [1, 0, 0, 1],
-            [0, 1, 1, 1],
-            [0, 0, 0, 1],
-            [1, 0, 0, 1],
-            [0, 1, 1, 0]
-        ]
-        
-        # "5" pixelated
-        five_pixels = [
-            [1, 1, 1, 1],
-            [1, 0, 0, 0],
-            [1, 1, 1, 0],
-            [0, 0, 0, 1],
-            [0, 0, 0, 1],
-            [1, 0, 0, 1],
-            [0, 1, 1, 0]
-        ]
-        
-        # Draw pixelated "9"
-        for y, row in enumerate(nine_pixels):
-            for x, pixel in enumerate(row):
-                if pixel == 1:
-                    logo_canvas.create_rectangle(
-                        32 + x * 2, 
-                        42 + y * 2, 
-                        32 + (x+1) * 2, 
-                        42 + (y+1) * 2, 
-                        fill='#800000', outline=''
-                    )
-        
-        # Draw pixelated "5"
-        for y, row in enumerate(five_pixels):
-            for x, pixel in enumerate(row):
-                if pixel == 1:
-                    logo_canvas.create_rectangle(
-                        41 + x * 2, 
-                        42 + y * 2, 
-                        41 + (x+1) * 2, 
-                        42 + (y+1) * 2, 
-                        fill='#800000', outline=''
-                    )
-        
-        # Add pixelated "Product Key" text
-        logo_canvas.create_text(65, 75, text="Product Key", fill='#000080', 
+        # Add "Product Key" text
+        logo_canvas.create_text(60, 85, text="Product Key", fill='#000080', 
                               font=('MS Sans Serif', 8, 'bold'))
         
-        return logo_canvas
+        return logo_canvas    
+    # def create_key_logo(self, parent_frame):
+        # """Create a pixelated yellow key logo"""
+        # logo_canvas = tk.Canvas(parent_frame, width=120, height=100, bg='#c0c0c0', 
+                               # highlightthickness=0)
+        # logo_canvas.pack(side='right', anchor='ne', padx=(0, 20), pady=10)
+        
+        # # Pixel colors
+        # key_yellow = '#FFD700'  # Golden yellow
+        # key_dark = '#B8860B'    # Dark goldenrod
+        # key_light = '#FFFF00'   # Bright yellow
+        # key_shadow = '#8B6914'  # Darker shadow
+        
+        # # Pixel size
+        # pixel_size = 4
+        
+        # # Key head - pixelated circle shape
+        # # This is a 2D array representing our pixel art
+        # # 0 = empty, 1 = shadow, 2 = dark, 3 = main color, 4 = highlight
+        # key_head = [
+            # [0, 0, 0, 1, 2, 2, 2, 1, 0, 0, 0],
+            # [0, 0, 2, 2, 3, 3, 3, 2, 2, 0, 0],
+            # [0, 2, 2, 3, 3, 3, 3, 3, 2, 2, 0],
+            # [1, 2, 3, 3, 2, 2, 2, 3, 3, 2, 1],
+            # [2, 3, 3, 2, 0, 0, 0, 2, 3, 3, 2],
+            # [2, 3, 3, 2, 0, 0, 0, 2, 3, 3, 2],
+            # [2, 3, 3, 2, 0, 0, 0, 2, 3, 3, 2],
+            # [1, 2, 3, 3, 2, 2, 2, 3, 3, 2, 1],
+            # [0, 2, 2, 3, 3, 3, 3, 3, 2, 2, 0],
+            # [0, 0, 2, 2, 3, 3, 3, 2, 2, 0, 0],
+            # [0, 0, 0, 1, 2, 2, 2, 1, 0, 0, 0]
+        # ]
+        
+        # # Key shaft and teeth - pixelated rectangle shape
+        # key_shaft = [
+            # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            # [0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 4, 0, 0, 0],
+            # [0, 0, 0, 0, 0, 0, 0, 4, 4, 4, 0, 4, 4, 0, 0],
+            # [0, 0, 0, 4, 4, 4, 4, 4, 3, 2, 2, 3, 4, 4, 0],
+            # [0, 0, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2],
+            # [0, 0, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2],
+            # [0, 0, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2],
+            # [0, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1],
+            # [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        # ]
+        
+        # # Draw the key head pixels
+        # for y, row in enumerate(key_head):
+            # for x, pixel in enumerate(row):
+                # if pixel != 0:  # If not empty
+                    # color = key_shadow if pixel == 1 else key_dark if pixel == 2 else key_yellow if pixel == 3 else key_light
+                    # logo_canvas.create_rectangle(
+                        # 20 + x * pixel_size, 
+                        # 30 + y * pixel_size, 
+                        # 20 + (x+1) * pixel_size, 
+                        # 30 + (y+1) * pixel_size, 
+                        # fill=color, outline=''
+                    # )
+        
+        # # Draw the key shaft pixels
+        # for y, row in enumerate(key_shaft):
+            # for x, pixel in enumerate(row):
+                # if pixel != 0:  # If not empty
+                    # color = key_shadow if pixel == 1 else key_dark if pixel == 2 else key_yellow if pixel == 3 else key_light
+                    # logo_canvas.create_rectangle(
+                        # 46 + x * pixel_size, 
+                        # 34 + y * pixel_size, 
+                        # 46 + (x+1) * pixel_size, 
+                        # 34 + (y+1) * pixel_size, 
+                        # fill=color, outline=''
+                    # )
+        
+        # # Draw "95" text in a pixelated style
+        # # "9" pixelated
+        # nine_pixels = [
+            # [0, 1, 1, 0],
+            # [1, 0, 0, 1],
+            # [1, 0, 0, 1],
+            # [0, 1, 1, 1],
+            # [0, 0, 0, 1],
+            # [1, 0, 0, 1],
+            # [0, 1, 1, 0]
+        # ]
+        
+        # # "5" pixelated
+        # five_pixels = [
+            # [1, 1, 1, 1],
+            # [1, 0, 0, 0],
+            # [1, 1, 1, 0],
+            # [0, 0, 0, 1],
+            # [0, 0, 0, 1],
+            # [1, 0, 0, 1],
+            # [0, 1, 1, 0]
+        # ]
+        
+        # # Draw pixelated "9"
+        # for y, row in enumerate(nine_pixels):
+            # for x, pixel in enumerate(row):
+                # if pixel == 1:
+                    # logo_canvas.create_rectangle(
+                        # 32 + x * 2, 
+                        # 42 + y * 2, 
+                        # 32 + (x+1) * 2, 
+                        # 42 + (y+1) * 2, 
+                        # fill='#800000', outline=''
+                    # )
+        
+        # # Draw pixelated "5"
+        # for y, row in enumerate(five_pixels):
+            # for x, pixel in enumerate(row):
+                # if pixel == 1:
+                    # logo_canvas.create_rectangle(
+                        # 41 + x * 2, 
+                        # 42 + y * 2, 
+                        # 41 + (x+1) * 2, 
+                        # 42 + (y+1) * 2, 
+                        # fill='#800000', outline=''
+                    # )
+        
+        # # Add pixelated "Product Key" text
+        # logo_canvas.create_text(65, 75, text="Product Key", fill='#000080', 
+                              # font=('MS Sans Serif', 8, 'bold'))
+        
+        # return logo_canvas
     
     '''
     def create_key_logo(self, parent_frame):
@@ -14129,7 +14714,8 @@ All rights reserved.
         progress_frame = tk.Frame(content_frame, bg='#c0c0c0')
         progress_frame.pack(fill='x', pady=10)
         
-        self.progress_bar = ttk.Progressbar(progress_frame, mode='determinate', length=400)
+        self.progress_bar = Win95ProgressBar(progress_frame, length=400)
+        #self.progress_bar = ttk.Progressbar(progress_frame, mode='determinate', length=400)
         self.progress_bar.pack()
         
         # Current file label
@@ -14188,9 +14774,9 @@ All rights reserved.
        self.create_logo(content_frame)
        
        success_text = """Congratulations! Bitpack has been successfully configured on your computer.
-    Setup has finished configuring files and making the necessary configuration to your system.
-    Click Finish to use Bitpack on your computer.
-    You can disconnect the USB stick now. (if you chose the Startup Disk option)"""
+Setup has finished configuring files and making the necessary configuration to your system.
+Click Finish to use Bitpack on your computer.
+You can disconnect the USB stick now. (if you chose the Startup Disk option)"""
        
        text_label = tk.Label(content_frame, text=success_text, bg='#c0c0c0', 
                             font=('MS Sans Serif', 9), justify='left', 
@@ -14200,59 +14786,133 @@ All rights reserved.
        # Create finish button
        button_frame = tk.Frame(self.main_frame, bg='#c0c0c0')
        button_frame.pack(side='bottom', fill='x', padx=10, pady=10)
-       tk.Button(button_frame, text='Finish', command=self.simulate_restart,
-                width=10, height=1, font=('MS Sans Serif', 8, 'bold')).pack(side='right', padx=5)
-    
+       self.default_button = tk.Button(button_frame, text='Finish', command=self.simulate_restart,
+                width=10, height=1, font=('MS Sans Serif', 8, 'bold'),
+                highlightthickness=1, highlightbackground='black')
+       self.default_button.pack(side='right', padx=5)
+       # tk.Button(button_frame, text='Finish', command=self.simulate_restart,
+                # width=10, height=1, font=('MS Sans Serif', 8, 'bold')).pack(side='right', padx=5)
+
     def simulate_restart(self):
-        self.clear_frame()
+        """Black screen: the Setup window is hidden while 'restarting'"""
+        self.special_screen = True
+        self.default_button = None
+        self.dialog.place_forget()
         screen_width = self.root9955.winfo_screenwidth()
         screen_height = self.root9955.winfo_screenheight()
         self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
-        self.is_fullscreen = True
-        # Black screen with restart message
-        restart_frame = tk.Frame(self.main_frame, bg='black')
-        restart_frame.pack(fill='both', expand=True)
-        
-        tk.Label(restart_frame, text="Restarting services...", bg='black', fg='white',
-                font=('MS Sans Serif', 12)).pack(expand=True)
+        self.root9955.update_idletasks()
+        canvas = self.background
+        canvas.delete('all')
+        canvas.create_rectangle(0, 0, screen_width, screen_height, fill='black', outline='')
+        canvas.create_text(screen_width // 2, screen_height // 2, text="Restarting services...",
+                           fill='white', font=('MS Sans Serif', 12))
         
         # After 2 seconds, show Windows 95 boot screen
-        self.root9955.after(2000, self.show_boot_screen)
+        self.root9955.after(2000, self.show_boot_screen)    
+    # def simulate_restart(self):
+        # self.clear_frame()
+        # screen_width = self.root9955.winfo_screenwidth()
+        # screen_height = self.root9955.winfo_screenheight()
+        # self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
+        # self.is_fullscreen = True
+        # # Black screen with restart message
+        # restart_frame = tk.Frame(self.main_frame, bg='black')
+        # restart_frame.pack(fill='both', expand=True)
+        
+        # tk.Label(restart_frame, text="Restarting services...", bg='black', fg='white',
+                # font=('MS Sans Serif', 12)).pack(expand=True)
+        
+        # # After 2 seconds, show Windows 95 boot screen
+        # self.root9955.after(2000, self.show_boot_screen)
     
     def show_boot_screen(self):
-        self.clear_frame()
+        """Windows 95 boot screen: sky, clouds, Bitpack logo, animated bar at the bottom"""
         screen_width = self.root9955.winfo_screenwidth()
         screen_height = self.root9955.winfo_screenheight()
-        self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
-        self.is_fullscreen = True
-        # Windows 95 boot screen
-        boot_frame = tk.Frame(self.main_frame, bg='#008080')
-        boot_frame.pack(fill='both', expand=True)
+        canvas = self.background
+        canvas.delete('all')
+        top, bottom = (0x00, 0x00, 0xa8), (0x00, 0x80, 0x80)   # blue at the top, Windows 95 teal at the bottom
+        bands = 64
+        for i in range(bands):
+            r = int(top[0] + (bottom[0] - top[0]) * i / bands)
+            g = int(top[1] + (bottom[1] - top[1]) * i / bands)
+            b = int(top[2] + (bottom[2] - top[2]) * i / bands)
+            canvas.create_rectangle(0, screen_height * i / bands, screen_width, screen_height * (i + 1) / bands + 1,
+                                    fill=f"#{r:02x}{g:02x}{b:02x}", outline='')
+        canvas.create_text(screen_width // 2 + 4, screen_height // 2 - 26, text="Bitpack", fill='#000040',
+                           font=('Times New Roman', 54, 'bold italic'))
+        # bands = 64
+        # for i in range(bands):
+            # r = int(0x30 + 0x60 * i / bands)
+            # g = int(0x60 + 0x70 * i / bands)
+            # b = min(255, int(0xc0 + 0x3f * i / bands))
+            # canvas.create_rectangle(0, screen_height * i / bands, screen_width, screen_height * (i + 1) / bands + 1,
+                                    # fill=f"#{r:02x}{g:02x}{b:02x}", outline='')
+        # for cx, cy, size in ((0.18, 0.22, 1.0), (0.72, 0.15, 1.3), (0.85, 0.55, 0.9), (0.12, 0.7, 1.1),
+                             # (0.5, 0.82, 0.8)):
+            # x, y = screen_width * cx, screen_height * cy
+            # for dx, dy, w, h in ((0, 0, 140, 46), (40, -22, 110, 50), (90, 4, 120, 40)):
+                # canvas.create_oval(x + dx * size, y + dy * size, x + (dx + w) * size, y + (dy + h) * size,
+                                   # fill='#eef4ff', outline='')
+        # canvas.create_text(screen_width // 2 + 4, screen_height // 2 - 26, text="Bitpack", fill='#203060',
+                           # font=('Times New Roman', 54, 'bold italic'))
+        canvas.create_text(screen_width // 2, screen_height // 2 - 30, text="Bitpack", fill='white',
+                           font=('Times New Roman', 54, 'bold italic'))
+        canvas.create_text(screen_width // 2, screen_height // 2 + 40, text="Getting things ready for you...",
+                           fill='white', font=('MS Sans Serif', 12))
         
-        # Windows 95 logo
-        logo_frame = tk.Frame(boot_frame, bg='#008080')
-        logo_frame.pack(expand=True)
+        colours = ['#0000a0', '#0040ff', '#40a0ff', '#a0e0ff', '#40a0ff', '#0040ff']
+        segment = max(1, screen_width // 24)
         
-        # tk.Label(logo_frame, text="Bitpack - Multiapp 95", bg='#008080', fg='white',
-                # font=('Arial', 24, 'bold')).pack(pady=(50, 0))
-        # tk.Label(logo_frame, text="Professional", bg='#008080', fg='white',
-                # font=('Arial', 32, 'bold')).pack()
-        tk.Label(logo_frame, text="Bitpack", bg='#008080', fg='white',
-                font=('Arial', 32, 'bold')).pack()
+        def move_bar(offset=0):
+            if not self.special_screen:
+                return
+            canvas.delete('bar')
+            for i in range(-len(colours), screen_width // segment + len(colours)):
+                x = i * segment + offset
+                canvas.create_rectangle(x, screen_height - 18, x + segment, screen_height,
+                                        fill=colours[i % len(colours)], outline='', tags='bar')
+            self.root9955.after(50, lambda: move_bar((offset + 6) % (segment * len(colours))))
         
-        tk.Label(logo_frame, text="Getting things ready for you...", bg='#008080', fg='white',
-                font=('MS Sans Serif', 12)).pack(pady=(30, 0))
+        move_bar()
         
         # After 3 seconds, show welcome message and write completion flag
         self.root9955.after(3000, self.show_welcome_to_windows)
-    
+    # def show_boot_screen(self):
+        # self.clear_frame()
+        # screen_width = self.root9955.winfo_screenwidth()
+        # screen_height = self.root9955.winfo_screenheight()
+        # self.root9955.geometry(f"{screen_width}x{screen_height}+0+0")
+        # self.is_fullscreen = True
+        # # Windows 95 boot screen
+        # boot_frame = tk.Frame(self.main_frame, bg='#008080')
+        # boot_frame.pack(fill='both', expand=True)
+        
+        # # Windows 95 logo
+        # logo_frame = tk.Frame(boot_frame, bg='#008080')
+        # logo_frame.pack(expand=True)
+        
+        # # tk.Label(logo_frame, text="Bitpack - Multiapp 95", bg='#008080', fg='white',
+                # # font=('Arial', 24, 'bold')).pack(pady=(50, 0))
+        # # tk.Label(logo_frame, text="Professional", bg='#008080', fg='white',
+                # # font=('Arial', 32, 'bold')).pack()
+        # tk.Label(logo_frame, text="Bitpack", bg='#008080', fg='white',
+                # font=('Arial', 32, 'bold')).pack()
+        
+        # tk.Label(logo_frame, text="Getting things ready for you...", bg='#008080', fg='white',
+                # font=('MS Sans Serif', 12)).pack(pady=(30, 0))
+        
+        # # After 3 seconds, show welcome message and write completion flag
+        # self.root9955.after(3000, self.show_welcome_to_windows)
+
     def show_welcome_to_windows(self):
+        # Back to the blue Setup screen with the Setup window in the middle
+        self.special_screen = False
+        self.is_fullscreen = False
+        self.background.delete('all')
+        self.toggle_fullscreen()
         self.clear_frame()
-        self.root9955.update_idletasks()
-        x = (self.root9955.winfo_screenwidth() // 2) - (640 // 2)
-        y = (self.root9955.winfo_screenheight() // 2) - (480 // 2)
-        self.root9955.geometry(f"640x480+{x}+{y}")
-        self.is_fullscreen = True
         self.create_header("Welcome to Bitpack!", "Setup is now complete")
         
         content_frame = tk.Frame(self.main_frame, bg='#c0c0c0')
@@ -14266,24 +14926,24 @@ All rights reserved.
         # Create a more compact welcome text
         welcome_text = f"""Welcome to Bitpack, {self.user_name.get()}!
 
-    Your software is now ready to use. This Setup will close as soon as you click Close Setup.
+Your software is now ready to use. This Setup will close as soon as you click Close Setup.
 
-    Virtual Instance:
-    - Run programs/Shutdown to close Virtual Instance
-    - Activate product (in case if you delete your product key from your computer)
-    - Check system compatibilities
-    - Switch between programs with taskbar
-    - Open Start Menu and press Shutdown to go to user handbook
+Virtual Instance:
+- Run programs/Shutdown to close Virtual Instance
+- Activate product (in case if you delete your product key from your computer)
+- Check system compatibilities
+- Switch between programs with taskbar
+- Open Start Menu and press Shutdown to go to user handbook
 
-    Settings:
-    - User: {self.user_name.get()}
-    - Company name: {self.company_name.get()}
-    - Computer: {self.computer_name.get()}
-    - Workgroup: {self.workgroup.get()}
-    - Hash: ##/##
-    - Product ID: 000020250420
+Settings:
+- User: {self.user_name.get()}
+- Company name: {self.company_name.get()}
+- Computer: {self.computer_name.get()}
+- Workgroup: {self.workgroup.get()}
+- Hash: ##/##
+- Product ID: 000020250420
 
-    Enjoy using Bitpack!"""
+Enjoy using Bitpack!"""
         
         # Use a Text widget instead of Label for better control over display
         text_widget = tk.Text(text_frame, bg='#c0c0c0', 
@@ -14300,7 +14960,62 @@ All rights reserved.
         
         self.create_buttons([
             {'text': 'Close Setup', 'command': self.close_and_complete, 'side': 'right'}
-        ])
+        ])    
+    # def show_welcome_to_windows(self):
+        # self.clear_frame()
+        # self.root9955.update_idletasks()
+        # x = (self.root9955.winfo_screenwidth() // 2) - (640 // 2)
+        # y = (self.root9955.winfo_screenheight() // 2) - (480 // 2)
+        # self.root9955.geometry(f"640x480+{x}+{y}")
+        # self.is_fullscreen = True
+        # self.create_header("Welcome to Bitpack!", "Setup is now complete")
+        
+        # content_frame = tk.Frame(self.main_frame, bg='#c0c0c0')
+        # content_frame.pack(fill='both', expand=True, padx=20, pady=10)
+        # self.create_logo(content_frame)
+        
+        # # Create a frame for the text with a scrollbar
+        # text_frame = tk.Frame(content_frame, bg='#c0c0c0')
+        # text_frame.pack(fill='both', expand=True, pady=5)
+        
+        # # Create a more compact welcome text
+        # welcome_text = f"""Welcome to Bitpack, {self.user_name.get()}!
+
+    # Your software is now ready to use. This Setup will close as soon as you click Close Setup.
+
+    # Virtual Instance:
+    # - Run programs/Shutdown to close Virtual Instance
+    # - Activate product (in case if you delete your product key from your computer)
+    # - Check system compatibilities
+    # - Switch between programs with taskbar
+    # - Open Start Menu and press Shutdown to go to user handbook
+
+    # Settings:
+    # - User: {self.user_name.get()}
+    # - Company name: {self.company_name.get()}
+    # - Computer: {self.computer_name.get()}
+    # - Workgroup: {self.workgroup.get()}
+    # - Hash: ##/##
+    # - Product ID: 000020250420
+
+    # Enjoy using Bitpack!"""
+        
+        # # Use a Text widget instead of Label for better control over display
+        # text_widget = tk.Text(text_frame, bg='#c0c0c0', 
+                            # font=('MS Sans Serif', 8), 
+                            # wrap=tk.WORD, 
+                            # height=12,
+                            # width=50,
+                            # relief='flat',
+                            # borderwidth=0,
+                            # highlightthickness=0)
+        # text_widget.pack(fill='both', expand=True)
+        # text_widget.insert('1.0', welcome_text)
+        # text_widget.config(state='disabled')  # Make it read-only
+        
+        # self.create_buttons([
+            # {'text': 'Close Setup', 'command': self.close_and_complete, 'side': 'right'}
+        # ])
     
     def close_and_complete(self):
         """Close setup and write completion flag"""
@@ -14321,17 +15036,29 @@ def startup_services():
     #import time
     #import random
     #import os
-    
+
     def update_progress_bar(current_step, total_steps):
-        # Calculează progresul ca procent
-        progress = int((current_step / total_steps) * 20)  # 20 de caractere pentru bara
+        # Windows 95 progress bar: navy blocks in a sunken white trough
+        progress_canvas.delete("all")
+        width = progress_canvas.winfo_width()
+        height = progress_canvas.winfo_height()
+        filled = int(width * current_step / total_steps)
+        x = 0
+        while x + 8 <= filled:
+            progress_canvas.create_rectangle(x, 0, x + 8, height, fill="#000080", outline="#000080")
+            x += 10
+        #progress_percent.config(text=f"{int((current_step / total_steps) * 100)}%")
+        root_srv.update()    
+    # def update_progress_bar(current_step, total_steps):
+        # # Calculează progresul ca procent
+        # progress = int((current_step / total_steps) * 20)  # 20 de caractere pentru bara
         
-        # Creează bara de progres cu caractere █ pentru progres și spații pentru restul
-        bar = "█" * progress + " " * (20 - progress)
-        progress_text = f"[{bar}] {int((current_step / total_steps) * 100)}%"
+        # # Creează bara de progres cu caractere █ pentru progres și spații pentru restul
+        # bar = "█" * progress + " " * (20 - progress)
+        # progress_text = f"[{bar}] {int((current_step / total_steps) * 100)}%"
         
-        progress_bar.config(text=progress_text)
-        root_srv.update()
+        # progress_bar.config(text=progress_text)
+        # root_srv.update()
     
     def update_boot_messages():
         current_path = os.getcwd()
@@ -14366,7 +15093,8 @@ def startup_services():
             time.sleep(random.uniform(0.2, 3.5))  # Simulează timpul de boot cu intervale aleatorii
             boot_label.config(text=boot_label.cget("text").rstrip("_"))
         
-        progress_bar.pack_forget()  # Ascunde bara de progres la final
+        progress_bar.place_forget()
+        #progress_bar.pack_forget()  # Ascunde bara de progres la final
         root_srv.after(2000, root_srv.destroy)  # Închide fereastra după un scurt delay
     
     def toggle_fullscreen(event=None):
@@ -14419,8 +15147,29 @@ def startup_services():
     boot_label.pack(padx=20, pady=20, anchor="w")
     
     # Bara de progres ASCII (inițial goală)
-    progress_bar = tk.Label(root_srv, text="[                    ] 0%", fg="white", bg="black", font=("Fixedsys",12))
-    progress_bar.pack()
+    # progress_bar = tk.Label(root_srv, text="[                    ] 0%", fg="white", bg="black", font=("Fixedsys",12))
+    # progress_bar.pack()
+    # Bara de progres in stil Windows 95: panou gri, jgheab alb adancit, blocuri navy
+    # Bara de progres in stil Windows 95, singura, in mijlocul ecranului
+    progress_bar = tk.Frame(root_srv, bg="#c0c0c0", bd=2, relief="sunken", width=360, height=24)
+    progress_bar.place(relx=0.5, rely=0.5, anchor="center")
+    progress_bar.pack_propagate(False)
+    progress_canvas = tk.Canvas(progress_bar, bg="white", highlightthickness=0, bd=0)
+    progress_canvas.pack(fill="both", expand=True, padx=1, pady=1)
+    # progress_bar = tk.Frame(root_srv, bg="#c0c0c0", bd=2, relief="raised")
+    # progress_bar.pack(pady=10)
+    # tk.Label(progress_bar, text="Starting Bitpack...", bg="#c0c0c0", fg="black",
+             # font=("MS Sans Serif", 8), anchor="w").pack(fill="x", padx=10, pady=(8, 4))
+    # progress_row = tk.Frame(progress_bar, bg="#c0c0c0")
+    # progress_row.pack(padx=10, pady=(0, 10))
+    # progress_trough = tk.Frame(progress_row, bg="white", bd=2, relief="sunken", width=320, height=22)
+    # progress_trough.pack(side="left")
+    # progress_trough.pack_propagate(False)
+    # progress_canvas = tk.Canvas(progress_trough, bg="white", highlightthickness=0, bd=0)
+    # progress_canvas.pack(fill="both", expand=True, padx=2, pady=2)
+    # progress_percent = tk.Label(progress_row, text="0%", bg="#c0c0c0", fg="black",
+                                # font=("MS Sans Serif", 8), width=5, anchor="e")
+    # progress_percent.pack(side="left", padx=(6, 0))
     
     # Start automat al bootării
     root_srv.after(1000, update_boot_messages)
@@ -14518,348 +15267,1139 @@ def check_and_create_counter():
             return False  # Nu mai rulăm funcția
         return True
 
+# def run_instance_checker():
+    # # Verifică dacă trebuie să ruleze funcția
+    # if not check_and_create_counter():
+        # #print("Funcția a fost deja rulată o dată. Nu se va mai executa.")
+        # return
+    # class Windows95Simulator:
+        # def __init__(self, root_inst):
+            # self.root_inst = root_inst
+            # self.root_inst.title("Virtual Instance Checker")
+            # self.root_inst.geometry("1024x768")
+            # self.root_inst.configure(bg='#008080')
+            # self.is_fullscreen = False  # Variabilă pentru a urmări starea fullscreen
+            
+            # # Obținem dimensiunile ecranului
+            # screen_width = self.root_inst.winfo_screenwidth()
+            # screen_height = self.root_inst.winfo_screenheight()
+            
+            # # Dimensiunile ferestrei
+            # window_width = 1024
+            # window_height = 768
+            
+            # # Calculăm poziția pentru centrul ecranului
+            # position_top = int((screen_height / 2) - (window_height / 2))
+            # position_right = int((screen_width / 2) - (window_width / 2))
+            
+            # # Setăm geometria ferestrei (dimensiuni și poziție)
+            # self.root_inst.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
+            
+            # # Background image (desktop wallpaper)
+            # self.desktop_bg = tk.Label(self.root_inst, bg='#008080', width=1024, height=768)
+            # self.desktop_bg.place(x=0, y=0)  # Plasare pe fundal
+            
+            # # Taskbar
+            # self.taskbar = tk.Frame(self.root_inst, bg='gray', height=30)
+            # self.taskbar.pack(side='bottom', fill='x')
+            
+            # # Start button
+            # self.start_button = tk.Button(self.taskbar, text='Start', width=10, height=2, bg='#8c8c8c', fg='white', font=("Fixedsys"), command=self.toggle_start_menu)
+            # self.start_button.pack(side='left')
+            
+            # # Clock
+            # self.clock_label = tk.Label(self.taskbar, bg='gray', fg='white', font=("Fixedsys"))
+            # self.clock_label.pack(side='right', padx=10)
+            # self.update_clock()
+            
+            # # Start menu
+            # self.start_menu = tk.Frame(self.root_inst, bg='lightgray', width=200, height=300)
+            # self.start_menu.place(x=0, y=728, anchor='sw')
+            # self.start_menu_visible = False
+            
+            # # Meniu Start cu submeniuri
+            # self.apps_frame = tk.Frame(self.start_menu, bg='lightgray')
+            # self.apps_frame.pack(fill='both', expand=True)
+            
+            # self.create_start_menu()
+            
+            # self.start_menu.lower()
+            
+            # # Taskbar running apps
+            # self.running_apps = {}
+            
+        # def create_activation_window(self, window):
+            # window.title("Activation Wizard")  # Titlul ferestrei
+            # window.geometry("400x200")
+            # window.configure(bg="#c9c9c9")
+            # # Mesaj
+            # label = tk.Label(window, text="Enter your product key:", font=("Fixedsys"), bg="#c9c9c9")
+            # label.pack(pady=10)
+            # # Câmp de introducere a cheii
+            # product_key_entry = tk.Entry(window, font=("Fixedsys"), width=30, bd=5)
+            # product_key_entry.pack(pady=5)
+            # # Butonul de activare (inițial dezactivat)
+            # activate_button = tk.Button(
+                # window, text="Activate", font=("Fixedsys"), state=tk.DISABLED, bd=5, bg="#c9c9c9", 
+                # command=lambda: activate_product()
+            # )
+            # activate_button.pack(pady=5)
+            # # Butonul "Activate later" -> elimină aplicația din taskbar
+            # later_button = tk.Button(
+                # window, text="Activate later", font=("Fixedsys"), bd=5, bg="#c9c9c9", 
+                # command=lambda: self.close_app("Product Activation", window)
+            # )
+            # later_button.pack(pady=5)
+            # # Funcție pentru activare
+            # def activate_product():
+                # product_key = product_key_entry.get()
+                # valid_key = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
+                # FOLDER_NAME = "Serial"
+                # FILE_NAME = "product_key.lic95"
+                
+                # if not os.path.exists(FOLDER_NAME):
+                    # try:
+                        # os.makedirs(FOLDER_NAME)
+                    # except:
+                        # pass
+                        
+                # if product_key == valid_key:
+                    # file_path = os.path.join(FOLDER_NAME, FILE_NAME)
+                    # # Verificăm dacă fișierul există deja
+                    # if not os.path.exists(file_path):
+                        # with open(file_path, "w") as file:
+                            # file.write(valid_key)
+                    # messagebox.showinfo("Activation Successful", "Product has been activated successfully.")
+                    # self.close_app("Product Activation", window)  # Închide corect aplicația
+                # else:
+                    # messagebox.showerror("Activation Failed", "Invalid product key. Please try again.")
+                    
+            # # Funcție pentru validarea cheii în timp real
+            # def validate_key(event):
+                # if product_key_entry.get() == "R46BX-JHR2J-PG7ER-24QFG-MWKVR":
+                    # activate_button.config(state=tk.NORMAL)  # Activează butonul dacă cheia este corectă
+                # else:
+                    # activate_button.config(state=tk.DISABLED)  # Dezactivează butonul dacă cheia e greșită
+            # product_key_entry.bind("<KeyRelease>", validate_key)  # Verifică validitatea în timp real
+
+        # def activate_product(self, product_key, window):            
+            # FOLDER_NAME = "Serial"
+            # FILE_NAME = "product_key.lic95"
+            
+            # if not os.path.exists(FOLDER_NAME):
+                # try:
+                    # os.makedirs(FOLDER_NAME)
+                # except:
+                    # pass
+                    
+            # file_path = os.path.join(FOLDER_NAME, FILE_NAME)
+            # valid_key = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
+            
+            # # Verifică dacă fișierul există deja
+            # try:
+                # with open(file_path, "r") as file:
+                    # existing_key = file.read().strip()
+                    # if existing_key == valid_key:
+                        # messagebox.showinfo("Activation", "Product is already activated!")
+                        # window.destroy()
+                        # return
+            # except FileNotFoundError:
+                # pass  # Fișierul nu există, deci putem continua activarea
+            
+            # # Salvează cheia de produs
+            # with open(file_path, "w") as file:
+                # file.write(valid_key)
+            
+            # messagebox.showinfo("Activation", "Product activated successfully!")
+            # window.destroy()
+
+        # def shutdown(self):
+            # self.root_inst.destroy()  # Închide aplicația
+        
+        # def create_start_menu(self):
+            # self.activation_button = tk.Button(self.apps_frame, text='Product Activation', font=("Fixedsys"), command=lambda: self.open_app("Product Activation"))
+            # self.activation_button.pack(fill='x')
+            
+            # self.notepad_button = tk.Button(self.apps_frame, text='Notepad', font=("Fixedsys"), command=lambda: self.open_app("Notepad"))
+            # self.notepad_button.pack(fill='x')
+            
+            # self.about_button = tk.Button(self.apps_frame, text='About Window', font=("Fixedsys"), command=lambda: self.open_app("About Window"))
+            # self.about_button.pack(fill='x')
+            
+            # # Butonul Fullscreen în meniul Start
+            # self.fullscreen_button = tk.Button(self.apps_frame, text='Fullscreen', font=("Fixedsys"), command=self.toggle_fullscreen)
+            # self.fullscreen_button.pack(fill='x')
+            
+            # # Buton de Shutdown
+            # self.shutdown_button = tk.Button(self.apps_frame, text='Shutdown', font=("Fixedsys"), command=self.shutdown)
+            # self.shutdown_button.pack(fill='x')
+        
+        # def toggle_start_menu(self):
+            # if self.start_menu_visible:
+                # self.start_menu.lower()
+            # else:
+                # self.start_menu.lift()
+            # self.start_menu_visible = not self.start_menu_visible
+        
+        # def open_app(self, app_name):
+            # if app_name in self.running_apps:
+                # return
+            
+            # window = tk.Toplevel(self.root_inst)
+            # window.title(app_name)
+            # window.geometry("600x400")
+            # window.protocol("WM_DELETE_WINDOW", lambda: self.close_app(app_name, window))
+            
+            # if app_name == "Notepad":
+                # self.create_notepad(window)
+            # elif app_name == "About Window":
+                # self.create_about_window(window)
+                
+            # elif app_name == "Product Activation":
+                # self.create_activation_window(window)
+            
+            # taskbar_button = tk.Button(self.taskbar, text=app_name, font=("Fixedsys"), command=lambda: self.toggle_app_visibility(app_name, window), bg='darkgray', fg='white', height=2)
+            # taskbar_button.pack(side='left')
+            
+            # self.running_apps[app_name] = {'window': window, 'button': taskbar_button}
+            
+            # self.start_menu.lower()
+            # self.start_menu_visible = False
+        
+        # def close_app(self, app_name, window):
+            # window.destroy()
+            # self.running_apps[app_name]['button'].destroy()
+            # del self.running_apps[app_name]
+        
+        # def toggle_app_visibility(self, app_name, window):
+            # if window.state() == "normal":
+                # window.withdraw()
+            # else:
+                # window.deiconify()
+        
+        # def update_clock(self):
+            # current_time = time.strftime('%H:%M:%S')
+            # self.clock_label.config(text=current_time, font=("Fixedsys"))
+            # self.root_inst.after(1000, self.update_clock)
+        
+        # def toggle_fullscreen(self):
+            # self.is_fullscreen = not self.is_fullscreen
+            # if self.is_fullscreen:
+                # self.root_inst.attributes('-fullscreen', True)
+            # else:
+                # self.root_inst.attributes('-fullscreen', False)
+        
+        # def create_notepad(self, window):
+            # text_area = tk.Text(window, font=("Fixedsys"))
+            # text_area.pack(fill='both', expand=True)
+            
+            # # Adăugăm un tag pentru culoarea gri
+            # text_area.tag_configure("placeholder", foreground="#c7c7c7")
+            
+            # # Textul prestabilit care va apărea la început
+            # placeholder_text = "This instance helps you check if the system requirements of the computer running Bitpack are compatible with the recommended minimum requirements. Click on the About Window button in the Start Menu to perform this check. To continue booting into Bitpack, click on the Shutdown button in the Start Menu. For Bitpack to function, it must be activated using a product key. This can be done from the Product Activation section. ##Try extension/manager, w95dist, devcpp, config/editor or RFLAGS (type this code in USER, without password)##"
+            # text_area.insert(tk.END, placeholder_text)
+            
+            # # Aplicăm tag-ul gri pe întregul text prestabilit
+            # text_area.tag_add("placeholder", "1.0", "end")
+            
+            # # Funcția pentru a șterge textul prestabilit când utilizatorul începe să scrie
+            # def on_focus_in(event):
+                # if text_area.get("1.0", tk.END).strip() == placeholder_text:
+                    # text_area.delete("1.0", tk.END)
+            
+            # # Funcția pentru a șterge textul prestabilit când utilizatorul pune cursorul
+            # def on_key_press(event):
+                # if text_area.get("1.0", tk.END).strip() == placeholder_text:
+                    # text_area.delete("1.0", tk.END)
+
+            # # Legăm evenimentele la funcțiile corespunzătoare
+            # text_area.bind("<FocusIn>", on_focus_in)  # Când fereastra primește focus
+            # text_area.bind("<KeyPress>", on_key_press)  # Când utilizatorul apasă o tastă
+            
+            # # Adăugăm un meniu pentru a salva și deschide fișiere
+            # menu_bar = tk.Menu(window)
+            # file_menu = tk.Menu(menu_bar, tearoff=0)
+            # file_menu.add_command(label='Save', command=lambda: self.save_file(text_area))
+            # file_menu.add_command(label='Open', command=lambda: self.open_file(text_area))
+            # menu_bar.add_cascade(label='File', menu=file_menu)
+            # window.config(menu=menu_bar)
+        
+        # def save_file(self, text_area):
+            # file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+            # if file_path:
+                # with open(file_path, "w") as file:
+                    # file.write(text_area.get("1.0", tk.END))
+        
+        # def open_file(self, text_area):
+            # file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
+            # if file_path:
+                # with open(file_path, "r") as file:
+                    # text_area.delete("1.0", tk.END)
+                    # text_area.insert("1.0", file.read())
+        
+        # def create_about_window(self, window):
+            # sys_info = platform.uname()
+            # system_version = sys_info.system
+            # processor_info = platform.processor()
+            
+            # # Specificațiile minime
+            # min_os = "Windows 10 (x64)"
+            # min_processor_speed = 1  # GHz
+            # min_ram = 4  # GB
+            # min_disk_space = 500  # MB
+            
+            # # Obținem informațiile sistemului
+            # os_version = sys_info.release
+            # ram = psutil.virtual_memory().total / (1024 ** 3)  # RAM în GB
+            # processor_speed = float(processor_info.split()[2].split('GHz')[0])  # extragem valoarea GHz
+            # is_x64 = sys_info.machine in ["x86_64", "AMD64"]  # Verificăm dacă este sistem x64 (AMD64 sau x86_64)
+            
+            # # Verificăm dacă sistemul îndeplinește cerințele minime
+            # meets_requirements = True
+            # requirements_message = "Meets minimum requirements"
+            
+            # if system_version != "Windows" or not is_x64:
+                # meets_requirements = False
+                # requirements_message = "Does not meet minimum requirements: OS is not Windows x64."
+            
+            # # Verificăm dacă versiunea este 10 sau mai mare
+            # major_version = int(os_version.split('.')[0])
+            # if major_version < 10:
+                # meets_requirements = False
+                # requirements_message = f"Does not meet minimum requirements: OS version is older than Windows 10 (Detected: Windows {major_version})."
+            
+            # if processor_speed < min_processor_speed:
+                # meets_requirements = False
+                # requirements_message = "Does not meet minimum requirements: Processor speed is too low."
+            
+            # # Verificăm RAM-ul
+            # if ram < min_ram:
+                # meets_requirements = False
+                # requirements_message = "Does not meet minimum requirements: RAM is too low."
+            
+            # # Verificăm dacă există suficient spațiu pe disc
+            # if system_version == "Windows":
+                # disk_space = psutil.disk_usage('/').free / (1024 ** 2)  # spațiu liber în MB
+                # if disk_space < min_disk_space:
+                    # meets_requirements = False
+                    # requirements_message = "Does not meet minimum requirements: Insufficient disk space."
+            
+            # window.configure(bg='#c9c9c9')
+            
+            # # Creăm layout-ul pentru fereastra de 'About'
+            # frame = tk.Frame(window, bg='#c9c9c9')
+            # frame.pack(padx=10, pady=10)
+
+            # # Specificațiile minime
+            # min_specs = tk.Label(frame, text=f"Minimum Requirements:\nOS: {min_os}\nProcessor: {min_processor_speed} GHz\nRAM: {min_ram} GB\nDisk space: {min_disk_space} MB free", font=("Fixedsys", 12), bg='#c9c9c9')
+            # min_specs.grid(row=0, column=0, padx=10, pady=10, sticky='w')
+            
+            # # Specificațiile curente
+            # current_specs = tk.Label(frame, text=f"Your System:\nOS: {system_version} {os_version} {sys_info.machine}\nProcessor: {processor_speed} GHz\nRAM: {ram:.2f} GB\nDisk space: {disk_space:.2f} MB free", font=("Fixedsys", 12), bg='#c9c9c9')
+            # current_specs.grid(row=0, column=1, padx=10, pady=10, sticky='w')
+            
+            # # Mesajul de cerințe
+            # color = "green" if meets_requirements else "red"
+            # result_label = tk.Label(window, text=requirements_message, font=("Fixedsys", 14), fg=color, bg='#c9c9c9')
+            # result_label.pack(pady=10)
+
+    # if __name__ == '__main__':
+        # root_inst = tk.Tk()
+        # app = Windows95Simulator(root_inst)
+        # root_inst.mainloop()
 def run_instance_checker():
     # Verifică dacă trebuie să ruleze funcția
     if not check_and_create_counter():
         #print("Funcția a fost deja rulată o dată. Nu se va mai executa.")
         return
+
+    import os
+    import re
+    import sys
+    import time
+    import platform
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import filedialog
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+
+    FACE, SHADOW, LIGHT = "#c0c0c0", "#808080", "#ffffff"
+    NAVY, TEAL, BLACK = "#000080", "#008080", "#000000"
+    FONT = ("MS Sans Serif", 8)
+    FONT_B = ("MS Sans Serif", 8, "bold")
+    NOTEPAD_FONT = ("Fixedsys", 9)
+    TASKBAR_H = 28
+    VALID_KEY = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
+    KEY_FOLDER, KEY_FILE = "Serial", "product_key.lic95"
+    README_TEXT = ("This instance helps you check if the system requirements of the computer running Bitpack are "
+                   "compatible with the recommended minimum requirements. Click on the About Window button in the "
+                   "Start Menu to perform this check. To continue booting into Bitpack, click on the Shutdown button "
+                   "in the Start Menu. For Bitpack to function, it must be activated using a product key. This can be "
+                   "done from the Product Activation section. ##Try extension/manager, w95dist, devcpp, config/editor "
+                   "or RFLAGS (type this code in USER, without password)##")
+
+    # ----- pixel-art icons (16 x 16 grid, drawn into PhotoImages, scale 1 or 2) ------------------------
+    ICONS = {
+        "computer": [(1, 0, 15, 11, BLACK), (2, 1, 14, 10, FACE), (3, 2, 13, 8, TEAL), (4, 3, 7, 4, "#00c0c0"),
+                     (6, 11, 10, 12, BLACK), (2, 12, 14, 15, BLACK), (3, 12, 13, 14, FACE), (10, 13, 12, 14, "#00a000")],
+        "notepad": [(2, 0, 14, 16, BLACK), (3, 1, 13, 15, LIGHT), (3, 1, 13, 3, NAVY), (4, 5, 12, 6, SHADOW),
+                    (4, 7, 12, 8, SHADOW), (4, 9, 12, 10, SHADOW), (4, 11, 10, 12, SHADOW)],
+        "key": [(0, 4, 7, 11, BLACK), (1, 5, 6, 10, "#ffd700"), (2, 6, 3, 7, LIGHT), (3, 7, 4, 8, "#808000"),
+                (6, 6, 16, 9, BLACK), (7, 7, 15, 8, "#ffd700"), (11, 9, 13, 12, BLACK), (14, 9, 16, 11, BLACK)],
+        "shutdown": [(1, 0, 15, 11, BLACK), (2, 1, 14, 10, FACE), (3, 2, 13, 8, "#202020"), (7, 3, 9, 7, "#c00000"),
+                     (6, 11, 10, 12, BLACK), (2, 12, 14, 15, BLACK), (3, 12, 13, 14, FACE)],
+        "fullscreen": [(1, 0, 15, 11, BLACK), (2, 1, 14, 10, FACE), (3, 2, 13, 8, LIGHT), (3, 2, 6, 3, BLACK),
+                       (3, 2, 4, 5, BLACK), (10, 7, 13, 8, BLACK), (12, 5, 13, 8, BLACK),
+                       (6, 11, 10, 12, BLACK), (2, 12, 14, 15, BLACK), (3, 12, 13, 14, FACE)],
+        "bitpack": [(1, 2, 7, 5, BLACK), (2, 3, 6, 4, "#6080ff"),                  # open lid, left flap
+                    (9, 2, 15, 5, BLACK), (10, 3, 14, 4, "#6080ff"),                # right flap
+                    (2, 5, 14, 15, BLACK), (3, 6, 13, 14, NAVY), (3, 6, 13, 7, "#4060e0"),
+                    (4, 9, 6, 11, "#ff2020"), (7, 9, 9, 11, "#20d020"), (10, 9, 12, 11, "#ffd000"),
+                    (4, 12, 12, 13, "#0000c0")],
+        "info": [(4, 1, 12, 2, BLACK), (2, 2, 14, 14, BLACK), (4, 14, 12, 15, BLACK), (3, 3, 13, 13, LIGHT),
+                 (7, 4, 9, 6, "#0000ff"), (7, 7, 9, 12, "#0000ff")],
+        "error": [(4, 1, 12, 2, "#800000"), (2, 2, 14, 14, "#800000"), (4, 14, 12, 15, "#800000"),
+                  (3, 3, 13, 13, "#ff0000"), (5, 5, 7, 7, LIGHT), (9, 9, 11, 11, LIGHT), (7, 7, 9, 9, LIGHT),
+                  (9, 5, 11, 7, LIGHT), (5, 9, 7, 11, LIGHT)],
+        "question": [(4, 1, 12, 2, BLACK), (2, 2, 14, 14, BLACK), (4, 14, 12, 15, BLACK), (3, 3, 13, 13, LIGHT),
+                     (6, 4, 10, 5, "#0000ff"), (9, 5, 11, 8, "#0000ff"), (7, 8, 9, 10, "#0000ff"),
+                     (7, 11, 9, 13, "#0000ff")],
+    }
+
+    def make_icon(kind, scale):
+        image = tk.PhotoImage(width=16 * scale, height=16 * scale)
+        for x0, y0, x1, y1, colour in ICONS[kind]:
+            image.put(colour, to=(x0 * scale, y0 * scale, x1 * scale, y1 * scale))
+        return image
+
+    # ----- system information (fixed: real CPU speed, Windows 11, every requirement checked) ----------
+    def cpu_name():
+        if os.name == "nt":
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                    r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as key:
+                    return winreg.QueryValueEx(key, "ProcessorNameString")[0].strip()
+            except OSError:
+                pass
+        return platform.processor() or platform.machine()
+
+    def system_report():
+        """Rows of (component, required, detected, ok) and the list of problems."""
+        rows = []
+        uname = platform.uname()
+        is_x64 = uname.machine.upper() in ("AMD64", "X86_64", "ARM64", "AARCH64")
+        if uname.system == "Windows":
+            try:
+                build = sys.getwindowsversion().build
+            except AttributeError:
+                build = 0
+            name = "Windows 11" if build >= 22000 else "Windows %s" % uname.release
+            detected = "%s (build %s), %s" % (name, build, "64-bit" if is_x64 else "32-bit")
+            try:
+                major = int(uname.release.split(".")[0])
+            except ValueError:
+                major = 0
+            ok = is_x64 and (major >= 10 or build >= 10240)
+        else:
+            detected = "%s %s %s" % (uname.system, uname.release, uname.machine)
+            ok = False
+        rows.append(("Operating system", "Windows 10 (x64)", detected, ok))
+
+        name = cpu_name()
+        ghz = None
+        if psutil is not None:
+            try:
+                freq = psutil.cpu_freq()
+                if freq is not None and (freq.max or freq.current):
+                    ghz = (freq.max or freq.current) / 1000.0
+            except Exception:
+                ghz = None
+        if ghz is None:
+            match = re.search(r"([\d.]+)\s*GHz", name, re.IGNORECASE)
+            ghz = float(match.group(1)) if match else None
+        cores = (psutil.cpu_count(logical=True) if psutil is not None else None) or os.cpu_count() or 0
+        detected = ("%.2f GHz" % ghz if ghz else "speed unknown") + (", %d logical cores" % cores if cores else "")
+        rows.append(("Processor", "1 GHz", detected, ghz is None or ghz >= 1.0))
+        rows.append(("Processor model", "-", name[:60], True))
+
+        if psutil is not None:
+            ram = psutil.virtual_memory().total / (1024 ** 3)
+            rows.append(("Memory (RAM)", "4 GB", "%.2f GB" % ram, ram >= 4))
+            drive = os.path.splitdrive(os.path.abspath(os.getcwd()))[0]
+            drive = (drive + os.sep) if drive else os.sep
+            try:
+                free = psutil.disk_usage(drive).free / (1024 ** 2)
+                rows.append(("Free disk space (%s)" % drive, "500 MB", "{:,.0f} MB".format(free), free >= 500))
+            except OSError:
+                rows.append(("Free disk space", "500 MB", "unknown", True))
+        else:
+            rows.append(("Memory (RAM)", "4 GB", "unknown (psutil missing)", True))
+            rows.append(("Free disk space", "500 MB", "unknown (psutil missing)", True))
+        problems = [row[0] for row in rows if not row[3]]
+        return rows, problems
+
+    # ==================================================================================================
+    class DesktopWindow:
+        """A Windows 95 window living on the simulated desktop (title bar, min / max / close, drag, resize)."""
+
+        def __init__(self, sim, key, title, icon, width, height, resizable=True, modal=False, on_close=None):
+            self.sim, self.key, self.title, self.icon_kind = sim, key, title, icon
+            self.on_close = on_close
+            self.modal = modal
+            self.maximized = False
+            self.minimized = False
+            self.frame = tk.Frame(sim.desktop, bg=FACE, bd=2, relief="raised")
+            self.caption = tk.Frame(self.frame, bg=NAVY, height=18)
+            self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self.caption.pack_propagate(False)
+            self.small_icon = make_icon(icon, 1)
+            self.caption_icon = tk.Label(self.caption, image=self.small_icon, bg=NAVY, bd=0)
+            self.caption_icon.pack(side="left", padx=(2, 3))
+            self.caption_title = tk.Label(self.caption, text=title, font=FONT_B, bg=NAVY, fg=LIGHT, anchor="w")
+            self.caption_title.pack(side="left", fill="x", expand=True)
+            self.close_button = sim.caption_button(self.caption, "close", self.close)
+            self.close_button.pack(side="right", padx=(2, 2))
+            if not modal:
+                if resizable:
+                    self.max_button = sim.caption_button(self.caption, "max", self.toggle_maximize)
+                    self.max_button.pack(side="right")
+                sim.caption_button(self.caption, "min", self.minimize).pack(side="right")
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.bind("<ButtonPress-1>", self._press)
+                widget.bind("<B1-Motion>", self._drag)
+                if resizable and not modal:
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            self.body = tk.Frame(self.frame, bg=FACE)
+            self.body.pack(side="top", fill="both", expand=True)
+            if resizable and not modal:
+                grip = tk.Canvas(self.frame, width=12, height=12, bg=FACE, highlightthickness=0, bd=0,
+                                 cursor="size_nw_se" if os.name == "nt" else "bottom_right_corner")
+                for i in (1, 5, 9):
+                    grip.create_line(11, i, i, 11, fill=LIGHT)
+                    grip.create_line(11, i + 1, i + 1, 11, fill=SHADOW)
+                grip.place(relx=1.0, rely=1.0, anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                self.grip = grip
+            sim.desktop.update_idletasks()
+            dw, dh = max(sim.desktop.winfo_width(), 400), max(sim.desktop.winfo_height(), 300)
+            if modal:
+                x, y = (dw - width) // 2, (dh - height) // 3
+            else:
+                offset = 28 * (len([w for w in sim.windows.values() if not w.modal]) % 6)
+                x, y = min(110 + offset, max(0, dw - width)), min(30 + offset, max(0, dh - height))
+            self.geometry = [max(0, x), max(0, y), width, height]
+            self._place()
+            self.min_size = (min(width, 260), min(height, 140))
+
+        def _place(self):
+            if self.maximized:
+                self.frame.place(x=0, y=0, relwidth=1.0, relheight=1.0, width=0, height=0)
+            else:
+                x, y, w, h = self.geometry
+                self.frame.place(x=x, y=y, width=w, height=h, relwidth=0, relheight=0)
+            self.frame.lift()
+
+        def set_title(self, title):
+            self.title = title
+            self.caption_title.config(text=title)
+            self.sim.refresh_taskbar()
+
+        def set_active(self, active):
+            colour = NAVY if active else SHADOW
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=colour)
+            self.caption_title.config(fg=LIGHT if active else FACE)
+
+        def _press(self, event):
+            self.sim.activate(self)
+            self._drag_from = (event.x_root, event.y_root, self.geometry[0], self.geometry[1])
+
+        def _drag(self, event):
+            if self.maximized:
+                return
+            x0, y0, gx, gy = self._drag_from
+            dw, dh = self.sim.desktop.winfo_width(), self.sim.desktop.winfo_height()
+            x = min(max(gx + event.x_root - x0, 40 - self.geometry[2]), dw - 40)
+            y = min(max(gy + event.y_root - y0, 0), dh - 20)
+            self.geometry[0], self.geometry[1] = x, y
+            self.frame.place_configure(x=x, y=y)
+
+        def _grip_press(self, event):
+            self._resize_from = (event.x_root, event.y_root, self.geometry[2], self.geometry[3])
+
+        def _grip_drag(self, event):
+            if self.maximized:
+                return
+            x0, y0, w, h = self._resize_from
+            self.geometry[2] = max(self.min_size[0], w + event.x_root - x0)
+            self.geometry[3] = max(self.min_size[1], h + event.y_root - y0)
+            self.frame.place_configure(width=self.geometry[2], height=self.geometry[3])
+
+        def toggle_maximize(self):
+            self.maximized = not self.maximized
+            if hasattr(self, "max_button"):
+                self.max_button.config(text=self.sim.glyphs["restore" if self.maximized else "max"])
+            self._place()
+
+        def minimize(self):
+            self.minimized = True
+            self.frame.place_forget()
+            self.sim.window_minimized(self)
+
+        def restore(self):
+            self.minimized = False
+            self._place()
+            self.sim.activate(self)
+
+        def close(self):
+            if self.on_close is not None and self.on_close() is False:
+                return
+            self.sim.window_closed(self)
+            self.frame.destroy()
+
+    # ==================================================================================================
     class Windows95Simulator:
         def __init__(self, root_inst):
             self.root_inst = root_inst
             self.root_inst.title("Virtual Instance Checker")
-            self.root_inst.geometry("1024x768")
-            self.root_inst.configure(bg='#008080')
+            self.root_inst.configure(bg=TEAL)
             self.is_fullscreen = False  # Variabilă pentru a urmări starea fullscreen
-            
-            # Obținem dimensiunile ecranului
-            screen_width = self.root_inst.winfo_screenwidth()
-            screen_height = self.root_inst.winfo_screenheight()
-            
-            # Dimensiunile ferestrei
-            window_width = 1024
-            window_height = 768
-            
-            # Calculăm poziția pentru centrul ecranului
-            position_top = int((screen_height / 2) - (window_height / 2))
-            position_right = int((screen_width / 2) - (window_width / 2))
-            
-            # Setăm geometria ferestrei (dimensiuni și poziție)
-            self.root_inst.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
-            
-            # Background image (desktop wallpaper)
-            self.desktop_bg = tk.Label(self.root_inst, bg='#008080', width=1024, height=768)
-            self.desktop_bg.place(x=0, y=0)  # Plasare pe fundal
-            
-            # Taskbar
-            self.taskbar = tk.Frame(self.root_inst, bg='gray', height=30)
-            self.taskbar.pack(side='bottom', fill='x')
-            
-            # Start button
-            self.start_button = tk.Button(self.taskbar, text='Start', width=10, height=2, bg='#8c8c8c', fg='white', font=("Fixedsys"), command=self.toggle_start_menu)
-            self.start_button.pack(side='left')
-            
-            # Clock
-            self.clock_label = tk.Label(self.taskbar, bg='gray', fg='white', font=("Fixedsys"))
-            self.clock_label.pack(side='right', padx=10)
+            window_width, window_height = 1024, 768
+            position_top = max(0, int((self.root_inst.winfo_screenheight() - window_height) / 2))
+            position_right = max(0, int((self.root_inst.winfo_screenwidth() - window_width) / 2))
+            self.root_inst.geometry(f"{window_width}x{window_height}+{position_right}+{position_top}")
+            self.root_inst.minsize(640, 480)
+
+            marlett = "Marlett" in tkfont.families(root_inst)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            self.icons16 = {kind: make_icon(kind, 1) for kind in ICONS}
+            self.icons32 = {kind: make_icon(kind, 2) for kind in ICONS}
+
+            self.windows = {}          # key -> DesktopWindow
+            self.order = []            # taskbar order
+            self.active = None
+            self.modal_window = None
+
+            self._build_taskbar()
+            self.desktop = tk.Canvas(self.root_inst, bg=TEAL, highlightthickness=0, bd=0)
+            self.desktop.pack(side="top", fill="both", expand=True)
+            self._build_desktop_icons()
+            self._build_start_menu()
             self.update_clock()
-            
-            # Start menu
-            self.start_menu = tk.Frame(self.root_inst, bg='lightgray', width=200, height=300)
-            self.start_menu.place(x=0, y=728, anchor='sw')
+
+            self.root_inst.bind_all("<ButtonPress-1>", self._on_any_click, add="+")
+            self.root_inst.bind("<F11>", lambda e: self.toggle_fullscreen())
+            self.root_inst.bind("<Escape>", lambda e: self.toggle_fullscreen()
+                                if self.is_fullscreen and self.modal_window is None else None)
+            self.root_inst.bind("<Control-Escape>", lambda e: self.toggle_start_menu())
+
+        # ----------------------------------------------------------------- helpers
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                             activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def w95_button(self, parent, text, command, width=10, default=False, state="normal"):
+            return tk.Button(parent, text=text, command=command, width=width, font=FONT_B if default else FONT,
+                             bg=FACE, fg=BLACK, activebackground=FACE, relief="raised", bd=2, state=state,
+                             disabledforeground=SHADOW, highlightthickness=1 if default else 0,
+                             highlightbackground=BLACK, takefocus=0)
+
+        # ----------------------------------------------------------------- desktop
+        def _build_desktop_icons(self):
+            self.desktop_items = []
+            entries = [("My Computer", "computer", lambda: self.open_app("About Window")),
+                       ("Read Me", "notepad", lambda: self.open_app("Notepad")),
+                       ("Product Activation", "key", lambda: self.open_app("Product Activation"))]
+            for index, (label, kind, action) in enumerate(entries):
+                x, y = 44, 24 + index * 82
+                picture = self.desktop.create_image(x, y, image=self.icons32[kind], anchor="n")
+                text = self.desktop.create_text(x, y + 36, text=label, fill=LIGHT, font=FONT, width=76,
+                                                justify="center", anchor="n")
+                back = self.desktop.create_rectangle(self.desktop.bbox(text), fill="", outline="")
+                self.desktop.tag_lower(back, text)
+                item = {"picture": picture, "text": text, "back": back, "action": action}
+                self.desktop_items.append(item)
+                for tag in (picture, text):
+                    self.desktop.tag_bind(tag, "<ButtonPress-1>", lambda e, it=item: self._select_icon(it))
+                    self.desktop.tag_bind(tag, "<Double-Button-1>", lambda e, it=item: it["action"]())
+            self.desktop.bind("<ButtonPress-1>", lambda e: self._select_icon(None)
+                              if not self.desktop.find_withtag("current") else None)
+
+        def _select_icon(self, chosen):
+            for item in self.desktop_items:
+                selected = item is chosen
+                self.desktop.itemconfig(item["back"], fill=NAVY if selected else "",
+                                        outline=LIGHT if selected else "", dash=(1, 1) if selected else ())
+
+        # ----------------------------------------------------------------- taskbar
+        def _build_taskbar(self):
+            bar = tk.Frame(self.root_inst, bg=FACE, height=TASKBAR_H, bd=0)
+            bar.pack(side="bottom", fill="x")
+            bar.pack_propagate(False)
+            tk.Frame(bar, bg=LIGHT, height=1).pack(side="top", fill="x")
+            inner = tk.Frame(bar, bg=FACE)
+            inner.pack(side="top", fill="both", expand=True, padx=2, pady=2)
+            self.taskbar = inner
+            self.start_button = tk.Button(inner, text=" Start", image=None, font=FONT_B, bg=FACE, fg=BLACK,
+                                          activebackground=FACE, relief="raised", bd=2, padx=3, pady=0,
+                                          highlightthickness=0, takefocus=0, command=self.toggle_start_menu)
+            self.start_button.config(image=self._flag_image(), compound="left")
+            self.start_button.pack(side="left", fill="y")
+            tray = tk.Frame(inner, bg=FACE, bd=1, relief="sunken")
+            tray.pack(side="right", fill="y")
+            self.clock_label = tk.Label(tray, bg=FACE, fg=BLACK, font=FONT, padx=8)
+            self.clock_label.pack(side="right", fill="y")
+            self.task_area = tk.Frame(inner, bg=FACE)
+            self.task_area.pack(side="left", fill="both", expand=True, padx=(4, 4))
+            self.task_buttons = {}
+
+        def _flag_image(self):
+            if not hasattr(self, "_flag"):
+                self._flag = make_icon("bitpack", 1)
+            return self._flag
+
+        def refresh_taskbar(self):
+            for key, button in list(self.task_buttons.items()):
+                if key not in self.windows:
+                    button.destroy()
+                    del self.task_buttons[key]
+            for key in self.order:
+                window = self.windows.get(key)
+                if window is None or window.modal:
+                    continue
+                if key not in self.task_buttons:
+                    button = tk.Button(self.task_area, image=self.icons16[window.icon_kind], compound="left",
+                                       font=FONT, bg=FACE, fg=BLACK, activebackground=FACE, bd=2, padx=4, pady=0,
+                                       anchor="w", width=150, highlightthickness=0, takefocus=0,
+                                       command=lambda k=key: self._task_click(k))
+                    button.pack(side="left", fill="y", padx=(0, 3))
+                    self.task_buttons[key] = button
+                active = window is self.active and not window.minimized
+                self.task_buttons[key].config(text=" " + window.title[:22], relief="sunken" if active else "raised",
+                                              font=FONT_B if active else FONT,
+                                              bg="#e0e0e0" if active else FACE)
+
+        def _task_click(self, key):
+            window = self.windows.get(key)
+            if window is None or self.modal_window is not None:
+                return
+            if window.minimized:
+                window.restore()
+            elif window is self.active:
+                window.minimize()
+            else:
+                self.activate(window)
+
+        # ----------------------------------------------------------------- start menu
+        def _build_start_menu(self):
+            menu = tk.Frame(self.root_inst, bg=FACE, bd=2, relief="raised")
+            band = tk.Canvas(menu, width=22, bg=SHADOW, highlightthickness=0, bd=0)
+            band.pack(side="left", fill="y")
+            band.bind("<Configure>", lambda e: self._draw_band(band))
+            items = tk.Frame(menu, bg=FACE)
+            items.pack(side="left", fill="both", expand=True)
+            self.start_menu = menu
             self.start_menu_visible = False
-            
-            # Meniu Start cu submeniuri
-            self.apps_frame = tk.Frame(self.start_menu, bg='lightgray')
-            self.apps_frame.pack(fill='both', expand=True)
-            
-            self.create_start_menu()
-            
-            self.start_menu.lower()
-            
-            # Taskbar running apps
-            self.running_apps = {}
-            
-        def create_activation_window(self, window):
-            window.title("Activation Wizard")  # Titlul ferestrei
-            window.geometry("400x200")
-            window.configure(bg="#c9c9c9")
-            # Mesaj
-            label = tk.Label(window, text="Enter your product key:", font=("Fixedsys"), bg="#c9c9c9")
-            label.pack(pady=10)
-            # Câmp de introducere a cheii
-            product_key_entry = tk.Entry(window, font=("Fixedsys"), width=30, bd=5)
-            product_key_entry.pack(pady=5)
-            # Butonul de activare (inițial dezactivat)
-            activate_button = tk.Button(
-                window, text="Activate", font=("Fixedsys"), state=tk.DISABLED, bd=5, bg="#c9c9c9", 
-                command=lambda: activate_product()
-            )
-            activate_button.pack(pady=5)
-            # Butonul "Activate later" -> elimină aplicația din taskbar
-            later_button = tk.Button(
-                window, text="Activate later", font=("Fixedsys"), bd=5, bg="#c9c9c9", 
-                command=lambda: self.close_app("Product Activation", window)
-            )
-            later_button.pack(pady=5)
-            # Funcție pentru activare
-            def activate_product():
-                product_key = product_key_entry.get()
-                valid_key = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
-                FOLDER_NAME = "Serial"
-                FILE_NAME = "product_key.lic95"
-                
-                if not os.path.exists(FOLDER_NAME):
-                    try:
-                        os.makedirs(FOLDER_NAME)
-                    except:
-                        pass
-                        
-                if product_key == valid_key:
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    # Verificăm dacă fișierul există deja
-                    if not os.path.exists(file_path):
-                        with open(file_path, "w") as file:
-                            file.write(valid_key)
-                    messagebox.showinfo("Activation Successful", "Product has been activated successfully.")
-                    self.close_app("Product Activation", window)  # Închide corect aplicația
-                else:
-                    messagebox.showerror("Activation Failed", "Invalid product key. Please try again.")
-                    
-            # Funcție pentru validarea cheii în timp real
-            def validate_key(event):
-                if product_key_entry.get() == "R46BX-JHR2J-PG7ER-24QFG-MWKVR":
-                    activate_button.config(state=tk.NORMAL)  # Activează butonul dacă cheia este corectă
-                else:
-                    activate_button.config(state=tk.DISABLED)  # Dezactivează butonul dacă cheia e greșită
-            product_key_entry.bind("<KeyRelease>", validate_key)  # Verifică validitatea în timp real
+            entries = [("Product Activation", "key", lambda: self.open_app("Product Activation")),
+                       ("Notepad", "notepad", lambda: self.open_app("Notepad")),
+                       ("System Check", "computer", lambda: self.open_app("About Window")),
+                       None,
+                       ("Full Screen", "fullscreen", self.toggle_fullscreen),
+                       None,
+                       ("Shut Down...", "shutdown", self.shutdown)]
+            for entry in entries:
+                if entry is None:
+                    tk.Frame(items, bg=SHADOW, height=1).pack(fill="x", padx=2, pady=(3, 0))
+                    tk.Frame(items, bg=LIGHT, height=1).pack(fill="x", padx=2, pady=(0, 3))
+                    continue
+                text, kind, action = entry
+                row = tk.Label(items, text="  " + text, image=self.icons32[kind], compound="left", font=FONT,
+                               bg=FACE, fg=BLACK, anchor="w", padx=6, pady=3, width=190)
+                row.pack(fill="x")
+                row.bind("<Enter>", lambda e, w=row: w.config(bg=NAVY, fg=LIGHT))
+                row.bind("<Leave>", lambda e, w=row: w.config(bg=FACE, fg=BLACK))
+                row.bind("<ButtonRelease-1>", lambda e, a=action, w=row: (w.config(bg=FACE, fg=BLACK),
+                                                                          self.hide_start_menu(), a()))
+                if text == "Full Screen":
+                    self.fullscreen_row = row
 
-        def activate_product(self, product_key, window):            
-            FOLDER_NAME = "Serial"
-            FILE_NAME = "product_key.lic95"
-            
-            if not os.path.exists(FOLDER_NAME):
-                try:
-                    os.makedirs(FOLDER_NAME)
-                except:
-                    pass
-                    
-            file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-            valid_key = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
-            
-            # Verifică dacă fișierul există deja
-            try:
-                with open(file_path, "r") as file:
-                    existing_key = file.read().strip()
-                    if existing_key == valid_key:
-                        messagebox.showinfo("Activation", "Product is already activated!")
-                        window.destroy()
-                        return
-            except FileNotFoundError:
-                pass  # Fișierul nu există, deci putem continua activarea
-            
-            # Salvează cheia de produs
-            with open(file_path, "w") as file:
-                file.write(valid_key)
-            
-            messagebox.showinfo("Activation", "Product activated successfully!")
-            window.destroy()
+        def _draw_band(self, band):
+            band.delete("all")
+            height = band.winfo_height()
+            for i in range(0, height, 4):                # navy at the bottom fading to grey, like Win95
+                shade = int(0x80 * (1 - i / max(height, 1)))
+                band.create_rectangle(0, i, 22, i + 4, fill="#%02x%02x%02x" % (shade, shade, 0x80 + shade // 2),
+                                      outline="")
+            band.create_text(12, height - 8, text="Bitpack", angle=90, anchor="w", fill=LIGHT,
+                             font=("Arial", 13, "bold"))
 
-        def shutdown(self):
-            self.root_inst.destroy()  # Închide aplicația
-        
-        def create_start_menu(self):
-            self.activation_button = tk.Button(self.apps_frame, text='Product Activation', font=("Fixedsys"), command=lambda: self.open_app("Product Activation"))
-            self.activation_button.pack(fill='x')
-            
-            self.notepad_button = tk.Button(self.apps_frame, text='Notepad', font=("Fixedsys"), command=lambda: self.open_app("Notepad"))
-            self.notepad_button.pack(fill='x')
-            
-            self.about_button = tk.Button(self.apps_frame, text='About Window', font=("Fixedsys"), command=lambda: self.open_app("About Window"))
-            self.about_button.pack(fill='x')
-            
-            # Butonul Fullscreen în meniul Start
-            self.fullscreen_button = tk.Button(self.apps_frame, text='Fullscreen', font=("Fixedsys"), command=self.toggle_fullscreen)
-            self.fullscreen_button.pack(fill='x')
-            
-            # Buton de Shutdown
-            self.shutdown_button = tk.Button(self.apps_frame, text='Shutdown', font=("Fixedsys"), command=self.shutdown)
-            self.shutdown_button.pack(fill='x')
-        
         def toggle_start_menu(self):
             if self.start_menu_visible:
-                self.start_menu.lower()
+                self.hide_start_menu()
             else:
+                self.start_menu.place(x=2, rely=1.0, y=-TASKBAR_H + 2, anchor="sw")   # always on the taskbar
                 self.start_menu.lift()
-            self.start_menu_visible = not self.start_menu_visible
-        
-        def open_app(self, app_name):
-            if app_name in self.running_apps:
-                return
-            
-            window = tk.Toplevel(self.root_inst)
-            window.title(app_name)
-            window.geometry("600x400")
-            window.protocol("WM_DELETE_WINDOW", lambda: self.close_app(app_name, window))
-            
-            if app_name == "Notepad":
-                self.create_notepad(window)
-            elif app_name == "About Window":
-                self.create_about_window(window)
-                
-            elif app_name == "Product Activation":
-                self.create_activation_window(window)
-            
-            taskbar_button = tk.Button(self.taskbar, text=app_name, font=("Fixedsys"), command=lambda: self.toggle_app_visibility(app_name, window), bg='darkgray', fg='white', height=2)
-            taskbar_button.pack(side='left')
-            
-            self.running_apps[app_name] = {'window': window, 'button': taskbar_button}
-            
-            self.start_menu.lower()
+                self.start_button.config(relief="sunken")
+                self.start_menu_visible = True
+
+        def hide_start_menu(self):
+            self.start_menu.place_forget()
+            self.start_button.config(relief="raised")
             self.start_menu_visible = False
-        
-        def close_app(self, app_name, window):
-            window.destroy()
-            self.running_apps[app_name]['button'].destroy()
-            del self.running_apps[app_name]
-        
-        def toggle_app_visibility(self, app_name, window):
-            if window.state() == "normal":
-                window.withdraw()
-            else:
-                window.deiconify()
-        
+
+        def _inside(self, widget, container):
+            while widget is not None:
+                if widget is container:
+                    return True
+                widget = getattr(widget, "master", None)
+            return False
+
+        def _on_any_click(self, event):
+            widget = event.widget
+            if not isinstance(widget, tk.Misc):
+                return
+            if self.start_menu_visible and not self._inside(widget, self.start_menu) \
+                    and not self._inside(widget, self.start_button):
+                self.hide_start_menu()
+            for window in list(self.windows.values()):
+                if self._inside(widget, window.frame):
+                    self.activate(window)
+                    break
+
+        # ----------------------------------------------------------------- windows
+        def activate(self, window):
+            if self.modal_window is not None and window is not self.modal_window:
+                window = self.modal_window
+            self.active = window
+            for other in self.windows.values():
+                other.set_active(other is window)
+            if not window.minimized:
+                window.frame.lift()
+            self.refresh_taskbar()
+
+        def window_minimized(self, window):
+            if self.active is window:
+                visible = [w for w in self.windows.values() if not w.minimized and w is not window]
+                self.active = None
+                if visible:
+                    self.activate(visible[-1])
+            self.refresh_taskbar()
+
+        def window_closed(self, window):
+            self.windows.pop(window.key, None)
+            if window.key in self.order:
+                self.order.remove(window.key)
+            if self.modal_window is window:
+                self.modal_window = None
+                try:
+                    window.frame.grab_release()
+                except tk.TclError:
+                    pass
+            if self.active is window:
+                self.active = None
+                visible = [w for w in self.windows.values() if not w.minimized]
+                if visible:
+                    self.activate(visible[-1])
+            self.refresh_taskbar()
+
+        def add_window(self, window):
+            self.windows[window.key] = window
+            self.order.append(window.key)
+            self.activate(window)
+
+        def open_app(self, app_name):
+            if self.modal_window is not None:
+                return
+            if app_name in self.windows:
+                window = self.windows[app_name]
+                window.restore() if window.minimized else self.activate(window)
+                return
+            if app_name == "Notepad":
+                self.create_notepad()
+            elif app_name == "About Window":
+                self.create_about_window()
+            elif app_name == "Product Activation":
+                self.create_activation_window()
+
+        def close_app(self, app_name, window=None):
+            target = self.windows.get(app_name)
+            if target is not None:
+                target.close()
+
+        def message(self, title, text, icon="info", buttons=("OK",), default=0, callback=None):
+            """A Windows 95 message box on the desktop; the other windows wait until it is closed."""
+            self._message_count = getattr(self, "_message_count", 0) + 1
+            key = "message-%d" % self._message_count
+            box = DesktopWindow(self, key, title, icon, 360, 140, resizable=False, modal=True)
+            body = tk.Frame(box.body, bg=FACE)
+            body.pack(fill="both", expand=True, padx=12, pady=(12, 4))
+            tk.Label(body, image=self.icons32[icon], bg=FACE).pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, font=FONT, bg=FACE, justify="left", wraplength=270).pack(side="left", anchor="w")
+            row = tk.Frame(box.body, bg=FACE)
+            row.pack(pady=(4, 10))
+
+            def answer(value):
+                box.close()
+                if callback is not None:
+                    callback(value)
+
+            box.on_close = None
+            for index, label in enumerate(buttons):
+                self.w95_button(row, label, lambda v=label: answer(v), width=9,
+                                default=index == default).pack(side="left", padx=4)
+            box.frame.bind("<Return>", lambda e: answer(buttons[default]))
+            box.frame.bind("<Escape>", lambda e: answer(buttons[-1]))
+            box.frame.update_idletasks()
+            needed = box.frame.winfo_reqheight()
+            if needed > box.geometry[3]:
+                box.geometry[3] = needed
+                box._place()
+            self.add_window(box)
+            self.modal_window = box
+            box.frame.focus_set()
+            try:
+                box.frame.grab_set()
+            except tk.TclError:
+                pass
+
+        # ----------------------------------------------------------------- applications
+        def create_notepad(self):
+            window = DesktopWindow(self, "Notepad", "Read Me - Notepad", "notepad", 600, 400,
+                                   on_close=lambda: None)
+            state = {"path": None}
+            menubar = tk.Frame(window.body, bg=FACE)
+            menubar.pack(side="top", fill="x")
+            holder = tk.Frame(window.body, bg=LIGHT, bd=2, relief="sunken")
+            holder.pack(side="top", fill="both", expand=True, padx=1, pady=(0, 12))
+            vbar = tk.Scrollbar(holder, orient="vertical")
+            vbar.pack(side="right", fill="y")
+            text_area = tk.Text(holder, font=NOTEPAD_FONT, wrap="word", bd=0, highlightthickness=0, undo=True,
+                                yscrollcommand=vbar.set)
+            text_area.pack(side="left", fill="both", expand=True)
+            vbar.config(command=text_area.yview)
+
+            # Textul prestabilit (gri) care dispare când utilizatorul începe să scrie
+            text_area.tag_configure("placeholder", foreground="#a0a0a0")
+            text_area.insert("1.0", README_TEXT, "placeholder")
+
+            def clear_placeholder(_event=None):
+                if text_area.get("1.0", "end-1c") == README_TEXT and text_area.tag_ranges("placeholder"):
+                    text_area.delete("1.0", "end")
+
+            text_area.bind("<FocusIn>", clear_placeholder)
+            text_area.bind("<KeyPress>", clear_placeholder)
+
+            def set_name(path):
+                state["path"] = path
+                window.set_title("%s - Notepad" % (os.path.basename(path) if path else "Untitled"))
+
+            def new_file():
+                text_area.delete("1.0", "end")
+                set_name(None)
+
+            def open_file():
+                path = filedialog.askopenfilename(parent=self.root_inst,
+                                                  filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+                if not path:
+                    return
+                with open(path, "rb") as fh:
+                    raw = fh.read()
+                for encoding in ("utf-8-sig", "cp1250"):      # fix: UTF-8 first, then Windows ANSI
+                    try:
+                        content = raw.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                text_area.delete("1.0", "end")
+                text_area.insert("1.0", content.replace("\r\n", "\n"))
+                set_name(path)
+
+            def save_file(save_as=False):
+                path = state["path"]
+                if save_as or not path:
+                    path = filedialog.asksaveasfilename(parent=self.root_inst, defaultextension=".txt",
+                                                        filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+                    if not path:
+                        return
+                content = "" if text_area.tag_ranges("placeholder") else text_area.get("1.0", "end-1c")
+                try:   # fix: UTF-8 (diacritics no longer fail) and no extra empty line at the end
+                    with open(path, "w", encoding="utf-8", newline="\r\n") as fh:
+                        fh.write(content)
+                except OSError as exc:
+                    self.message("Notepad", "Cannot save the file:\n%s" % exc, "error")
+                    return
+                set_name(path)
+
+            def menubutton(text):
+                button = tk.Menubutton(menubar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                       activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=1, underline=0,
+                                       highlightthickness=0, takefocus=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="New", command=new_file)
+            m.add_command(label="Open...", command=open_file)
+            m.add_command(label="Save", command=save_file)
+            m.add_command(label="Save As...", command=lambda: save_file(True))
+            m.add_separator()
+            m.add_command(label="Exit", command=window.close)
+            m = menubutton("Edit")
+            m.add_command(label="Undo", command=lambda: text_area.event_generate("<<Undo>>"))
+            m.add_separator()
+            m.add_command(label="Cut", command=lambda: text_area.event_generate("<<Cut>>"))
+            m.add_command(label="Copy", command=lambda: text_area.event_generate("<<Copy>>"))
+            m.add_command(label="Paste", command=lambda: text_area.event_generate("<<Paste>>"))
+            m.add_separator()
+            m.add_command(label="Select All", command=lambda: text_area.tag_add("sel", "1.0", "end-1c"))
+            m = menubutton("Help")
+            m.add_command(label="About Bitpack", command=lambda: self.message(
+                "About Bitpack", "Bitpack Virtual Instance Checker\n\nUse System Check to compare this computer "
+                "with the minimum requirements, then Shut Down to continue booting Bitpack."))
+            window.on_close = None
+            self.add_window(window)
+
+        def create_about_window(self):
+            window = DesktopWindow(self, "About Window", "System Check", "computer", 560, 330)
+            head = tk.Frame(window.body, bg=FACE)
+            head.pack(fill="x", padx=12, pady=(10, 6))
+            tk.Label(head, image=self.icons32["computer"], bg=FACE).pack(side="left", padx=(0, 10))
+            tk.Label(head, text="Bitpack compares this computer with its minimum requirements.", font=FONT,
+                     bg=FACE, justify="left").pack(side="left")
+            table = tk.Frame(window.body, bg=LIGHT, bd=2, relief="sunken")
+            table.pack(fill="x", padx=12)
+            summary = tk.Label(window.body, font=FONT_B, bg=FACE, justify="left", anchor="w", wraplength=520)
+            summary.pack(fill="x", padx=12, pady=(8, 4))
+            buttons = tk.Frame(window.body, bg=FACE)
+            buttons.pack(side="bottom", fill="x", padx=12, pady=(0, 14))
+
+            def fill():
+                for child in table.winfo_children():
+                    child.destroy()
+                rows, problems = system_report()
+                headers = ("Component", "Required", "This computer", "Result")
+                for column, title in enumerate(headers):
+                    tk.Label(table, text=title, font=FONT, bg=FACE, relief="raised", bd=1, anchor="w",
+                             padx=4).grid(row=0, column=column, sticky="ew")
+                for r, (component, required, detected, ok) in enumerate(rows, start=1):
+                    values = (component, required, detected, "OK" if ok else "Too low")
+                    for column, value in enumerate(values):
+                        colour = (("#008000" if ok else "#c00000") if column == 3 else BLACK)
+                        tk.Label(table, text=value, font=FONT_B if column == 3 else FONT, bg=LIGHT, fg=colour,
+                                 anchor="w", padx=4).grid(row=r, column=column, sticky="ew")
+                table.grid_columnconfigure(2, weight=1)
+                if problems:
+                    summary.config(fg="#c00000", text="Does not meet the minimum requirements: " +
+                                   ", ".join(problems) + ".")
+                else:
+                    summary.config(fg="#008000", text="This computer meets the minimum requirements for Bitpack.")
+
+            self.w95_button(buttons, "OK", window.close, width=10, default=True).pack(side="right")
+            self.w95_button(buttons, "Check Again", fill, width=12).pack(side="right", padx=(0, 6))
+            fill()
+            self.add_window(window)
+
+        def create_activation_window(self):
+            window = DesktopWindow(self, "Product Activation", "Activation Wizard", "key", 470, 260, resizable=False)
+            body = tk.Frame(window.body, bg=FACE)
+            body.pack(fill="both", expand=True, padx=10, pady=10)
+            art = tk.Frame(body, bg=TEAL, bd=2, relief="sunken", width=110)
+            art.pack(side="left", fill="y")
+            art.pack_propagate(False)
+            tk.Label(art, image=self.icons32["key"], bg=TEAL).pack(expand=True)
+            right = tk.Frame(body, bg=FACE)
+            right.pack(side="left", fill="both", expand=True, padx=(12, 0))
+            path = os.path.join(KEY_FOLDER, KEY_FILE)
+            try:
+                with open(path, "r") as fh:
+                    activated = fh.read().strip() == VALID_KEY
+            except OSError:
+                activated = False
+            tk.Label(right, text="Product Activation", font=("MS Sans Serif", 10, "bold"), bg=FACE,
+                     anchor="w").pack(fill="x")
+            tk.Label(right, text=("Bitpack is already activated. You can enter the key again."
+                                  if activated else "Type the 25-character product key:\n"
+                                                    "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"),
+                     font=FONT, bg=FACE, justify="left", anchor="w", wraplength=300).pack(fill="x", pady=(6, 10))
+            tk.Label(right, text="Product key:", font=FONT, bg=FACE, anchor="w").pack(fill="x")
+            key_var = tk.StringVar()
+            product_key_entry = tk.Entry(right, textvariable=key_var, font=("Courier New", 10), bd=2,
+                                         relief="sunken", highlightthickness=0, width=32)
+            product_key_entry.pack(anchor="w", pady=(2, 0))
+            buttons = tk.Frame(window.body, bg=FACE)
+            buttons.pack(side="bottom", fill="x", padx=10, pady=(0, 12))
+
+            def activate_product():
+                if key_var.get().strip().upper() != VALID_KEY:
+                    self.message("Activation Failed", "Invalid product key. Please try again.", "error")
+                    return
+                try:
+                    os.makedirs(KEY_FOLDER, exist_ok=True)
+                    with open(path, "w") as fh:     # fix: also replaces a file holding a wrong key
+                        fh.write(VALID_KEY)
+                except OSError as exc:
+                    self.message("Activation Failed", "The key could not be saved:\n%s" % exc, "error")
+                    return
+                window.close()
+                self.message("Activation Successful", "Product has been activated successfully.", "info")
+
+            activate_button = self.w95_button(buttons, "Activate", activate_product, width=10, default=True,
+                                              state="disabled")
+            self.w95_button(buttons, "Activate Later", window.close, width=13).pack(side="right")
+            activate_button.pack(side="right", padx=(0, 6))
+
+            def validate_key(*_args):        # Butonul Activate se activează doar pentru cheia corectă
+                ok = key_var.get().strip().upper() == VALID_KEY
+                activate_button.config(state="normal" if ok else "disabled")
+
+            key_var.trace_add("write", validate_key)
+            product_key_entry.bind("<Return>", lambda e: activate_product()
+                                   if str(activate_button["state"]) == "normal" else None)
+            self.add_window(window)
+            product_key_entry.focus_set()
+
+        # ----------------------------------------------------------------- system
         def update_clock(self):
-            current_time = time.strftime('%H:%M:%S')
-            self.clock_label.config(text=current_time, font=("Fixedsys"))
-            self.root_inst.after(1000, self.update_clock)
-        
+            try:
+                self.clock_label.config(text=time.strftime("%I:%M %p").lstrip("0"))
+                self._clock_job = self.root_inst.after(1000, self.update_clock)
+            except tk.TclError:
+                pass                                      # the window is already closed
+
         def toggle_fullscreen(self):
             self.is_fullscreen = not self.is_fullscreen
-            if self.is_fullscreen:
-                self.root_inst.attributes('-fullscreen', True)
-            else:
-                self.root_inst.attributes('-fullscreen', False)
-        
-        def create_notepad(self, window):
-            text_area = tk.Text(window, font=("Fixedsys"))
-            text_area.pack(fill='both', expand=True)
-            
-            # Adăugăm un tag pentru culoarea gri
-            text_area.tag_configure("placeholder", foreground="#c7c7c7")
-            
-            # Textul prestabilit care va apărea la început
-            placeholder_text = "This instance helps you check if the system requirements of the computer running Bitpack are compatible with the recommended minimum requirements. Click on the About Window button in the Start Menu to perform this check. To continue booting into Bitpack, click on the Shutdown button in the Start Menu. For Bitpack to function, it must be activated using a product key. This can be done from the Product Activation section. ##Try extension/manager, w95dist, devcpp, config/editor or RFLAGS (type this code in USER, without password)##"
-            text_area.insert(tk.END, placeholder_text)
-            
-            # Aplicăm tag-ul gri pe întregul text prestabilit
-            text_area.tag_add("placeholder", "1.0", "end")
-            
-            # Funcția pentru a șterge textul prestabilit când utilizatorul începe să scrie
-            def on_focus_in(event):
-                if text_area.get("1.0", tk.END).strip() == placeholder_text:
-                    text_area.delete("1.0", tk.END)
-            
-            # Funcția pentru a șterge textul prestabilit când utilizatorul pune cursorul
-            def on_key_press(event):
-                if text_area.get("1.0", tk.END).strip() == placeholder_text:
-                    text_area.delete("1.0", tk.END)
+            self.root_inst.attributes("-fullscreen", self.is_fullscreen)
+            self.fullscreen_row.config(text="  " + ("Exit Full Screen" if self.is_fullscreen else "Full Screen"))
 
-            # Legăm evenimentele la funcțiile corespunzătoare
-            text_area.bind("<FocusIn>", on_focus_in)  # Când fereastra primește focus
-            text_area.bind("<KeyPress>", on_key_press)  # Când utilizatorul apasă o tastă
-            
-            # Adăugăm un meniu pentru a salva și deschide fișiere
-            menu_bar = tk.Menu(window)
-            file_menu = tk.Menu(menu_bar, tearoff=0)
-            file_menu.add_command(label='Save', command=lambda: self.save_file(text_area))
-            file_menu.add_command(label='Open', command=lambda: self.open_file(text_area))
-            menu_bar.add_cascade(label='File', menu=file_menu)
-            window.config(menu=menu_bar)
-        
-        def save_file(self, text_area):
-            file_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
-            if file_path:
-                with open(file_path, "w") as file:
-                    file.write(text_area.get("1.0", tk.END))
-        
-        def open_file(self, text_area):
-            file_path = filedialog.askopenfilename(filetypes=[("Text files", "*.txt")])
-            if file_path:
-                with open(file_path, "r") as file:
-                    text_area.delete("1.0", tk.END)
-                    text_area.insert("1.0", file.read())
-        
-        def create_about_window(self, window):
-            sys_info = platform.uname()
-            system_version = sys_info.system
-            processor_info = platform.processor()
-            
-            # Specificațiile minime
-            min_os = "Windows 10 (x64)"
-            min_processor_speed = 1  # GHz
-            min_ram = 4  # GB
-            min_disk_space = 500  # MB
-            
-            # Obținem informațiile sistemului
-            os_version = sys_info.release
-            ram = psutil.virtual_memory().total / (1024 ** 3)  # RAM în GB
-            processor_speed = float(processor_info.split()[2].split('GHz')[0])  # extragem valoarea GHz
-            is_x64 = sys_info.machine in ["x86_64", "AMD64"]  # Verificăm dacă este sistem x64 (AMD64 sau x86_64)
-            
-            # Verificăm dacă sistemul îndeplinește cerințele minime
-            meets_requirements = True
-            requirements_message = "Meets minimum requirements"
-            
-            if system_version != "Windows" or not is_x64:
-                meets_requirements = False
-                requirements_message = "Does not meet minimum requirements: OS is not Windows x64."
-            
-            # Verificăm dacă versiunea este 10 sau mai mare
-            major_version = int(os_version.split('.')[0])
-            if major_version < 10:
-                meets_requirements = False
-                requirements_message = f"Does not meet minimum requirements: OS version is older than Windows 10 (Detected: Windows {major_version})."
-            
-            if processor_speed < min_processor_speed:
-                meets_requirements = False
-                requirements_message = "Does not meet minimum requirements: Processor speed is too low."
-            
-            # Verificăm RAM-ul
-            if ram < min_ram:
-                meets_requirements = False
-                requirements_message = "Does not meet minimum requirements: RAM is too low."
-            
-            # Verificăm dacă există suficient spațiu pe disc
-            if system_version == "Windows":
-                disk_space = psutil.disk_usage('/').free / (1024 ** 2)  # spațiu liber în MB
-                if disk_space < min_disk_space:
-                    meets_requirements = False
-                    requirements_message = "Does not meet minimum requirements: Insufficient disk space."
-            
-            window.configure(bg='#c9c9c9')
-            
-            # Creăm layout-ul pentru fereastra de 'About'
-            frame = tk.Frame(window, bg='#c9c9c9')
-            frame.pack(padx=10, pady=10)
-
-            # Specificațiile minime
-            min_specs = tk.Label(frame, text=f"Minimum Requirements:\nOS: {min_os}\nProcessor: {min_processor_speed} GHz\nRAM: {min_ram} GB\nDisk space: {min_disk_space} MB free", font=("Fixedsys", 12), bg='#c9c9c9')
-            min_specs.grid(row=0, column=0, padx=10, pady=10, sticky='w')
-            
-            # Specificațiile curente
-            current_specs = tk.Label(frame, text=f"Your System:\nOS: {system_version} {os_version} {sys_info.machine}\nProcessor: {processor_speed} GHz\nRAM: {ram:.2f} GB\nDisk space: {disk_space:.2f} MB free", font=("Fixedsys", 12), bg='#c9c9c9')
-            current_specs.grid(row=0, column=1, padx=10, pady=10, sticky='w')
-            
-            # Mesajul de cerințe
-            color = "green" if meets_requirements else "red"
-            result_label = tk.Label(window, text=requirements_message, font=("Fixedsys", 14), fg=color, bg='#c9c9c9')
-            result_label.pack(pady=10)
+        def shutdown(self):
+            def answer(value):
+                if value == "Yes":
+                    try:
+                        self.root_inst.after_cancel(self._clock_job)   # fix: no "invalid command name" error
+                    except (AttributeError, tk.TclError):
+                        pass
+                    self.root_inst.destroy()  # Închide instanța și continuă pornirea Bitpack
+            self.message("Shut Down", "Shut down the Instance Checker and continue starting Bitpack?",
+                         "question", ("Yes", "No"), default=0, callback=answer)
 
     if __name__ == '__main__':
         root_inst = tk.Tk()
         app = Windows95Simulator(root_inst)
         root_inst.mainloop()
-
+        
 def ch_inst_and_virt_inst_db():
     import sqlite3
     conn = sqlite3.connect("Config/dbo_bitpack.db")
@@ -34609,91 +36149,390 @@ if passfig == 4:
             # Rularea buclei principale
             validation.mainloop()
 
-    def low():
-        entrypass.delete(0, END)
-        lengthpass = var1.get()
-        passwordpass = ""
-        
-        if custom_check.get() == 1:  # If custom option is selected
-            chars = custom_entry.get()  # Get custom characters
-        else:
-            if varpass.get() == 1:  # if strength selected is low
-                chars = "abcdefghijklmnopqrstuvwxyz"
-            elif varpass.get() == 0:  # if strength selected is medium
-                chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-            elif varpass.get() == 3:  # if strength selected is strong
-                chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 !@#$%^&*()"
-            else:
-                print("Please choose an option")
+    import math
+    import os
+    import secrets
+    import string
+    import tkinter as tk          # Fix: no "from tkinter import *" - it replaced names such as Image in Bitpack
+    import tkinter.font as tkfont
+    try:
+        import pyperclip
+    except ImportError:
+        pyperclip = None
 
-        for i in range(0, lengthpass):
-            passwordpass = passwordpass + random.choice(chars)
-        return passwordpass
+    PG_FACE, PG_SHADOW, PG_LIGHT, PG_NAVY, PG_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    PG_FONT = ("MS Sans Serif", 8)
+    PG_FONT_B = ("MS Sans Serif", 8, "bold")
+    PG_FONT_MONO = ("Courier New", 11)
+    PG_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+    PG_SYMBOLS = "!@#$%^&*()"
+    PG_LEVELS = {                  # the radio values of the original: 1 = Low, 0 = Medium, 3 = Strong
+        1: [string.ascii_lowercase],
+        0: [string.ascii_uppercase, string.ascii_lowercase],
+        3: [string.ascii_uppercase, string.ascii_lowercase, string.digits, PG_SYMBOLS],
+    }
+
+
+    def make_password(length, groups):
+        """A password from the character groups, made with the cryptographic generator (secrets).
+        Every group appears at least once when the length allows it."""
+        pool = "".join(groups)
+        chars = [secrets.choice(group) for group in groups] if length >= len(groups) else []
+        chars += [secrets.choice(pool) for _ in range(length - len(chars))]
+        secrets.SystemRandom().shuffle(chars)
+        return "".join(chars)
 
 
     def save_to_file(passwordpass):
-        with open("passwords.txt", "a") as file:
+        with open("passwords.txt", "a", encoding="utf-8") as file:
             file.write(passwordpass + "\n")
 
-    def generate():
-        password1 = low()
-        entrypass.insert(10, password1)
-        save_to_file(password1)
+
+    class PasswordGenerator95:
+        def __init__(self, passroot):
+            self.root = passroot
+            passroot.title("Random Password Generator")
+            passroot.resizable(False, False)
+            passroot.configure(bg=PG_FACE)
+            self.custom_frame = PG_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.minimizing = False
+
+            self.varpass = tk.IntVar(value=3)          # Strong
+            self.var1 = tk.StringVar(value="16")       # length
+            self.custom_check = tk.IntVar(value=0)
+            self.save_var = tk.IntVar(value=1)         # as before: every password is added to passwords.txt
+            self.password_var = tk.StringVar()
+
+            self._build_titlebar()
+            self._build_menu()
+            self._build_body()
+            passroot.update_idletasks()
+            w, h = passroot.winfo_reqwidth(), passroot.winfo_reqheight()
+            passroot.geometry("+%d+%d" % (max(0, (passroot.winfo_screenwidth() - w) // 2),
+                                          max(0, (passroot.winfo_screenheight() - h) // 2)))
+            passroot.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            passroot.bind("<F5>", lambda e: self.generate())
+            passroot.bind("<Return>", lambda e: self.generate())
+            if self.custom_frame:
+                passroot.configure(bd=2, relief="raised")
+                passroot.after(10, self._enable_custom_frame)
+
+        # ----- Windows 95 frame ---------------------------------------------------------------------
+        def _build_titlebar(self):
+            root = self.root
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = {"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"}
+            glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if PG_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=PG_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=PG_NAVY, bd=0, highlightthickness=0)
+            icon.create_rectangle(1, 4, 15, 12, fill=PG_LIGHT, outline=PG_BLACK)       # a password field
+            for x in (3, 6, 9, 12):
+                icon.create_text(x + 1, 9, text="*", fill=PG_BLACK, font=("Courier New", 7, "bold"))
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Random Password Generator", bg=PG_NAVY, fg=PG_LIGHT, font=PG_FONT_B, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, title, icon)
+
+            def caption_button(key, command):
+                return tk.Button(bar, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=PG_FACE, fg=PG_BLACK,
+                                 activebackground=PG_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", root.destroy).pack(side="right", padx=(2, 2))
+            caption_button("min", self._minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=PG_NAVY if active else PG_SHADOW)
+            self.caption_parts[1].config(fg=PG_LIGHT if active else PG_FACE)
+
+        def _enable_custom_frame(self):
+            self.root.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.root
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            if event.widget is self.root and self.minimizing and self.root.state() == "normal":
+                self.minimizing = False
+                self.root.overrideredirect(True)
+                self.root.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.root.overrideredirect(False)
+            self.root.iconify()
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame:
+                self.root.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it. A click in a text field gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Spinbox, tk.Text)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        # ----- Windows 95 message box (always in front) -------------------------------------------------
+        def message(self, title, text):
+            root = self.root
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=PG_FACE, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+
+            def close():
+                win.destroy()
+                try:
+                    root.focus_force()
+                except tk.TclError:
+                    pass
+
+            bar = tk.Frame(win, bg=PG_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=PG_NAVY, fg=PG_LIGHT, font=PG_FONT_B).pack(side="left", padx=4)
+            tk.Button(bar, text=self.glyphs["close"], command=close,
+                      font=("Marlett", 7) if self.glyphs["close"] == "r" else ("MS Sans Serif", 7, "bold"),
+                      image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=PG_FACE,
+                      relief="raised", bd=2, highlightthickness=0, takefocus=0).pack(side="right", padx=2)
+            body = tk.Frame(win, bg=PG_FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            picture = tk.Canvas(body, width=32, height=32, bg=PG_FACE, highlightthickness=0)
+            picture.create_oval(2, 2, 30, 30, fill=PG_LIGHT, outline=PG_BLACK)
+            picture.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+            picture.pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=PG_FACE, font=PG_FONT, justify="left", wraplength=360).pack(side="left")
+            self._button(win, "OK", close, width=9, default=True).pack(pady=(4, 12))
+            win.bind("<Return>", lambda e: close())
+            win.bind("<Escape>", lambda e: close())
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+
+        def show_help(self):
+            self.message("How to Use",
+                         "1. Choose the length (4 to 128 characters).\n"
+                         "2. Choose the strength: Low (a-z), Medium (A-Z, a-z) or Strong (letters, digits and "
+                         "symbols) - or tick Custom characters and type your own.\n"
+                         "3. Press Generate (Enter or F5), then Copy (Ctrl+C).\n\n"
+                         "Options > Save to passwords.txt adds every new password to that file.")
+
+        # ----- layout ---------------------------------------------------------------------------------
+        def _button(self, parent, text, command, width=10, default=False):
+            return tk.Button(parent, text=text, command=command, width=width, font=PG_FONT_B if default else PG_FONT,
+                             bg=PG_FACE, fg=PG_BLACK, activebackground=PG_FACE, relief="raised", bd=2,
+                             highlightthickness=1 if default else 0, highlightbackground=PG_BLACK, takefocus=0)
+
+        def _build_menu(self):
+            bar = tk.Frame(self.root, bg=PG_FACE)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=PG_FONT, bg=PG_FACE, fg=PG_BLACK, activebackground=PG_NAVY,
+                                       activeforeground=PG_LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=PG_FONT, bg=PG_FACE, fg=PG_BLACK, activebackground=PG_NAVY,
+                               activeforeground=PG_LIGHT, selectcolor=PG_BLACK)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Exit", command=self.root.destroy)
+            m = menubutton("Edit")
+            m.add_command(label="Generate", accelerator="F5", command=self.generate)
+            m.add_command(label="Copy", accelerator="Ctrl+C", command=self.copy1)
+            m = menubutton("Options")
+            for label, value in (("Low (a-z)", 1), ("Medium (A-Z, a-z)", 0), ("Strong (A-Z, a-z, 0-9, symbols)", 3)):
+                m.add_radiobutton(label=label, variable=self.varpass, value=value, command=self.enable_custom_entry)
+            m.add_separator()
+            m.add_checkbutton(label="Save to passwords.txt", variable=self.save_var, onvalue=1, offvalue=0,
+                              command=self._save_changed)
+            m = menubutton("Help")
+            m.add_command(label="How to Use", accelerator="F1", command=self.show_help)
+            m.add_separator()
+            m.add_command(label="About", command=lambda: self.message(
+                "About Random Password Generator",
+                "Random Password Generator\n\nPasswords are made with the secure random generator."
+                " Strong passwords always contain upper and lower case letters, digits and symbols."))
+            self.root.bind("<F1>", lambda e: self.show_help())
+
+        def _build_body(self):
+            body = tk.Frame(self.root, bg=PG_FACE)
+            body.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+
+            group = tk.LabelFrame(body, text=" Password ", font=PG_FONT, bg=PG_FACE, bd=2, relief="groove")
+            group.pack(fill="x")
+            row = tk.Frame(group, bg=PG_FACE)
+            row.pack(fill="x", padx=8, pady=(6, 8))
+            self.entrypass = tk.Entry(row, textvariable=self.password_var, font=PG_FONT_MONO, width=30, bg=PG_LIGHT,
+                                      relief="sunken", bd=2, highlightthickness=0)
+            self.entrypass.pack(side="left", fill="x", expand=True)
+            self.entrypass.bind("<Control-c>", lambda e: (self.copy1(), "break")[1])
+            self._button(row, "Copy", self.copy1, width=8).pack(side="left", padx=(6, 0))
+            self._button(row, "Generate", self.generate, width=10, default=True).pack(side="left", padx=(6, 0))
+
+            options = tk.LabelFrame(body, text=" Options ", font=PG_FONT, bg=PG_FACE, bd=2, relief="groove")
+            options.pack(fill="x", pady=(6, 0))
+            grid = tk.Frame(options, bg=PG_FACE)
+            grid.pack(fill="x", padx=8, pady=(6, 8))
+
+            tk.Label(grid, text="Length:", font=PG_FONT, bg=PG_FACE).grid(row=0, column=0, sticky="w")
+            # Fix: a spin box from 4 to 128 instead of a list that also held the word "Length"
+            self.combopass = tk.Spinbox(grid, from_=4, to=128, textvariable=self.var1, width=5, font=PG_FONT,
+                                        bg=PG_LIGHT, relief="sunken", bd=2, highlightthickness=0, justify="right",
+                                        buttonbackground=PG_FACE)
+            self.combopass.grid(row=0, column=1, sticky="w", padx=(6, 0))
+            tk.Label(grid, text="characters", font=PG_FONT, bg=PG_FACE).grid(row=0, column=2, sticky="w", padx=(4, 0))
+
+            tk.Label(grid, text="Strength:", font=PG_FONT, bg=PG_FACE).grid(row=1, column=0, sticky="w", pady=(6, 0))
+            radios = tk.Frame(grid, bg=PG_FACE)
+            radios.grid(row=1, column=1, columnspan=3, sticky="w", padx=(2, 0), pady=(6, 0))
+            self.strength_radios = []
+            for text, value in (("Low", 1), ("Medium", 0), ("Strong", 3)):
+                radio = tk.Radiobutton(radios, text=text, variable=self.varpass, value=value, font=PG_FONT, bg=PG_FACE,
+                                       activebackground=PG_FACE, selectcolor=PG_LIGHT, highlightthickness=0,
+                                       disabledforeground=PG_SHADOW, command=self.enable_custom_entry)
+                radio.pack(side="left", padx=(0, 8))
+                self.strength_radios.append(radio)
+
+            self.custom_checkbutton = tk.Checkbutton(grid, text="Custom characters:", variable=self.custom_check,
+                                                     font=PG_FONT, bg=PG_FACE, activebackground=PG_FACE,
+                                                     selectcolor=PG_LIGHT, highlightthickness=0,
+                                                     command=self.enable_custom_entry)
+            self.custom_checkbutton.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+            self.custom_entry = tk.Entry(grid, font=("Courier New", 9), width=26, bg=PG_LIGHT, relief="sunken", bd=2,
+                                         highlightthickness=0, state="disabled", disabledbackground=PG_FACE)
+            self.custom_entry.grid(row=2, column=2, columnspan=2, sticky="we", pady=(6, 0))
+
+            self.info = tk.Label(body, text="", font=PG_FONT, bg=PG_FACE, anchor="w")
+            self.info.pack(fill="x", pady=(6, 2))
+
+            self.status = tk.Label(self.root, text="Press Generate (F5) to create a password.", font=PG_FONT,
+                                   bg=PG_FACE, anchor="w", relief="sunken", bd=1, padx=4)
+            self.status.pack(side="bottom", fill="x", padx=2, pady=(4, 2))
+            self._save_changed(quiet=True)
+
+        # ----- actions (the original workflow) ----------------------------------------------------------
+        def set_status(self, text):
+            self.status.config(text=text)
+
+        def _save_changed(self, quiet=False):
+            if not quiet:
+                self.set_status("New passwords are added to passwords.txt." if self.save_var.get()
+                                else "New passwords are not saved anywhere.")
+
+        def enable_custom_entry(self):
+            custom = self.custom_check.get() == 1
+            self.custom_entry.config(state="normal" if custom else "disabled")
+            for radio in self.strength_radios:
+                radio.config(state="disabled" if custom else "normal")
+            if custom:
+                self.custom_entry.focus_force()
+
+        def low(self):
+            """The characters to use and the password length, or None (with a message) when they are not valid."""
+            try:
+                lengthpass = int(self.var1.get().strip())
+            except ValueError:
+                lengthpass = 0
+            if not 4 <= lengthpass <= 128:     # Fix: a length that is not a number no longer raises an error
+                self.set_status("The length must be a number from 4 to 128.")
+                return None
+            if self.custom_check.get() == 1:  # If custom option is selected
+                chars = "".join(dict.fromkeys(self.custom_entry.get().replace(" ", "")))   # each character once
+                if len(chars) < 2:             # Fix: an empty custom field no longer raises an error
+                    self.set_status("Type at least 2 different custom characters.")
+                    return None
+                groups = [chars]
+            else:
+                groups = PG_LEVELS.get(self.varpass.get(), PG_LEVELS[3])
+            return make_password(lengthpass, groups), "".join(groups)
+
+        def generate(self):
+            made = self.low()
+            if made is None:
+                return
+            password1, pool = made
+            self.password_var.set(password1)
+            bits = len(password1) * math.log2(len(set(pool)))
+            self.info.config(text="%d characters, about %d bits of entropy." % (len(password1), bits))
+            if self.save_var.get():
+                try:
+                    save_to_file(password1)
+                    self.set_status("Generated and added to passwords.txt.")
+                except OSError as exc:
+                    self.set_status("Generated, but passwords.txt could not be written: %s" % exc)
+            else:
+                self.set_status("Generated (not saved).")
+
+        def copy1(self):
+            random_password = self.password_var.get()
+            if not random_password:
+                self.set_status("Nothing to copy - generate a password first.")
+                return
+            try:
+                if pyperclip is None:
+                    raise RuntimeError
+                pyperclip.copy(random_password)
+            except Exception:                  # Fix: works without pyperclip too
+                self.root.clipboard_clear()
+                self.root.clipboard_append(random_password)
+                self.root.update()
+            self.set_status("Password copied to the clipboard.")
 
 
-    def copy1():
-        random_password = entrypass.get()
-        pyperclip.copy(random_password)
-
-    def enable_custom_entry():
-        custom_entry.config(state=NORMAL if custom_check.get() == 1 else DISABLED)
-
-    passroot = Tk()
-    passroot.resizable(False, False)
-    varpass = IntVar()
-    var1 = IntVar()
-    custom_check = IntVar()
-
-    passroot.title("Random Password Generator")
-    #image_icon53 = PhotoImage(file = "img/passlogo.png")
-    #passroot.iconphoto(False, image_icon53)
-
-    Random_password = Label(passroot, text="Password")
-    Random_password.grid(row=0)
-    entrypass = Entry(passroot)
-    entrypass.grid(row=0, column=1)
-
-    c_label = Label(passroot, text="Length")
-    c_label.grid(row=1)
-
-    copy_buttonpass = Button(passroot, text="Copy", command=copy1)
-    copy_buttonpass.grid(row=0, column=2)
-    generate_buttonpass = Button(passroot, text="Generate", command=generate)
-    generate_buttonpass.grid(row=0, column=3)
-
-    radio_low = Radiobutton(passroot, text="Low", variable=varpass, value=1, command=enable_custom_entry)
-    radio_low.grid(row=1, column=2, sticky='E')
-    radio_middle = Radiobutton(passroot, text="Medium", variable=varpass, value=0, command=enable_custom_entry)
-    radio_middle.grid(row=1, column=3, sticky='E')
-    radio_strong = Radiobutton(passroot, text="Strong", variable=varpass, value=3, command=enable_custom_entry)
-    radio_strong.grid(row=1, column=4, sticky='E')
-
-    custom_entry_label = Label(passroot, text="Custom Characters")
-    custom_entry_label.grid(row=2)
-    custom_entry = Entry(passroot, state=DISABLED)
-    custom_entry.grid(row=2, column=1)
-
-    custom_checkbutton = Checkbutton(passroot, text="Custom", variable=custom_check, command=enable_custom_entry)
-    custom_checkbutton.grid(row=2, column=2)
-
-    combopass = Combobox(passroot, textvariable=var1)
-    combopass['values'] = (8, 9, 10, 11, 12, 13, 14, 15, 16,
-                           17, 18, 19, 20, 21, 22, 23, 24, 25,
-                           26, 27, 28, 29, 30, 31, 32, "Length")
-    combopass.current(0)
-    combopass.bind('<<ComboboxSelected>>')
-    combopass.grid(column=1, row=1)
-
+    passroot = tk.Tk()
+    PasswordGenerator95(passroot)
     passroot.mainloop()
 
 if passfig1 == 5:
@@ -34828,13 +36667,54 @@ if passfig1 == 5:
             # Rularea buclei principale
             validation.mainloop()
 
-    import tkinter as tk
-    from tkinter import ttk
-    import random
+    import os
+    import math
+    import secrets
+    import sqlite3
     import string
-    from PIL import Image, ImageTk
-    import tkinter.messagebox
-    import json
+    import tkinter as tk
+    import tkinter.font as tkfont
+
+    PG2_FACE, PG2_SHADOW, PG2_LIGHT, PG2_NAVY, PG2_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    PG2_FONT = ("MS Sans Serif", 8)
+    PG2_FONT_B = ("MS Sans Serif", 8, "bold")
+    PG2_FONT_MONO = ("Courier New", 11)
+    PG2_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+    PG2_COMPLEXITY_COLOURS = {"Weak": "#cc0000", "Medium": "#cc7700", "Complex": "#008000"}
+
+
+    def pg2_ensure_tables(db_path):
+        """Fix: the tables (and the settings row) are created when they are missing, so nothing is lost silently."""
+        folder = os.path.dirname(db_path)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS passgen_settings (
+                id INTEGER PRIMARY KEY,
+                password_length INTEGER,
+                include_uppercase INTEGER,
+                include_numbers INTEGER,
+                include_special_chars INTEGER
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS passgen_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                password TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("""
+            INSERT OR IGNORE INTO passgen_settings
+                (id, password_length, include_uppercase, include_numbers, include_special_chars)
+            VALUES (1, 12, 0, 0, 0)
+        """)
+        conn.commit()
+        conn.close()
+
 
     class Settings:
         def __init__(self, db_path="Config/dbo_bitpack.db"):
@@ -34845,58 +36725,55 @@ if passfig1 == 5:
                 "include_numbers": False,
                 "include_special_chars": False
             }
+            self.error = None
             self.load_settings()
 
         def load_settings(self):
-            import sqlite3
-            
             try:
+                pg2_ensure_tables(self.db_path)
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
-                
                 cursor.execute("""
-                    SELECT password_length, include_uppercase, include_numbers, include_special_chars 
+                    SELECT password_length, include_uppercase, include_numbers, include_special_chars
                     FROM passgen_settings WHERE id=1
                 """)
-                
                 result = cursor.fetchone()
                 conn.close()
-                
                 if result:
                     self.settings = {
-                        "password_length": result[0],
+                        "password_length": int(result[0] or 12),
                         "include_uppercase": bool(result[1]),
                         "include_numbers": bool(result[2]),
                         "include_special_chars": bool(result[3])
                     }
                 else:
-                    self.settings = self.defaults
+                    self.settings = dict(self.defaults)
             except Exception as e:
-                print(f"Error loading settings: {e}")
-                self.settings = self.defaults
+                self.error = "Error loading settings: %s" % e
+                self.settings = dict(self.defaults)
 
         def save_settings(self):
-            import sqlite3
-            
+            """Returns None when saved, or the error text."""
             try:
+                pg2_ensure_tables(self.db_path)
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
-                
+                # Fix: INSERT OR REPLACE - an UPDATE on a missing row saved nothing
                 cursor.execute("""
-                    UPDATE passgen_settings 
-                    SET password_length=?, include_uppercase=?, include_numbers=?, include_special_chars=?
-                    WHERE id=1
+                    INSERT OR REPLACE INTO passgen_settings
+                        (id, password_length, include_uppercase, include_numbers, include_special_chars)
+                    VALUES (1, ?, ?, ?, ?)
                 """, (
-                    self.settings["password_length"],
+                    int(self.settings["password_length"]),
                     int(self.settings["include_uppercase"]),
                     int(self.settings["include_numbers"]),
                     int(self.settings["include_special_chars"])
                 ))
-                
                 conn.commit()
                 conn.close()
+                return None
             except Exception as e:
-                print(f"Error saving settings: {e}")
+                return str(e)
 
         def get_setting(self, key):
             return self.settings.get(key, self.defaults.get(key))
@@ -34904,129 +36781,398 @@ if passfig1 == 5:
         def set_setting(self, key, value):
             self.settings[key] = value
 
+
     class PasswordGeneratorApp:
         def __init__(self, rootpassgen):
             self.rootpassgen = rootpassgen
             self.rootpassgen.title("Password Generator")
-            self.rootpassgen.geometry("750x620") 
-            self.rootpassgen.resizable(False, False) 
-            #self.image_icon55 = PhotoImage(file = "img/passlogo.png")
-            #self.rootpassgen.iconphoto(False, self.image_icon55)
+            self.rootpassgen.resizable(False, False)
+            self.rootpassgen.configure(bg=PG2_FACE)
+            self.custom_frame = PG2_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.minimizing = False
+            self.settings_window = None
 
-            self.db_path = "Config/dbo_bitpack.db"  # ADAUGĂ ACEASTĂ LINIE
-            
-            self.settings = Settings(self.db_path)  # MODIFICAT: treci db_path
-            self.settings.load_settings()
-            
-            self.settings_button = ttk.Button(self.rootpassgen, text="Settings", command=self.open_settings)
-            self.settings_button.pack(anchor="ne", padx=10, pady=10)
-
-            self.main_frame = ttk.Frame(rootpassgen)
-            self.main_frame.pack(pady=10)
-
-            self.options_frame = ttk.Frame(self.main_frame)
-            self.options_frame.pack(side=tk.LEFT)
-
-            self.length_label = ttk.Label(self.options_frame, text="Password Length:")
-            self.length_label.pack(pady=10)
+            self.db_path = "Config/dbo_bitpack.db"
+            self.settings = Settings(self.db_path)
 
             self.length_var = tk.IntVar(value=12)
-            self.length_scale = ttk.Scale(self.options_frame, from_=6, to=50, variable=self.length_var, orient=tk.HORIZONTAL, length=200, command=self.update_length_label)
-            self.length_scale.pack()
-
-            self.length_display = ttk.Label(self.options_frame, text="Length: 12")
-            self.length_display.pack(pady=10)
-
             self.uppercase_var = tk.IntVar(value=0)
-            self.uppercase_check = ttk.Checkbutton(self.options_frame, text="Include Uppercase Letters", variable=self.uppercase_var)
-            self.uppercase_check.pack(pady=5)
-
             self.numbers_var = tk.IntVar(value=0)
-            self.numbers_check = ttk.Checkbutton(self.options_frame, text="Include Numbers", variable=self.numbers_var)
-            self.numbers_check.pack(pady=5)
-
             self.special_chars_var = tk.IntVar(value=0)
-            self.special_chars_check = ttk.Checkbutton(self.options_frame, text="Include Special Characters", variable=self.special_chars_var)
-            self.special_chars_check.pack(pady=10)
+            self.custom_chars_var = tk.StringVar(value="")
+            self.custom_chars_checkbox_var = tk.BooleanVar(value=False)
+            self.password_var = tk.StringVar()
 
-            self.generate_button = ttk.Button(self.options_frame, text="Generate Password", command=self.generate_password)
-            self.generate_button.pack(pady=15)
-
-            self.password_frame = ttk.Frame(self.options_frame)
-            self.password_frame.pack(pady=10)
-
-            self.password_entry = ttk.Entry(self.password_frame, width=30, font=("Arial", 12), state='readonly')
-            self.password_entry.pack(side=tk.LEFT)
-
-            self.copy_button = ttk.Button(self.password_frame, text="Copy", command=self.copy_password)
-            self.copy_button.pack(side=tk.LEFT)
-
-            self.complexity_label = ttk.Label(self.options_frame, text="Complexity:")
-            self.complexity_label.pack()
-            self.complexity_display = ttk.Label(self.options_frame, text="", font=("Arial", 12))
-            self.complexity_display.pack()
-
-            self.black_bar = ttk.Separator(self.main_frame, orient=tk.VERTICAL)
-            self.black_bar.pack(side=tk.LEFT, fill=tk.Y, padx=20)
-
-            self.history_frame = ttk.Frame(self.main_frame)
-            self.history_frame.pack(side=tk.LEFT)
-
-            self.history_label = ttk.Label(self.history_frame, text="Password History:")
-            self.history_label.pack()
-
-            self.history_scrollbar = ttk.Scrollbar(self.history_frame)
-            self.history_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            self.history_listbox = tk.Listbox(self.history_frame, width=30, yscrollcommand=self.history_scrollbar.set)
-            self.history_listbox.pack(pady=5)
-
-            self.history_scrollbar.config(command=self.history_listbox.yview)
-
-            self.copy_history_button = ttk.Button(self.history_frame, text="Copy", command=self.copy_selected_password)
-            self.copy_history_button.pack(pady=5)
-
-            self.delete_selected_button = ttk.Button(self.history_frame, text="Delete Selected", command=self.delete_selected_history)
-            self.delete_selected_button.pack(pady=5)
-
-            self.delete_full_button = ttk.Button(self.history_frame, text="Delete Full History", command=self.delete_full_history)
-            self.delete_full_button.pack(pady=5)
-
+            self._build_titlebar()
+            self._build_menu()
+            self._build_body()
             self.load_password_history()
+            self.load_settings()
+            self.toggle_custom_characters()
 
-            self.apply_settings()
+            rootpassgen.update_idletasks()
+            w, h = rootpassgen.winfo_reqwidth(), rootpassgen.winfo_reqheight()
+            rootpassgen.geometry("+%d+%d" % (max(0, (rootpassgen.winfo_screenwidth() - w) // 2),
+                                             max(0, (rootpassgen.winfo_screenheight() - h) // 2)))
+            rootpassgen.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            for key, action in (("<F5>", self.generate_password), ("<Return>", self.generate_password),
+                                ("<F1>", self.show_help)):
+                rootpassgen.bind(key, lambda e, a=action: a())
+            if self.settings.error:
+                self.set_status(self.settings.error)
+            if self.custom_frame:
+                rootpassgen.configure(bd=2, relief="raised")
+                rootpassgen.after(10, self._enable_custom_frame)
+
+        # ===== Windows 95 frame ======================================================================
+        def _build_titlebar(self):
+            root = self.rootpassgen
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = {"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"}
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if PG2_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=PG2_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=PG2_NAVY, bd=0, highlightthickness=0)
+            icon.create_rectangle(1, 3, 13, 11, fill=PG2_LIGHT, outline=PG2_BLACK)      # password field + key
+            for x in (3, 6, 9):
+                icon.create_text(x + 1, 8, text="*", fill=PG2_BLACK, font=("Courier New", 7, "bold"))
+            icon.create_oval(9, 9, 15, 15, fill="#ffd700", outline=PG2_BLACK)
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Password Generator", bg=PG2_NAVY, fg=PG2_LIGHT, font=PG2_FONT_B, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, title, icon)
+            self.caption_button(bar, "close", root.destroy).pack(side="right", padx=(2, 2))
+            self.caption_button(bar, "min", self._minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=PG2_FACE, fg=PG2_BLACK,
+                             activebackground=PG2_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=PG2_NAVY if active else PG2_SHADOW)
+            self.caption_parts[1].config(fg=PG2_LIGHT if active else PG2_FACE)
+
+        def _enable_custom_frame(self):
+            self.rootpassgen.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootpassgen
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootpassgen
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootpassgen.overrideredirect(False)
+            self.rootpassgen.iconify()
+
+        def _caption_press(self, event):
+            root = self.rootpassgen
+            self._drag = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame:
+                self.rootpassgen.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it. A click in a text field gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Spinbox, tk.Text, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        # ===== Windows 95 dialogs (always in front) =================================================
+        def _dialog_window(self, title):
+            root = self.rootpassgen
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=PG2_FACE, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+            bar = tk.Frame(win, bg=PG2_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=PG2_NAVY, fg=PG2_LIGHT, font=PG2_FONT_B).pack(side="left", padx=4)
+            close_button = self.caption_button(bar, "close", win.destroy)
+            close_button.pack(side="right", padx=2)
+            return win, close_button
+
+        def _show_modal(self, win):
+            root = self.rootpassgen
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+
+        def message(self, title, text, icon="info", buttons=("OK",), default=0, callback=None):
+            win, close_button = self._dialog_window(title)
+
+            def answer(value):
+                win.destroy()
+                try:
+                    self.rootpassgen.focus_force()
+                except tk.TclError:
+                    pass
+                if callback is not None:
+                    callback(value)
+
+            close_button.config(command=lambda: answer(buttons[-1]))
+            body = tk.Frame(win, bg=PG2_FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            picture = tk.Canvas(body, width=32, height=32, bg=PG2_FACE, highlightthickness=0)
+            if icon == "warning":
+                picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=PG2_BLACK)
+                picture.create_text(16, 19, text="!", fill=PG2_BLACK, font=("Times New Roman", 15, "bold"))
+            else:
+                picture.create_oval(2, 2, 30, 30, fill=PG2_LIGHT, outline=PG2_BLACK)
+                picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                    font=("Times New Roman", 16, "bold"))
+            picture.pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=PG2_FACE, font=PG2_FONT, justify="left", wraplength=360).pack(side="left")
+            row = tk.Frame(win, bg=PG2_FACE)
+            row.pack(pady=(4, 12))
+            for index, label in enumerate(buttons):
+                self._button(row, label, lambda v=label: answer(v), width=9,
+                             default=index == default).pack(side="left", padx=4)
+            win.bind("<Return>", lambda e: answer(buttons[default]))
+            win.bind("<Escape>", lambda e: answer(buttons[-1]))
+            self._show_modal(win)
+
+        def show_help(self):
+            self.message("How to Use",
+                         "1. Choose the length and the kinds of characters (or tick Use Custom Characters and "
+                         "type your own).\n"
+                         "2. Press Generate Password (Enter or F5), then Copy.\n"
+                         "3. Every new password is kept in the history (in the Bitpack database): select one to copy "
+                         "or delete it.\n\n"
+                         "Options > Settings... stores the length and kinds you want every time the tool starts.")
+
+        # ===== layout ================================================================================
+        def _button(self, parent, text, command, width=12, default=False):
+            return tk.Button(parent, text=text, command=command, width=width, font=PG2_FONT_B if default else PG2_FONT,
+                             bg=PG2_FACE, fg=PG2_BLACK, activebackground=PG2_FACE, relief="raised", bd=2,
+                             disabledforeground=PG2_SHADOW, highlightthickness=1 if default else 0,
+                             highlightbackground=PG2_BLACK, takefocus=0)
+
+        def _check(self, parent, text, variable, command=None):
+            return tk.Checkbutton(parent, text=text, variable=variable, command=command, font=PG2_FONT, bg=PG2_FACE,
+                                  activebackground=PG2_FACE, selectcolor=PG2_LIGHT, highlightthickness=0, anchor="w",
+                                  disabledforeground=PG2_SHADOW)
+
+        def _scale(self, parent, variable, command=None, length=220):
+            return tk.Scale(parent, from_=6, to=50, orient="horizontal", variable=variable, length=length,
+                            command=command, font=PG2_FONT, bg=PG2_FACE, troughcolor=PG2_LIGHT, activebackground=PG2_FACE,
+                            highlightthickness=0, bd=1, sliderlength=14, showvalue=False)
+
+        def _build_menu(self):
+            bar = tk.Frame(self.rootpassgen, bg=PG2_FACE)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=PG2_FONT, bg=PG2_FACE, fg=PG2_BLACK,
+                                       activebackground=PG2_NAVY, activeforeground=PG2_LIGHT, relief="flat", bd=0,
+                                       padx=6, pady=2, underline=0, takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=PG2_FONT, bg=PG2_FACE, fg=PG2_BLACK, activebackground=PG2_NAVY,
+                               activeforeground=PG2_LIGHT, selectcolor=PG2_BLACK)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Exit", command=self.rootpassgen.destroy)
+            m = menubutton("Edit")
+            m.add_command(label="Generate Password", accelerator="F5", command=self.generate_password)
+            m.add_command(label="Copy Password", command=self.copy_password)
+            m.add_separator()
+            m.add_command(label="Copy Selected from History", command=self.copy_selected_password)
+            m.add_command(label="Delete Selected from History", command=self.delete_selected_history)
+            m.add_command(label="Delete Full History...", command=self.delete_full_history)
+            m = menubutton("Options")
+            m.add_command(label="Settings...", command=self.open_settings)
+            m = menubutton("Help")
+            m.add_command(label="How to Use", accelerator="F1", command=self.show_help)
+            m.add_separator()
+            m.add_command(label="About", command=lambda: self.message(
+                "About Password Generator",
+                "Password Generator\n\nPasswords are made with the secure random generator of Python (secrets). "
+                "Every kind you tick appears at least once in each password."))
+
+        def _build_body(self):
+            root = self.rootpassgen
+            self.status = tk.Label(root, text="Press Generate Password (F5).", font=PG2_FONT, bg=PG2_FACE, anchor="w",
+                                   relief="sunken", bd=1, padx=4)
+            self.status.pack(side="bottom", fill="x", padx=2, pady=(4, 2))
+
+            main = tk.Frame(root, bg=PG2_FACE)
+            main.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+            left = tk.Frame(main, bg=PG2_FACE)
+            left.pack(side="left", fill="y")
+
+            options = tk.LabelFrame(left, text=" Options ", font=PG2_FONT, bg=PG2_FACE, bd=2, relief="groove")
+            options.pack(fill="x")
+            row = tk.Frame(options, bg=PG2_FACE)
+            row.pack(fill="x", padx=8, pady=(6, 0))
+            tk.Label(row, text="Password length:", font=PG2_FONT, bg=PG2_FACE).pack(side="left")
+            self.length_display = tk.Label(row, text="12", font=PG2_FONT_B, bg=PG2_LIGHT, relief="sunken", bd=2,
+                                           width=4)
+            self.length_display.pack(side="right")
+            self.length_scale = self._scale(options, self.length_var, self.update_length_label, length=250)
+            self.length_scale.pack(fill="x", padx=8, pady=(2, 4))
+            self.uppercase_check = self._check(options, "Include Uppercase Letters (A-Z)", self.uppercase_var)
+            self.uppercase_check.pack(fill="x", padx=8)
+            self.numbers_check = self._check(options, "Include Numbers (0-9)", self.numbers_var)
+            self.numbers_check.pack(fill="x", padx=8)
+            self.special_chars_check = self._check(options, "Include Special Characters (!@#...)",
+                                                   self.special_chars_var)
+            self.special_chars_check.pack(fill="x", padx=8)
+            self.custom_chars_checkbox = self._check(options, "Use Custom Characters:", self.custom_chars_checkbox_var,
+                                                     self.toggle_custom_characters)
+            self.custom_chars_checkbox.pack(fill="x", padx=8, pady=(6, 0))
+            self.custom_chars_entry = tk.Entry(options, textvariable=self.custom_chars_var, font=("Courier New", 9),
+                                               bg=PG2_LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                                               disabledbackground=PG2_FACE)
+            self.custom_chars_entry.pack(fill="x", padx=(26, 8), pady=(2, 8))
+
+            self.generate_button = self._button(left, "Generate Password", self.generate_password, width=20,
+                                                default=True)
+            self.generate_button.pack(pady=(8, 6))
+
+            result = tk.LabelFrame(left, text=" Password ", font=PG2_FONT, bg=PG2_FACE, bd=2, relief="groove")
+            result.pack(fill="x")
+            prow = tk.Frame(result, bg=PG2_FACE)
+            prow.pack(fill="x", padx=8, pady=(6, 4))
+            self.password_entry = tk.Entry(prow, textvariable=self.password_var, width=24, font=PG2_FONT_MONO,
+                                           state="readonly", readonlybackground=PG2_LIGHT, relief="sunken", bd=2,
+                                           highlightthickness=0)
+            self.password_entry.pack(side="left", fill="x", expand=True)
+            self.copy_button = self._button(prow, "Copy", self.copy_password, width=6)
+            self.copy_button.pack(side="left", padx=(6, 0))
+            crow = tk.Frame(result, bg=PG2_FACE)
+            crow.pack(fill="x", padx=8, pady=(0, 8))
+            tk.Label(crow, text="Complexity:", font=PG2_FONT, bg=PG2_FACE).pack(side="left")
+            self.complexity_meter = tk.Canvas(crow, width=96, height=14, bg=PG2_LIGHT, relief="sunken", bd=2,
+                                              highlightthickness=0)
+            self.complexity_meter.pack(side="left", padx=(6, 6))
+            self.complexity_blocks = [self.complexity_meter.create_rectangle(3 + i * 31, 3, 3 + i * 31 + 28, 15,
+                                                                             fill=PG2_LIGHT, outline="")
+                                      for i in range(3)]
+            self.complexity_display = tk.Label(crow, text="", font=PG2_FONT_B, bg=PG2_FACE, anchor="w")
+            self.complexity_display.pack(side="left")
+
+            history = tk.LabelFrame(main, text=" Password History ", font=PG2_FONT, bg=PG2_FACE, bd=2, relief="groove")
+            history.pack(side="left", fill="both", expand=True, padx=(8, 0))
+            buttons = tk.Frame(history, bg=PG2_FACE)
+            buttons.pack(side="bottom", fill="x", padx=8, pady=(4, 8))
+            self.copy_history_button = self._button(buttons, "Copy", self.copy_selected_password, width=7)
+            self.copy_history_button.pack(side="left")
+            self.delete_selected_button = self._button(buttons, "Delete", self.delete_selected_history, width=7)
+            self.delete_selected_button.pack(side="left", padx=(4, 0))
+            self.delete_full_button = self._button(buttons, "Delete All...", self.delete_full_history, width=11)
+            self.delete_full_button.pack(side="right")
+            holder = tk.Frame(history, bg=PG2_LIGHT, relief="sunken", bd=2)
+            holder.pack(fill="both", expand=True, padx=8, pady=(6, 0))
+            self.history_scrollbar = tk.Scrollbar(holder, orient="vertical")
+            self.history_scrollbar.pack(side="right", fill="y")
+            self.history_listbox = tk.Listbox(holder, width=30, height=16, font=("Courier New", 9), bd=0,
+                                              highlightthickness=0, activestyle="none", selectbackground=PG2_NAVY,
+                                              selectforeground=PG2_LIGHT, exportselection=False,
+                                              yscrollcommand=self.history_scrollbar.set)
+            self.history_listbox.pack(side="left", fill="both", expand=True)
+            self.history_scrollbar.config(command=self.history_listbox.yview)
+            self.history_listbox.bind("<Double-Button-1>", lambda e: self.copy_selected_password())
+            self.history_listbox.bind("<Delete>", lambda e: self.delete_selected_history())
+
+        # ===== the original workflow ================================================================
+        def set_status(self, text):
+            self.status.config(text=text)
+
+        def update_length_label(self, event=None):
+            self.length_display.configure(text=str(self.length_var.get()))
+
+        def toggle_custom_characters(self):
+            custom = self.custom_chars_checkbox_var.get()
+            self.custom_chars_entry.config(state="normal" if custom else "disabled")   # Fix: off at start too
+            for check in (self.uppercase_check, self.numbers_check, self.special_chars_check):
+                check.config(state="disabled" if custom else "normal")
+            if custom:
+                self.custom_chars_entry.focus_force()
 
         def generate_password(self):
-            length = self.length_var.get()
-            uppercase = bool(self.uppercase_var.get())
-            numbers = bool(self.numbers_var.get())
-            special_chars = bool(self.special_chars_var.get())
+            length = int(self.length_var.get())
+            if self.custom_chars_checkbox_var.get():
+                custom_chars = "".join(dict.fromkeys(self.custom_chars_var.get().replace(" ", "")))
+                if len(custom_chars) < 2:      # Fix: an empty custom field no longer raises an error
+                    self.set_status("Type at least 2 different custom characters.")
+                    return
+                groups = [custom_chars]
+            else:
+                groups = [string.ascii_lowercase]
+                if self.uppercase_var.get():
+                    groups.append(string.ascii_uppercase)
+                if self.numbers_var.get():
+                    groups.append(string.digits)
+                if self.special_chars_var.get():
+                    groups.append(string.punctuation)
 
-            selected_characters = [string.ascii_lowercase]
+            # Fix: secrets instead of random; every kind at least once, the rest from all of them
+            # (before, each kind got exactly the same number of characters - a predictable composition)
+            pool = "".join(groups)
+            chars = [secrets.choice(group) for group in groups] if length >= len(groups) else []
+            chars += [secrets.choice(pool) for _ in range(length - len(chars))]
+            secrets.SystemRandom().shuffle(chars)
+            password = "".join(chars)
 
-            if uppercase:
-                selected_characters.append(string.ascii_uppercase)
-            if numbers:
-                selected_characters.append(string.digits)
-            if special_chars:
-                selected_characters.append(string.punctuation)
-
-            random.shuffle(selected_characters)
-
-            password = ''.join(random.choice(chars) for chars in selected_characters for _ in range(length // len(selected_characters)))
-            password += ''.join(random.choice(chars) for chars in selected_characters[:length % len(selected_characters)])
-
-            password_list = list(password)
-            random.shuffle(password_list)
-            password = ''.join(password_list)
-
-            self.password_entry.configure(state='normal')
-            self.password_entry.delete(0, tk.END)
-            self.password_entry.insert(0, password)
-            self.password_entry.configure(state='readonly')
-
+            self.password_var.set(password)
             complexity = self.check_complexity(password)
             self.update_complexity_display(complexity)
+            bits = len(password) * math.log2(len(set(pool)))
+            self.set_status("New password: %d characters, about %d bits of entropy." % (len(password), bits))
 
             if password not in self.history_listbox.get(0, tk.END):
                 self.add_password_to_history(password)
@@ -35049,250 +37195,169 @@ if passfig1 == 5:
                 return "Weak"
 
         def update_complexity_display(self, complexity):
-            if complexity == "Complex":
-                self.complexity_display.configure(text=complexity, foreground="green")
-            elif complexity == "Medium":
-                self.complexity_display.configure(text=complexity, foreground="orange")
-            else:
-                self.complexity_display.configure(text=complexity, foreground="red")
+            colour = PG2_COMPLEXITY_COLOURS.get(complexity, PG2_BLACK)
+            filled = {"Weak": 1, "Medium": 2, "Complex": 3}.get(complexity, 0)
+            for index, block in enumerate(self.complexity_blocks):
+                self.complexity_meter.itemconfig(block, fill=colour if index < filled else PG2_LIGHT)
+            self.complexity_display.configure(text=complexity, fg=colour)
 
-        def update_length_label(self, event=None):
-            length = self.length_var.get()
-            self.length_display.configure(text=f"Length: {length}")
+        def _copy(self, text):
+            self.rootpassgen.clipboard_clear()
+            self.rootpassgen.clipboard_append(text)
+            self.rootpassgen.update()
 
         def copy_password(self):
-            password = self.password_entry.get()
+            password = self.password_var.get()
             if password:
-                self.rootpassgen.clipboard_clear()
-                self.rootpassgen.clipboard_append(password)
-                self.rootpassgen.update()
-                tkinter.messagebox.showinfo("Password Copied", "Password copied to clipboard!")
+                self._copy(password)
+                self.set_status("Password copied to the clipboard.")   # no message box to close every time
+            else:
+                self.set_status("Generate a password first.")
 
         def copy_selected_password(self):
             selected_index = self.history_listbox.curselection()
             if selected_index:
-                selected_password = self.history_listbox.get(selected_index)
-                self.rootpassgen.clipboard_clear()
-                self.rootpassgen.clipboard_append(selected_password)
-                self.rootpassgen.update()
-                tkinter.messagebox.showinfo("Password Copied", "Password copied to clipboard!")
+                self._copy(self.history_listbox.get(selected_index[0]))
+                self.set_status("Password from the history copied to the clipboard.")
+            else:
+                self.set_status("Select a password in the history first.")
 
         def load_password_history(self):
-            import sqlite3
-            
             try:
+                pg2_ensure_tables(self.db_path)
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
-                
-                cursor.execute("SELECT password FROM passgen_history ORDER BY created_at")
+                cursor.execute("SELECT password FROM passgen_history ORDER BY created_at, id")
                 passwords = cursor.fetchall()
                 conn.close()
-                
-                for password_tuple in passwords:
-                    password = password_tuple[0]
-                    if password not in self.history_listbox.get(0, tk.END):
+                shown = set()
+                for (password,) in passwords:
+                    if password not in shown:
+                        shown.add(password)
                         self.history_listbox.insert(tk.END, password)
-                        
+                self.history_listbox.yview(tk.END)
             except Exception as e:
-                print(f"Error loading password history: {e}")
+                self.set_status("Error loading password history: %s" % e)
 
         def add_password_to_history(self, password):
-            import sqlite3
-            
             self.history_listbox.insert(tk.END, password)
             self.history_listbox.yview(tk.END)
-            
             try:
+                pg2_ensure_tables(self.db_path)
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
-                
-                cursor.execute("""
-                    INSERT INTO passgen_history (password)
-                    VALUES (?)
-                """, (password,))
-                
+                cursor.execute("INSERT INTO passgen_history (password) VALUES (?)", (password,))
                 conn.commit()
                 conn.close()
             except Exception as e:
-                print(f"Error adding password to history: {e}")
+                self.set_status("The password could not be added to the history: %s" % e)
 
         def delete_selected_history(self):
-            import sqlite3
-            
             selected_indices = self.history_listbox.curselection()
-            if selected_indices:
+            if not selected_indices:
+                self.set_status("Select a password in the history first.")
+                return
+            try:
                 conn = sqlite3.connect(self.db_path)
                 cursor = conn.cursor()
-                
                 for index in reversed(selected_indices):
                     password = self.history_listbox.get(index)
                     self.history_listbox.delete(index)
-                    
-                    # Șterge din DB
-                    cursor.execute("DELETE FROM passgen_history WHERE password=? AND id IN (SELECT id FROM passgen_history WHERE password=? LIMIT 1)", (password, password))
-                
+                    cursor.execute("DELETE FROM passgen_history WHERE password=?", (password,))
                 conn.commit()
                 conn.close()
+                self.set_status("Deleted from the history.")
+            except Exception as e:
+                self.set_status("Error deleting from the history: %s" % e)
 
         def delete_full_history(self):
-            import sqlite3
-            
-            self.history_listbox.delete(0, tk.END)
-            
-            try:
-                conn = sqlite3.connect(self.db_path)
-                cursor = conn.cursor()
-                
-                cursor.execute("DELETE FROM passgen_history")
-                
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                print(f"Error deleting full history: {e}")
+            if self.history_listbox.size() == 0:
+                self.set_status("The history is already empty.")
+                return
 
-        def apply_settings(self):
-            self.length_var.set(self.settings.get_setting("password_length"))
-            self.uppercase_var.set(self.settings.get_setting("include_uppercase"))
-            self.numbers_var.set(self.settings.get_setting("include_numbers"))
-            self.special_chars_var.set(self.settings.get_setting("include_special_chars"))
-            self.update_length_label()
+            def answer(value):
+                if value != "Yes":
+                    return
+                self.history_listbox.delete(0, tk.END)
+                try:
+                    conn = sqlite3.connect(self.db_path)
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM passgen_history")
+                    conn.commit()
+                    conn.close()
+                    self.set_status("The whole history was deleted.")
+                except Exception as e:
+                    self.set_status("Error deleting full history: %s" % e)
 
-            # New objects for custom characters and enabling/disabling text entry
-            self.custom_chars_var = tk.StringVar(value="")
-            self.custom_chars_entry = ttk.Entry(self.options_frame, textvariable=self.custom_chars_var)
-            self.custom_chars_entry.pack(pady=10)
-
-            self.custom_chars_checkbox_var = tk.BooleanVar(value=False)
-            self.custom_chars_checkbox = ttk.Checkbutton(self.options_frame, text="Use Custom Characters", variable=self.custom_chars_checkbox_var, command=self.toggle_custom_characters)
-            self.custom_chars_checkbox.pack(pady=5)
-
-        def toggle_custom_characters(self):
-            if self.custom_chars_checkbox_var.get():
-                self.custom_chars_entry.config(state="normal")
-                self.uppercase_check.config(state="disabled")
-                self.numbers_check.config(state="disabled")
-                self.special_chars_check.config(state="disabled")
-            else:
-                self.custom_chars_entry.config(state="disabled")
-                self.uppercase_check.config(state="normal")
-                self.numbers_check.config(state="normal")
-                self.special_chars_check.config(state="normal")
-
-        def generate_password(self):
-            if self.custom_chars_checkbox_var.get():
-                custom_chars = self.custom_chars_var.get()
-                password = ''.join(random.choice(custom_chars) for _ in range(self.length_var.get()))
-            else:
-                length = self.length_var.get()
-                uppercase = bool(self.uppercase_var.get())
-                numbers = bool(self.numbers_var.get())
-                special_chars = bool(self.special_chars_var.get())
-
-                selected_characters = [string.ascii_lowercase]
-
-                if uppercase:
-                    selected_characters.append(string.ascii_uppercase)
-                if numbers:
-                    selected_characters.append(string.digits)
-                if special_chars:
-                    selected_characters.append(string.punctuation)
-
-                random.shuffle(selected_characters)
-
-                password = ''.join(random.choice(chars) for chars in selected_characters for _ in range(length // len(selected_characters)))
-                password += ''.join(random.choice(chars) for chars in selected_characters[:length % len(selected_characters)])
-
-                password_list = list(password)
-                random.shuffle(password_list)
-                password = ''.join(password_list)
-
-            self.password_entry.configure(state='normal')
-            self.password_entry.delete(0, tk.END)
-            self.password_entry.insert(0, password)
-            self.password_entry.configure(state='readonly')
-
-            complexity = self.check_complexity(password)
-            self.update_complexity_display(complexity)
-
-            if password not in self.history_listbox.get(0, tk.END):
-                self.add_password_to_history(password)
+            # Fix: asks first - the whole history is gone after this
+            self.message("Delete Full History", "Delete all %d passwords from the history?\nThis cannot be undone."
+                         % self.history_listbox.size(), "warning", ("Yes", "No"), default=1, callback=answer)
 
         # Function to load settings on the main window
         def load_settings(self):
             self.length_var.set(self.settings.get_setting("password_length"))
-            self.uppercase_var.set(self.settings.get_setting("include_uppercase"))
-            self.numbers_var.set(self.settings.get_setting("include_numbers"))
-            self.special_chars_var.set(self.settings.get_setting("include_special_chars"))
-
-            # Reconfigure the main window based on the new settings
+            self.uppercase_var.set(int(self.settings.get_setting("include_uppercase")))
+            self.numbers_var.set(int(self.settings.get_setting("include_numbers")))
+            self.special_chars_var.set(int(self.settings.get_setting("include_special_chars")))
             self.update_length_label()
 
-        # Function to save the settings to file and update the main window
-        def save_settings_and_update_main_window(self):
-            # Update the settings object with the new settings from the settings window
-            self.settings.set_setting("password_length", self.password_length_var.get())
-            self.settings.set_setting("include_uppercase", self.include_uppercase_var.get())
-            self.settings.set_setting("include_numbers", self.include_numbers_var.get())
-            self.settings.set_setting("include_special_chars", self.include_special_chars_var.get())
-
-            # Save the settings to file
-            self.settings.save_settings()
-
-            # Apply the new settings to the main window
-            self.load_settings()
-
-            # Message box to confirm settings have been saved
-            tkinter.messagebox.showinfo("Settings Saved", "Your settings have been saved!")
-        
-        # Function to open the settings window
+        # Function to open the settings window (only one at a time; the main window keeps its choices)
         def open_settings(self):
-            settings_window = tk.Toplevel(self.rootpassgen)
-            settings_window.title("Settings")
-            settings_window.resizable(False, False)
-            #image_icon57 = PhotoImage(file = "img/settingslogo.png")
-            #settings_window.iconphoto(False, image_icon57)
+            if self.settings_window is not None and self.settings_window.winfo_exists():
+                self.settings_window.lift()
+                return
+            win, close_button = self._dialog_window("Settings")
+            self.settings_window = win
+            body = tk.Frame(win, bg=PG2_FACE)
+            body.pack(fill="both", expand=True, padx=12, pady=(10, 4))
+            tk.Label(body, text="Default values used every time the Password Generator starts:", font=PG2_FONT,
+                     bg=PG2_FACE, anchor="w").pack(fill="x")
+            group = tk.LabelFrame(body, text=" Defaults ", font=PG2_FONT, bg=PG2_FACE, bd=2, relief="groove")
+            group.pack(fill="x", pady=(6, 0))
 
-            # Set the application icon for the settings window
-            #settings_window.iconbitmap("Logo_Tool.ico")
+            length_var = tk.IntVar(value=self.settings.get_setting("password_length"))
+            upper_var = tk.IntVar(value=int(self.settings.get_setting("include_uppercase")))
+            numbers_var = tk.IntVar(value=int(self.settings.get_setting("include_numbers")))
+            special_var = tk.IntVar(value=int(self.settings.get_setting("include_special_chars")))
 
-            # Load settings from the main window
-            self.load_settings()
+            row = tk.Frame(group, bg=PG2_FACE)
+            row.pack(fill="x", padx=8, pady=(6, 0))
+            tk.Label(row, text="Default password length:", font=PG2_FONT, bg=PG2_FACE).pack(side="left")
+            value_label = tk.Label(row, text=str(length_var.get()), font=PG2_FONT_B, bg=PG2_LIGHT, relief="sunken", bd=2,
+                                   width=4)
+            value_label.pack(side="right")
+            self._scale(group, length_var, lambda v: value_label.config(text=str(length_var.get())),
+                        length=230).pack(fill="x", padx=8, pady=(2, 4))
+            self._check(group, "Include Uppercase Letters (A-Z)", upper_var).pack(fill="x", padx=8)
+            self._check(group, "Include Numbers (0-9)", numbers_var).pack(fill="x", padx=8)
+            self._check(group, "Include Special Characters (!@#...)", special_var).pack(fill="x", padx=8, pady=(0, 8))
 
-            self.password_length_label = ttk.Label(settings_window, text="Default Password Length:")
-            self.password_length_label.pack(pady=5)
+            def close():
+                self.settings_window = None
+                win.destroy()
 
-            self.password_length_var = tk.IntVar(value=self.settings.get_setting("password_length"))
+            def save():
+                self.settings.set_setting("password_length", int(length_var.get()))
+                self.settings.set_setting("include_uppercase", bool(upper_var.get()))
+                self.settings.set_setting("include_numbers", bool(numbers_var.get()))
+                self.settings.set_setting("include_special_chars", bool(special_var.get()))
+                error = self.settings.save_settings()
+                close()
+                if error:
+                    self.message("Settings", "The settings could not be saved:\n%s" % error, "warning")
+                    return
+                self.load_settings()                 # apply the new defaults to the main window
+                self.set_status("Settings saved.")
 
-            # Create a frame to contain the slider and its value display
-            slider_frame = ttk.Frame(settings_window)
-            slider_frame.pack()
+            close_button.config(command=close)
+            buttons = tk.Frame(win, bg=PG2_FACE)
+            buttons.pack(fill="x", padx=12, pady=(4, 12))
+            self._button(buttons, "Cancel", close, width=9).pack(side="right")
+            self._button(buttons, "OK", save, width=9, default=True).pack(side="right", padx=(0, 6))
+            win.bind("<Return>", lambda e: save())
+            win.bind("<Escape>", lambda e: close())
+            self._show_modal(win)
 
-            # Create a slider for password length
-            self.password_length_slider = ttk.Scale(slider_frame, from_=6, to=50, variable=self.password_length_var, orient=tk.HORIZONTAL, length=120, command=self.update_password_length_slider)
-            self.password_length_slider.pack()
-
-            # Display the selected value of the slider
-            self.password_length_display = ttk.Label(slider_frame, textvariable=self.password_length_var)
-            self.password_length_display.pack()
-
-            self.include_uppercase_var = tk.BooleanVar(value=self.settings.get_setting("include_uppercase"))
-            self.include_uppercase_check = ttk.Checkbutton(settings_window, text="Include Uppercase Letters", variable=self.include_uppercase_var)
-            self.include_uppercase_check.pack(pady=5)
-
-            self.include_numbers_var = tk.BooleanVar(value=self.settings.get_setting("include_numbers"))
-            self.include_numbers_check = ttk.Checkbutton(settings_window, text="Include Numbers", variable=self.include_numbers_var)
-            self.include_numbers_check.pack(pady=5)
-
-            self.include_special_chars_var = tk.BooleanVar(value=self.settings.get_setting("include_special_chars"))
-            self.include_special_chars_check = ttk.Checkbutton(settings_window, text="Include Special Characters", variable=self.include_special_chars_var)
-            self.include_special_chars_check.pack(pady=10)
-
-            self.save_settings_button = ttk.Button(settings_window, text="Save Settings", command=self.save_settings_and_update_main_window)
-            self.save_settings_button.pack(pady=10)
-            
-        def update_password_length_slider(self, value):
-        # Round the value to the nearest integer and update the IntVar
-            self.password_length_var.set(round(float(value)))
 
     if __name__ == "__main__":
         rootpassgen = tk.Tk()
@@ -35431,478 +37496,833 @@ if hardvar == 6:
             # Rularea buclei principale
             validation.mainloop()
 
-    from datetime import datetime
-
+    import os
     import time
-    import platform
+    import queue
     import socket
+    import platform
     import threading
     import subprocess
-    import dearpygui.dearpygui as dpg
-    from cpuinfo import get_cpu_info
-    import GPUtil
+    from datetime import datetime
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import filedialog
+
     import psutil
-    import humanize
-    
-    try:
-        dpg.destroy_context()
-    except:
-        pass
 
-    dpg.create_context()
-
-    # Check for AMD support and conditionally import pyadl
-    AMD_SUPPORTED = False
     try:
-        import pyadl
-        _ = pyadl.ADLManager.getInstance().getDevices()
-        AMD_SUPPORTED = True
+        from cpuinfo import get_cpu_info
     except ImportError:
-        pass
-    except Exception as amd_error:
-        # Only print the AMD error if no NVIDIA GPUs are detected
-        if not GPUtil.getGPUs():
-            print(f"Unexpected error while checking for AMD support: {amd_error}")
+        get_cpu_info = None
 
-    # Check for Windows and conditionally import winreg
-    if platform.system() == 'Windows':
+    if platform.system() == "Windows":
         import winreg
     else:
         winreg = None
 
-    gci = get_cpu_info()
-    WIN_WIDTH = 800
-    WIN_HEIGHT = 400
-
-    dpg.create_context()
-
-    gpu_temp_texts = {}  # Store NVIDIA GPU temp text IDs
-    amd_gpu_temp_texts = {}  # Store AMD GPU temp text IDs
-    gpu_progress_bars = {}  # Store NVIDIA GPU progress bar IDs
-
-    # Get CPU Total Utilization
-    def get_cpu_util():
-        """Get CPU Total Utilization"""
-
-        while True:
-            cpu_val = psutil.cpu_percent(interval=1, percpu=False)
-            dpg.set_value(cpu_progress_bar, 1.0 / 100.0 * cpu_val)
-            dpg.configure_item(cpu_progress_bar, overlay=f"{cpu_val}%")
+    SI_FACE, SI_SHADOW, SI_LIGHT, SI_NAVY, SI_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    SI_FONT = ("MS Sans Serif", 8)
+    SI_FONT_B = ("MS Sans Serif", 8, "bold")
+    SI_FONT_MONO = ("Courier New", 9)
+    SI_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+    SI_NO_WINDOW = 0x08000000 if SI_IS_WINDOWS else 0     # no console windows from the .exe
 
 
-    # entry
-    with dpg.window(
-            label=f"Computer Name: {platform.node()}",
-            no_close=True,
-            no_resize=True,
-            no_move=True,
-            width=WIN_WIDTH - 18,
-            height=WIN_HEIGHT
-    ) as main_window:
-        with dpg.collapsing_header(label="Processor"):
-            with dpg.group(horizontal=True):
-                dpg.add_text(f"{gci['brand_raw']} @", bullet=True)
-                dpg.add_text(f"{gci['hz_actual_friendly']}")
-            with dpg.group(horizontal=True):
-                dpg.add_text("CPU Utilization(Total):", bullet=True)
-                threading.Thread(target=get_cpu_util, args=(), daemon=True).start()
-                cpu_progress_bar = dpg.add_progress_bar(default_value=0.0, overlay="0.0%", width=200)
-            dpg.add_text(f"{gci['count']} Total Core/s", bullet=True)
-            dpg.add_text(f"{gci['arch']} Architecture", bullet=True)
-            with dpg.tree_node(label="Cache/s"):
+    # ----- information (no tkinter here: some of it runs in the background thread) -------------------------
+    def nice_size(value):
+        if value is None:
+            return "-"
+        value = float(value)
+        for unit in ("bytes", "KB", "MB", "GB", "TB"):
+            if value < 1024 or unit == "TB":
+                return ("%d %s" % (value, unit)) if unit == "bytes" else ("%.1f %s" % (value, unit))
+            value /= 1024.0
+
+
+    def registry_value(path, name):
+        if winreg is None:
+            return None
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path) as key:
+                return winreg.QueryValueEx(key, name)[0]
+        except OSError:
+            return None
+
+
+    def run_quiet(command, timeout=8):
+        """Run a command without a console window; its output, or '' when it fails."""
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
+                                    creationflags=SI_NO_WINDOW)
+            return result.stdout if result.returncode == 0 else ""
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+
+    def windows_version():
+        uname = platform.uname()
+        if uname.system != "Windows":
+            return "%s %s" % (uname.system, uname.release), uname.version
+        build = 0
+        try:
+            build = int(uname.version.split(".")[2])
+        except (IndexError, ValueError):
+            pass
+        product = registry_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "ProductName") or "Windows"
+        if build >= 22000:   # Fix: build 22000 itself is Windows 11 (the old test was "> 22000")
+            product = product.replace("Windows 10", "Windows 11")
+        display = registry_value(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "DisplayVersion") or ""
+        return product, ("Version %s (build %s)" % (display, build) if display else "Build %s" % build)
+
+
+    def general_info():
+        product, version = windows_version()
+        brand = registry_value(r"SYSTEM\CurrentControlSet\Control\SystemInformation", "SystemManufacturer")
+        model = registry_value(r"SYSTEM\CurrentControlSet\Control\SystemInformation", "SystemProductName")
+        if platform.system() == "Linux":
+            for name, path in (("brand", "/sys/class/dmi/id/sys_vendor"), ("model", "/sys/class/dmi/id/product_name")):
                 try:
-                    l1_i = humanize.naturalsize(gci['l1_instruction_cache_size'], gnu=True)
-                    dpg.add_text(f"L1 Instruction Cache Size: {l1_i}")
-                except KeyError:
-                    dpg.add_text("L1 Instruction Cache Size: Can't determine")
+                    value = open(path).read().strip()
+                except OSError:
+                    value = None
+                if name == "brand":
+                    brand = value
+                else:
+                    model = value
+        boot = datetime.fromtimestamp(psutil.boot_time())
+        return {
+            "Computer name": platform.node(),
+            "Operating system": product,
+            "Version": version,
+            "Machine": platform.machine(),
+            "Manufacturer": brand or "Can't determine",
+            "Model": model or "Can't determine",
+            "BIOS": " ".join(v for v in (registry_value(r"HARDWARE\DESCRIPTION\System\BIOS", "BIOSVendor"),
+                                         registry_value(r"HARDWARE\DESCRIPTION\System\BIOS", "BIOSVersion")) if v)
+                    or "Can't determine",
+            "Last boot": boot.strftime("%m/%d/%Y %I:%M:%S %p"),
+        }
 
+
+    def processor_name():
+        return (registry_value(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString") or
+                platform.processor() or platform.machine()).strip()
+
+
+    def slow_processor_details():
+        """Caches and flags through py-cpuinfo (slow, so it runs in the background)."""
+        if get_cpu_info is None:
+            return {"error": "py-cpuinfo is not installed"}
+        try:
+            info = get_cpu_info()
+        except Exception as exc:
+            return {"error": str(exc)}
+        caches = []
+        for key, label in (("l1_instruction_cache_size", "L1 instruction"), ("l1_data_cache_size", "L1 data"),
+                           ("l2_cache_size", "L2"), ("l3_cache_size", "L3")):
+            value = info.get(key)
+            caches.append((label, nice_size(value) if isinstance(value, int) else (value or "Can't determine")))
+        return {"caches": caches, "flags": info.get("flags", []), "arch": info.get("arch_string_raw") or info.get("arch")}
+
+
+    def video_adapters():
+        """Every graphics adapter (Intel, AMD, NVIDIA...) through PowerShell, without a console window."""
+        if not SI_IS_WINDOWS:
+            return []
+        output = run_quiet(["powershell", "-NoProfile", "-Command",
+                            "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name + '|' + "
+                            "$_.AdapterRAM + '|' + $_.DriverVersion + '|' + $_.CurrentHorizontalResolution + 'x' + "
+                            "$_.CurrentVerticalResolution }"], timeout=15)
+        adapters = []
+        for line in output.splitlines():
+            parts = line.strip().split("|")
+            if len(parts) == 4 and parts[0]:
+                ram = int(parts[1]) if parts[1].isdigit() and int(parts[1]) > 0 else None
+                adapters.append({"name": parts[0], "memory": ram, "driver": parts[2],
+                                 "mode": parts[3] if parts[3] != "x" else ""})
+        return adapters
+
+
+    def nvidia_status():
+        """NVIDIA GPUs from nvidia-smi (no console window). [] when there is no NVIDIA driver."""
+        output = run_quiet(["nvidia-smi", "--query-gpu=index,name,utilization.gpu,temperature.gpu,memory.used,"
+                            "memory.total", "--format=csv,noheader,nounits"], timeout=5)
+        gpus = []
+        for line in output.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 6:
+                def number(text):
+                    try:
+                        return float(text)
+                    except ValueError:
+                        return None
+                gpus.append({"id": parts[0], "name": parts[1], "load": number(parts[2]), "temp": number(parts[3]),
+                             "mem_used": number(parts[4]), "mem_total": number(parts[5])})
+        return gpus
+
+
+    def amd_status():
+        """AMD temperatures through pyadl, when it is installed. [] otherwise."""
+        try:
+            import pyadl
+            devices = pyadl.ADLManager.getInstance().getDevices()
+        except Exception:
+            return []
+        result = []
+        for device in devices:
+            try:
+                temperature = device.getCurrentTemperature()
+            except Exception:
+                temperature = None
+            result.append({"name": str(getattr(device, "adapterName", "AMD GPU")), "temp": temperature})
+        return result
+
+
+    def network_info():
+        stats = psutil.net_if_stats()
+        interfaces = []
+        for name, addresses in psutil.net_if_addrs().items():
+            entry = {"name": name, "ipv4": [], "mac": "", "up": False, "speed": 0}
+            for address in addresses:
+                if address.family == socket.AF_INET:
+                    entry["ipv4"].append((address.address, address.netmask or ""))
+                elif address.family == psutil.AF_LINK:
+                    entry["mac"] = address.address
+            if name in stats:
+                entry["up"], entry["speed"] = stats[name].isup, stats[name].speed
+            interfaces.append(entry)
+        interfaces.sort(key=lambda e: (not e["up"], not e["ipv4"], e["name"].lower()))
+        return interfaces
+
+
+    def disk_rows():
+        rows = []
+        for partition in psutil.disk_partitions(all=False):
+            try:
+                usage = psutil.disk_usage(partition.mountpoint)
+            except (PermissionError, OSError):
+                usage = None           # Fix: one row per partition, even when it cannot be read
+            rows.append((partition.device, partition.mountpoint, partition.fstype or "-", usage))
+        return rows
+
+
+    def si_background(events, stop):
+        """Slow information, in its own thread. It only gets the queue and the stop signal - never the window -
+        so no tkinter object is ever released (or touched) from this thread."""
+        events.put(("details", slow_processor_details()))
+        events.put(("adapters", video_adapters()))
+        while not stop.is_set():
+            events.put(("gpus", (nvidia_status(), amd_status())))   # one thread, every 2 seconds
+            stop.wait(2.0)
+
+
+    # ----- window -------------------------------------------------------------------------------------------
+    class SystemInfo95:
+        def __init__(self, root):
+            self.root = root
+            root.title("System Information")
+            root.resizable(False, False)
+            root.configure(bg=SI_FACE)
+            self.custom_frame = SI_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.minimizing = False
+            self.events = queue.Queue()
+            self.stop = threading.Event()
+            self.running = True
+            self.cpu_history = [0.0] * 60
+            self.last_net = psutil.net_io_counters()
+            self.last_net_time = time.time()
+            self.slow = {"details": None, "adapters": None, "nvidia": [], "amd": []}
+            psutil.cpu_percent(interval=None)
+            psutil.cpu_percent(interval=None, percpu=True)
+
+            self._build_titlebar()
+            self._build_menu()
+            self._build_tabs()
+            self.status = tk.Label(root, text="", font=SI_FONT, bg=SI_FACE, anchor="w", relief="sunken", bd=1, padx=4)
+            self.status.pack(side="bottom", fill="x", padx=2, pady=(4, 2))
+            self.switch_tab("General")
+            root.update_idletasks()
+            w, h = root.winfo_reqwidth(), root.winfo_reqheight()
+            root.geometry("+%d+%d" % (max(0, (root.winfo_screenwidth() - w) // 2),
+                                      max(0, (root.winfo_screenheight() - h) // 2)))
+            root.protocol("WM_DELETE_WINDOW", self.close)
+            root.bind("<F5>", lambda e: self.refresh_static())
+            if self.custom_frame:
+                root.configure(bd=2, relief="raised")
+                root.after(10, self._enable_custom_frame)
+
+            threading.Thread(target=si_background, args=(self.events, self.stop), daemon=True).start()
+            self._jobs = {}
+            self._tick()
+            self._drain()
+
+        # ===== Windows 95 frame =======================================================================
+        def _build_titlebar(self):
+            root = self.root
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = {"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"}
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            self.computer_icon = self._icon(2)
+            if SI_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=SI_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            self.small_icon = self._icon(1)
+            icon = tk.Label(bar, image=self.small_icon, bg=SI_NAVY, bd=0)
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="System Information", bg=SI_NAVY, fg=SI_LIGHT, font=SI_FONT_B, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, title, icon)
+            self.caption_button(bar, "close", self.close).pack(side="right", padx=(2, 2))
+            self.caption_button(bar, "min", self._minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def _icon(self, scale):
+            rects = [(1, 0, 15, 11, SI_BLACK), (2, 1, 14, 10, SI_FACE), (3, 2, 13, 8, "#008080"), (4, 3, 7, 4, "#00c0c0"),
+                     (6, 11, 10, 12, SI_BLACK), (2, 12, 14, 15, SI_BLACK), (3, 12, 13, 14, SI_FACE),
+                     (10, 13, 12, 14, "#00a000")]
+            image = tk.PhotoImage(width=16 * scale, height=16 * scale)
+            for x0, y0, x1, y1, colour in rects:
+                image.put(colour, to=(x0 * scale, y0 * scale, x1 * scale, y1 * scale))
+            return image
+
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=SI_FACE, fg=SI_BLACK,
+                             activebackground=SI_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=SI_NAVY if active else SI_SHADOW)
+            self.caption_parts[1].config(fg=SI_LIGHT if active else SI_FACE)
+
+        def _enable_custom_frame(self):
+            self.root.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.root
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            if event.widget is self.root and self.minimizing and self.root.state() == "normal":
+                self.minimizing = False
+                self.root.overrideredirect(True)
+                self.root.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.root.overrideredirect(False)
+            self.root.iconify()
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame:
+                self.root.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        # ===== message box (always in front) ==========================================================
+        def message(self, title, text):
+            root = self.root
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=SI_FACE, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+            bar = tk.Frame(win, bg=SI_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=SI_NAVY, fg=SI_LIGHT, font=SI_FONT_B).pack(side="left", padx=4)
+            self.caption_button(bar, "close", win.destroy).pack(side="right", padx=2)
+            body = tk.Frame(win, bg=SI_FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            tk.Label(body, image=self.computer_icon, bg=SI_FACE).pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=SI_FACE, font=SI_FONT, justify="left", wraplength=340).pack(side="left")
+            self._button(win, "OK", win.destroy, default=True).pack(pady=(4, 12))
+            win.bind("<Return>", lambda e: win.destroy())
+            win.bind("<Escape>", lambda e: win.destroy())
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
                 try:
-                    l1_d = humanize.naturalsize(gci['l1_data_cache_size'], gnu=True)
-                    dpg.add_text(f"L1 Data Cache Size: {l1_d}")
-                except KeyError:
-                    dpg.add_text("L1 Data Cache Size: Can't determine")
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
 
-                try:
-                    l2 = humanize.naturalsize(gci['l2_cache_size'], gnu=True)
-                    dpg.add_text(f"L2 Cache Size: {l2}")
-                except KeyError:
-                    dpg.add_text("L2 Cache Size: Can't determine")
+        # ===== layout =================================================================================
+        def _button(self, parent, text, command, width=10, default=False):
+            return tk.Button(parent, text=text, command=command, width=width, font=SI_FONT_B if default else SI_FONT,
+                             bg=SI_FACE, fg=SI_BLACK, activebackground=SI_FACE, relief="raised", bd=2,
+                             highlightthickness=1 if default else 0, highlightbackground=SI_BLACK, takefocus=0)
 
-                try:
-                    l3 = humanize.naturalsize(gci['l3_cache_size'], gnu=True)
-                    dpg.add_text(f"L3 Cache Size: {l3}")
-                except KeyError:
-                    dpg.add_text("L3 Cache Size: Can't determine")
+        def _build_menu(self):
+            bar = tk.Frame(self.root, bg=SI_FACE)
+            bar.pack(side="top", fill="x")
 
-            with dpg.tree_node(label="Flags"):
-                with dpg.table(
-                    header_row=False,
-                    resizable=True,
-                    policy=dpg.mvTable_SizingStretchProp,
-                    row_background=True,
-                    borders_outerV=True,
-                    borders_innerV=True,
-                    borders_outerH=True,
-                    borders_innerH=True,
-                    delay_search=True
-                ):
-                    COL = 11
-                    FLAG = 0
-                    flags = gci['flags']
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=SI_FONT, bg=SI_FACE, fg=SI_BLACK, activebackground=SI_NAVY,
+                                       activeforeground=SI_LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=SI_FONT, bg=SI_FACE, fg=SI_BLACK, activebackground=SI_NAVY,
+                               activeforeground=SI_LIGHT)
+                button.config(menu=menu)
+                return menu
 
-                    for _ in range(COL):
-                        dpg.add_table_column()
+            m = menubutton("File")
+            m.add_command(label="Save Report...", accelerator="Ctrl+S", command=self.save_report)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.close)
+            m = menubutton("View")
+            for name in ("General", "Processor", "Graphics", "Memory", "Disks", "Network"):
+                m.add_command(label=name, command=lambda n=name: self.switch_tab(n))
+            m.add_separator()
+            m.add_command(label="Refresh", accelerator="F5", command=self.refresh_static)
+            m = menubutton("Help")
+            m.add_command(label="About", command=lambda: self.message(
+                "About System Information",
+                "System Information\n\nShows the processor, graphics, memory, disks and network of this computer. "
+                "Usage values are updated every second.\n\nFile > Save Report writes everything to a text file."))
+            self.root.bind("<Control-s>", lambda e: self.save_report())
 
-                    rows = int(len(flags) / COL) + 1
-                    for row in range(rows):
-                        with dpg.table_row():
-                            for col in range(COL):
-                                FLAG = row * COL + col
-                                if FLAG >= len(flags):
-                                    dpg.add_text("---")
-                                else:
-                                    dpg.add_text(f"{flags[FLAG]}")
+        def _build_tabs(self):
+            outer = tk.Frame(self.root, bg=SI_FACE)
+            outer.pack(fill="both", expand=True, padx=8, pady=(6, 0))
+            tabrow = tk.Frame(outer, bg=SI_FACE)
+            tabrow.pack(fill="x")
+            self.page_area = tk.Frame(outer, bg=SI_FACE, bd=2, relief="raised", width=610, height=400)
+            self.page_area.pack(fill="both", expand=True)
+            self.page_area.pack_propagate(False)
+            self.tab_labels, self.pages = {}, {}
+            for name in ("General", "Processor", "Graphics", "Memory", "Disks", "Network"):
+                label = tk.Label(tabrow, text=name, font=SI_FONT, bg=SI_FACE, bd=2, relief="raised", padx=8, pady=2)
+                label.pack(side="left", anchor="s")
+                label.bind("<Button-1>", lambda e, n=name: self.switch_tab(n))
+                self.tab_labels[name] = label
+                self.pages[name] = tk.Frame(self.page_area, bg=SI_FACE)
+            self._page_general()
+            self._page_processor()
+            self._page_graphics()
+            self._page_memory()
+            self._page_disks()
+            self._page_network()
 
-        with dpg.collapsing_header(label="Graphics"):
-            gpu_temp_placeholder = dpg.add_group(horizontal=False)
-            gpu_list = []
+        def switch_tab(self, name):
+            for key, label in self.tab_labels.items():
+                selected = key == name
+                label.config(font=SI_FONT_B if selected else SI_FONT, pady=4 if selected else 2)
+                label.pack_configure(pady=(0 if selected else 3, 0))
+            for page in self.pages.values():
+                page.pack_forget()
+            self.pages[name].pack(fill="both", expand=True, padx=10, pady=10)
+            self.current_tab = name
 
-            def handle_nvidia_gpus():
-                """handle NVIDIA GPUs"""
-                gpus = GPUtil.getGPUs()
-                for gpu in gpus:
-                    if gpu.id not in gpu_temp_texts:
-                        dpg.add_text(
-                            f"Graphics Name: {gpu.name}",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
-                        with dpg.group(horizontal=True, parent=gpu_temp_placeholder):
-                            dpg.add_text("GPU Utilization:", bullet=True)
-                            gpu_progress_bar = dpg.add_progress_bar(
-                                default_value=0.0,
-                                overlay="0.0%",
-                                width=200
-                            )
-                            gpu_progress_bars[gpu.id] = gpu_progress_bar
+        def _group(self, parent, title):
+            return tk.LabelFrame(parent, text=" %s " % title, font=SI_FONT, bg=SI_FACE, bd=2, relief="groove")
 
-                        gpu_temp_text_id = dpg.add_text(
-                            f"Temperature: {gpu.temperature}°C",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
-                        gpu_temp_texts[gpu.id] = gpu_temp_text_id
-                    else:
-                        dpg.set_value(
-                            gpu_temp_texts[gpu.id],
-                            f"Temperature: {gpu.temperature}°C"
-                        )
+        def _bar(self, parent, width=220):
+            canvas = tk.Canvas(parent, width=width, height=16, bg=SI_LIGHT, relief="sunken", bd=2, highlightthickness=0)
+            return canvas
 
-            def handle_amd_gpus():
-                """handle AMD GPUs"""
-                if not AMD_SUPPORTED:
-                    return
+        def _draw_bar(self, canvas, fraction, text=""):
+            canvas.delete("all")
+            width = int(canvas.cget("width"))
+            blocks = int((width - 4) * max(0.0, min(1.0, fraction))) // 9
+            for i in range(blocks):
+                canvas.create_rectangle(3 + i * 9, 3, 3 + i * 9 + 7, 15, fill=SI_NAVY, outline="")
+            if text:
+                canvas.create_text(width - 6, 9, text=text, anchor="e", font=SI_FONT_B, fill=SI_BLACK)
 
-                amd_manager = pyadl.ADLManager.getInstance()
-                devices = amd_manager.getDevices()
-                for device in devices:
-                    temperature_data = device.getCurrentTemperature()
-                    if temperature_data is not None:
-                        if device.adapterName not in amd_gpu_temp_texts:
-                            dpg.add_text(
-                            f"AMD GPU {device.adapterName}",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
-                        amd_gpu_temp_text_id = dpg.add_text(
-                            f"Temperature: {temperature_data}°C",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
-                        amd_gpu_temp_texts[device.adapterName] = amd_gpu_temp_text_id
-                    else:
-                        dpg.set_value(
-                            amd_gpu_temp_texts[device.adapterName],
-                            f"Temperature: {temperature_data}°C"
-                        )
+        def _rows(self, parent, rows, label_width=16):
+            values = {}
+            for r, (label, value) in enumerate(rows):
+                tk.Label(parent, text=label + ":", font=SI_FONT, bg=SI_FACE, anchor="w",
+                         width=label_width).grid(row=r, column=0, sticky="w", pady=1)
+                widget = tk.Label(parent, text=value, font=SI_FONT_B, bg=SI_FACE, anchor="w", justify="left",
+                                  wraplength=330)
+                widget.grid(row=r, column=1, sticky="w", pady=1)
+                values[label] = widget
+            return values
 
-            def update_gpu_temperature():
-                """Get GPU Temperature and Util Updates"""
+        # ----- pages -------------------------------------------------------------------------------------
+        def _page_general(self):
+            page = self.pages["General"]
+            top = tk.Frame(page, bg=SI_FACE)
+            top.pack(fill="x", pady=(4, 8))
+            tk.Label(top, image=self.computer_icon, bg="#008080", bd=2, relief="sunken", padx=16, pady=16).pack(side="left")
+            self.general_title = tk.Label(top, text="", font=("MS Sans Serif", 10, "bold"), bg=SI_FACE, justify="left")
+            self.general_title.pack(side="left", padx=14, anchor="w")
+            group = self._group(page, "System")
+            group.pack(fill="x")
+            inner = tk.Frame(group, bg=SI_FACE)
+            inner.pack(fill="x", padx=10, pady=6)
+            self.general_values = self._rows(inner, [(k, "") for k in ("Operating system", "Version", "Machine",
+                                                                      "Manufacturer", "Model", "BIOS", "Last boot",
+                                                                      "Up time")])
+            self.refresh_general()
+
+        def refresh_general(self):
+            info = general_info()
+            self.general_info = info
+            self.general_title.config(text="%s\n%s" % (info["Computer name"], info["Operating system"]))
+            for key, widget in self.general_values.items():
+                if key in info:
+                    widget.config(text=info[key])
+
+        def _page_processor(self):
+            page = self.pages["Processor"]
+            group = self._group(page, "Processor")
+            group.pack(fill="x")
+            inner = tk.Frame(group, bg=SI_FACE)
+            inner.pack(fill="x", padx=10, pady=6)
+            freq = psutil.cpu_freq()
+            speed = "%.2f GHz" % ((freq.max or freq.current) / 1000.0) if freq and (freq.max or freq.current) else "-"
+            self.cpu_values = self._rows(inner, [
+                ("Name", processor_name()), ("Speed", speed),
+                ("Cores", "%s physical, %s logical" % (psutil.cpu_count(logical=False) or "?", psutil.cpu_count() or "?")),
+                ("Architecture", platform.machine()), ("Cache", "reading...")])
+            usage = self._group(page, "CPU Usage")
+            usage.pack(fill="both", expand=True, pady=(8, 0))
+            row = tk.Frame(usage, bg=SI_FACE)
+            row.pack(fill="x", padx=10, pady=(6, 4))
+            tk.Label(row, text="Total:", font=SI_FONT, bg=SI_FACE, width=8, anchor="w").pack(side="left")
+            self.cpu_bar = self._bar(row, 240)
+            self.cpu_bar.pack(side="left")
+            self.cpu_history_canvas = tk.Canvas(usage, width=550, height=90, bg=SI_BLACK, relief="sunken", bd=2,
+                                                highlightthickness=0)
+            self.cpu_history_canvas.pack(padx=10, pady=(2, 4))
+            self.core_canvas = tk.Canvas(usage, width=550, height=26, bg=SI_FACE, highlightthickness=0)
+            self.core_canvas.pack(padx=10, pady=(0, 6))
+            flags_row = tk.Frame(page, bg=SI_FACE)
+            flags_row.pack(fill="x", pady=(6, 0))
+            self.flags_label = tk.Label(flags_row, text="Flags: reading...", font=SI_FONT, bg=SI_FACE, anchor="w",
+                                        justify="left", wraplength=520)
+            self.flags_label.pack(fill="x")
+
+        def _page_graphics(self):
+            page = self.pages["Graphics"]
+            self.graphics_group = self._group(page, "Display adapters")
+            self.graphics_group.pack(fill="x")
+            self.adapters_box = tk.Frame(self.graphics_group, bg=SI_FACE)
+            self.adapters_box.pack(fill="x", padx=10, pady=6)
+            tk.Label(self.adapters_box, text="Reading the display adapters...", font=SI_FONT, bg=SI_FACE).pack(anchor="w")
+            self.live_gpu_group = self._group(page, "Usage and temperature")
+            self.live_gpu_group.pack(fill="x", pady=(8, 0))
+            self.live_gpu_box = tk.Frame(self.live_gpu_group, bg=SI_FACE)
+            self.live_gpu_box.pack(fill="x", padx=10, pady=6)
+            self.live_gpu_widgets = {}
+            self.live_gpu_note = tk.Label(self.live_gpu_box, text="Looking for NVIDIA / AMD sensors...", font=SI_FONT,
+                                          bg=SI_FACE, anchor="w")
+            self.live_gpu_note.pack(anchor="w")
+
+        def _page_memory(self):
+            page = self.pages["Memory"]
+            self.memory_widgets = {}
+            for key, title in (("ram", "Main memory (RAM)"), ("swap", "Swap / page file")):
+                group = self._group(page, title)
+                group.pack(fill="x", pady=(0, 8))
+                inner = tk.Frame(group, bg=SI_FACE)
+                inner.pack(fill="x", padx=10, pady=6)
+                bar = self._bar(inner, 400)
+                bar.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+                labels = {}
+                for r, name in enumerate(("Used", "Available" if key == "ram" else "Free", "Total"), start=1):
+                    tk.Label(inner, text=name + ":", font=SI_FONT, bg=SI_FACE, width=12, anchor="w").grid(
+                        row=r, column=0, sticky="w")
+                    labels[name] = tk.Label(inner, text="", font=SI_FONT_B, bg=SI_FACE, anchor="w")
+                    labels[name].grid(row=r, column=1, sticky="w")
+                self.memory_widgets[key] = (bar, labels)
+
+        def _page_disks(self):
+            page = self.pages["Disks"]
+            group = self._group(page, "Drives")
+            group.pack(fill="both", expand=True)
+            self.disk_box = tk.Frame(group, bg=SI_FACE)
+            self.disk_box.pack(fill="both", expand=True, padx=10, pady=6)
+            self.refresh_disks()
+
+        def refresh_disks(self):
+            for child in self.disk_box.winfo_children():
+                child.destroy()
+            headers = ("Drive", "Mount point", "File system", "Usage", "Used", "Free", "Total")
+            for column, title in enumerate(headers):
+                tk.Label(self.disk_box, text=title, font=SI_FONT, bg=SI_FACE, relief="raised", bd=1, anchor="w",
+                         padx=3).grid(row=0, column=column, sticky="ew")
+            for r, (device, mount, fstype, usage) in enumerate(disk_rows(), start=1):
+                cells = [device, mount, fstype]
+                for column, text in enumerate(cells):
+                    tk.Label(self.disk_box, text=text, font=SI_FONT, bg=SI_FACE, anchor="w", padx=3).grid(
+                        row=r, column=column, sticky="w", pady=2)
+                bar = self._bar(self.disk_box, 64)
+                bar.grid(row=r, column=3, sticky="w", padx=3, pady=2)
+                if usage is None:
+                    tk.Label(self.disk_box, text="Can't determine", font=SI_FONT, bg=SI_FACE, fg=SI_SHADOW,
+                             anchor="w").grid(row=r, column=4, columnspan=3, sticky="w")
+                    continue
+                self._draw_bar(bar, usage.percent / 100.0)
+                for column, text in ((4, "%s (%.0f%%)" % (nice_size(usage.used), usage.percent)),
+                                     (5, nice_size(usage.free)), (6, nice_size(usage.total))):
+                    tk.Label(self.disk_box, text=text, font=SI_FONT_B if column == 5 else SI_FONT, bg=SI_FACE,
+                             anchor="w", padx=3).grid(row=r, column=column, sticky="w")
+
+        def _page_network(self):
+            page = self.pages["Network"]
+            live = self._group(page, "Traffic (all adapters)")
+            live.pack(fill="x")
+            inner = tk.Frame(live, bg=SI_FACE)
+            inner.pack(fill="x", padx=10, pady=6)
+            self.net_values = self._rows(inner, [("Receiving", "-"), ("Sending", "-")], label_width=12)
+            group = self._group(page, "Adapters")
+            group.pack(fill="both", expand=True, pady=(8, 0))
+            holder = tk.Frame(group, bg=SI_LIGHT, bd=2, relief="sunken")
+            holder.pack(fill="both", expand=True, padx=10, pady=6)
+            scroll = tk.Scrollbar(holder, orient="vertical")
+            scroll.pack(side="right", fill="y")
+            self.net_text = tk.Text(holder, font=SI_FONT_MONO, bg=SI_LIGHT, bd=0, height=12, wrap="none",
+                                    highlightthickness=0, yscrollcommand=scroll.set, cursor="arrow")
+            self.net_text.pack(side="left", fill="both", expand=True)
+            scroll.config(command=self.net_text.yview)
+            self.net_text.tag_config("name", font=("Courier New", 9, "bold"), foreground=SI_NAVY)
+            self.net_text.tag_config("down", foreground=SI_SHADOW)
+            self.refresh_network()
+
+        def refresh_network(self):
+            self.net_text.config(state="normal")
+            self.net_text.delete("1.0", "end")
+            for entry in network_info():
+                state = ("up, %d Mbps" % entry["speed"] if entry["speed"] else "up") if entry["up"] else "down"
+                self.net_text.insert("end", "%s  (%s)\n" % (entry["name"], state), "name" if entry["up"] else "down")
+                for ip, mask in entry["ipv4"]:
+                    self.net_text.insert("end", "    IP address:  %-16s  Subnet mask: %s\n" % (ip, mask))
+                if entry["mac"]:
+                    self.net_text.insert("end", "    MAC address: %s\n" % entry["mac"])
+                self.net_text.insert("end", "\n")
+            self.net_text.config(state="disabled")
+
+        def refresh_static(self):
+            self.refresh_general()
+            self.refresh_disks()
+            self.refresh_network()
+            self.status.config(text="Refreshed at %s." % datetime.now().strftime("%H:%M:%S"))
+
+        # ===== live values (every second, in the window's thread) =======================================
+        def _tick(self):
+            if not self.running:
+                return
+            total = psutil.cpu_percent(interval=None)
+            cores = psutil.cpu_percent(interval=None, percpu=True)
+            self.cpu_history = self.cpu_history[1:] + [total]
+            self._draw_bar(self.cpu_bar, total / 100.0, "%.0f%%" % total)
+            self._draw_history()
+            self._draw_cores(cores)
+
+            mem, swap = psutil.virtual_memory(), psutil.swap_memory()     # Fix: memory is live now
+            bar, labels = self.memory_widgets["ram"]
+            self._draw_bar(bar, mem.percent / 100.0, "%.0f%%" % mem.percent)
+            labels["Used"].config(text="%s (%.0f%%)" % (nice_size(mem.used), mem.percent))
+            labels["Available"].config(text=nice_size(mem.available))
+            labels["Total"].config(text=nice_size(mem.total))
+            bar, labels = self.memory_widgets["swap"]
+            self._draw_bar(bar, swap.percent / 100.0, "%.0f%%" % swap.percent)
+            labels["Used"].config(text="%s (%.0f%%)" % (nice_size(swap.used), swap.percent))
+            labels["Free"].config(text=nice_size(swap.free))
+            labels["Total"].config(text=nice_size(swap.total))
+
+            now, net = time.time(), psutil.net_io_counters()
+            seconds = max(0.001, now - self.last_net_time)
+            self.net_values["Receiving"].config(text="%s/s" % nice_size((net.bytes_recv - self.last_net.bytes_recv) / seconds))
+            self.net_values["Sending"].config(text="%s/s" % nice_size((net.bytes_sent - self.last_net.bytes_sent) / seconds))
+            self.last_net, self.last_net_time = net, now
+
+            uptime = int(time.time() - psutil.boot_time())
+            self.general_values["Up time"].config(text="%d days, %02d:%02d:%02d" % (
+                uptime // 86400, uptime % 86400 // 3600, uptime % 3600 // 60, uptime % 60))
+            self.status.config(text="%s   |   CPU %.0f%%   |   Memory %.0f%%" % (platform.node(), total, mem.percent))
+            self._jobs["tick"] = self.root.after(1000, self._tick)
+
+        def _draw_history(self):
+            canvas = self.cpu_history_canvas
+            canvas.delete("all")
+            width, height = 550, 90
+            for x in range(0, width, 25):
+                canvas.create_line(x, 0, x, height, fill="#004000")
+            for y in range(0, height, 15):
+                canvas.create_line(0, y, width, y, fill="#004000")
+            step = width / (len(self.cpu_history) - 1)
+            points = []
+            for i, value in enumerate(self.cpu_history):
+                points += [i * step, height - 2 - value / 100.0 * (height - 4)]
+            canvas.create_line(*points, fill="#00ff00", width=2)
+
+        def _draw_cores(self, cores):
+            canvas = self.core_canvas
+            canvas.delete("all")
+            if not cores:
+                return
+            width = min(28, max(8, 500 // len(cores) - 4))
+            for i, value in enumerate(cores):
+                x = i * (width + 4)
+                canvas.create_rectangle(x, 2, x + width, 22, fill=SI_LIGHT, outline=SI_SHADOW)
+                filled = int(18 * value / 100.0)
+                canvas.create_rectangle(x + 2, 21 - filled, x + width - 2, 21, fill=SI_NAVY, outline="")
+
+        # ===== results of the background thread, shown in the window's thread ===========================
+        def _drain(self):
+            if not self.running:
+                return
+            try:
                 while True:
-                    try:
-                        handle_nvidia_gpus()
-                    except ImportError as import_error:
-                        dpg.add_text(
-                            f"Error importing GPUtil: {import_error}",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
-                    except Exception as general_exception:
-                        dpg.add_text(
-                            f"Error fetching NVIDIA GPU information: {general_exception}",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
+                    kind, data = self.events.get_nowait()
+                    if kind == "details":
+                        self._show_details(data)
+                    elif kind == "adapters":
+                        self._show_adapters(data)
+                    elif kind == "gpus":
+                        self._show_gpus(*data)
+            except queue.Empty:
+                pass
+            self._jobs["drain"] = self.root.after(200, self._drain)
 
-                    try:
-                        handle_amd_gpus()
-                    except Exception as general_exception:
-                        dpg.add_text(
-                            f"Error fetching AMD GPU temperature: {general_exception}",
-                            bullet=True,
-                            parent=gpu_temp_placeholder
-                        )
+        def _show_details(self, details):
+            self.slow["details"] = details
+            if "error" in details:
+                self.cpu_values["Cache"].config(text="Not available (%s)" % details["error"])
+                self.flags_label.config(text="Flags: not available")
+                return
+            self.cpu_values["Cache"].config(text=",  ".join("%s %s" % pair for pair in details["caches"]))
+            flags = details.get("flags") or []
+            self.flags_label.config(text="Flags (%d): %s" % (len(flags), " ".join(flags)) if flags else "Flags: -")
 
-                    time.sleep(1)
+        def _show_adapters(self, adapters):
+            self.slow["adapters"] = adapters
+            for child in self.adapters_box.winfo_children():
+                child.destroy()
+            if not adapters:
+                tk.Label(self.adapters_box, text="No display adapter information (needs Windows / PowerShell).",
+                         font=SI_FONT, bg=SI_FACE, anchor="w").pack(anchor="w")
+                return
+            for adapter in adapters:
+                tk.Label(self.adapters_box, text=adapter["name"], font=SI_FONT_B, bg=SI_FACE, anchor="w").pack(anchor="w")
+                details = []
+                if adapter["memory"]:
+                    details.append("Memory: %s" % nice_size(adapter["memory"]))
+                if adapter["mode"]:
+                    details.append("Mode: %s" % adapter["mode"])
+                if adapter["driver"]:
+                    details.append("Driver: %s" % adapter["driver"])
+                tk.Label(self.adapters_box, text="    " + "    ".join(details), font=SI_FONT, bg=SI_FACE,
+                         anchor="w").pack(anchor="w", pady=(0, 4))
 
-            # Get GPU Utilization
-            def get_gpu_util():
-                """Get GPU Utilization"""
-                while True:
-                    try:
-                        gpus = GPUtil.getGPUs()
-                        for gpu in gpus:
-                            gpu_val = gpu.load * 100
-                            dpg.set_value(gpu_progress_bars[gpu.id], 1.0 / 100.0 * gpu_val)
-                            dpg.configure_item(gpu_progress_bars[gpu.id], overlay=f"{gpu_val:.2f}%")
-                    except (ImportError, Exception) as general_exception:
-                        print(f"An error occurred: {general_exception}")
-                    time.sleep(1)
+        def _show_gpus(self, nvidia, amd):
+            """Fix: the rows are made once per GPU and then only updated (they used to pile up every second)."""
+            self.slow["nvidia"], self.slow["amd"] = nvidia, amd
+            if not nvidia and not amd:
+                self.live_gpu_note.config(text="No NVIDIA (nvidia-smi) or AMD (pyadl) sensors found on this computer.")
+                return
+            self.live_gpu_note.pack_forget()
+            for gpu in nvidia:
+                key = "nv" + gpu["id"]
+                if key not in self.live_gpu_widgets:
+                    tk.Label(self.live_gpu_box, text=gpu["name"], font=SI_FONT_B, bg=SI_FACE, anchor="w").pack(anchor="w")
+                    row = tk.Frame(self.live_gpu_box, bg=SI_FACE)
+                    row.pack(anchor="w", pady=(2, 6))
+                    bar = self._bar(row, 200)
+                    bar.pack(side="left")
+                    info = tk.Label(row, text="", font=SI_FONT, bg=SI_FACE)
+                    info.pack(side="left", padx=8)
+                    self.live_gpu_widgets[key] = (bar, info)
+                bar, info = self.live_gpu_widgets[key]
+                load = gpu["load"] or 0.0
+                self._draw_bar(bar, load / 100.0, "%.0f%%" % load)
+                parts = []
+                if gpu["temp"] is not None:
+                    parts.append("%.0f\u00b0C" % gpu["temp"])
+                if gpu["mem_used"] is not None and gpu["mem_total"]:
+                    parts.append("VRAM %.0f / %.0f MB" % (gpu["mem_used"], gpu["mem_total"]))
+                info.config(text="   ".join(parts))
+            for device in amd:
+                key = "amd" + device["name"]
+                if key not in self.live_gpu_widgets:
+                    label = tk.Label(self.live_gpu_box, text="", font=SI_FONT, bg=SI_FACE, anchor="w")
+                    label.pack(anchor="w", pady=(0, 4))
+                    self.live_gpu_widgets[key] = (None, label)
+                text = "%s:  %s" % (device["name"], ("%.0f\u00b0C" % device["temp"]) if device["temp"] is not None
+                                    else "temperature not available")
+                self.live_gpu_widgets[key][1].config(text=text)
 
-        with dpg.collapsing_header(label="Memory"):
-            mem = psutil.virtual_memory()
-            mem_used = humanize.naturalsize(mem.used)
-            mem_percent = mem.percent
-            mem_avail = humanize.naturalsize(mem.available)
-            mem_total = humanize.naturalsize(mem.total)
-            dpg.add_text("MAIN MEMORY", color=(0, 255, 0))
-            dpg.add_text(f"Used Memory: {mem_used}({mem_percent}%)", bullet=True)
-            dpg.add_text(f"Available Memory: {mem_avail}", bullet=True)
-            dpg.add_text(f"Total Memory: {mem_total}", bullet=True)
+        # ===== report and closing =====================================================================
+        def save_report(self):
+            path = filedialog.asksaveasfilename(parent=self.root, title="Save System Report", defaultextension=".txt",
+                                                initialfile="System report %s.txt" % platform.node(),
+                                                filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+            if not path:
+                return
+            lines = ["SYSTEM REPORT - %s" % datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ""]
+            lines += ["%-18s %s" % (k + ":", v) for k, v in self.general_info.items()]
+            lines += ["", "PROCESSOR"] + ["%-18s %s" % (k + ":", w.cget("text")) for k, w in self.cpu_values.items()]
+            lines += ["", "GRAPHICS"]
+            for adapter in self.slow["adapters"] or []:
+                lines.append("  %s  %s  driver %s" % (adapter["name"], nice_size(adapter["memory"]), adapter["driver"]))
+            mem, swap = psutil.virtual_memory(), psutil.swap_memory()
+            lines += ["", "MEMORY", "  RAM:  %s used of %s (%.0f%%)" % (nice_size(mem.used), nice_size(mem.total), mem.percent),
+                      "  Swap: %s used of %s (%.0f%%)" % (nice_size(swap.used), nice_size(swap.total), swap.percent),
+                      "", "DISKS"]
+            for device, mount, fstype, usage in disk_rows():
+                lines.append("  %-12s %-14s %-8s %s" % (device, mount, fstype, "Can't determine" if usage is None else
+                                                        "%s free of %s" % (nice_size(usage.free), nice_size(usage.total))))
+            lines += ["", "NETWORK", self.net_text.get("1.0", "end").rstrip()]
+            try:
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
+                self.status.config(text="Report saved: %s" % path)
+            except OSError as exc:
+                self.message("Save Report", "The report could not be saved:\n%s" % exc)
 
-            swap = psutil.swap_memory()
-            swap_used = humanize.naturalsize(swap.used)
-            swap_percent = swap.percent
-            swap_free = humanize.naturalsize(swap.free)
-            swap_total = humanize.naturalsize(swap.total)
-            dpg.add_text("SWAP MEMORY", color=(0, 255, 0))
-            dpg.add_text(f"Used Swap Memory: {swap_used}({swap_percent}%)", bullet=True)
-            dpg.add_text(f"Free Swap Memory: {swap_free}", bullet=True)
-            dpg.add_text(f"Total Swap Memory: {swap_total}", bullet=True)
-
-        with dpg.collapsing_header(label="Disk"):
-            with dpg.table(
-                resizable=True,
-                policy=dpg.mvTable_SizingStretchProp,
-                borders_outerV=True,
-                borders_innerV=True,
-                borders_outerH=True,
-                borders_innerH=True,
-                delay_search=True
-            ):
-                dpg.add_table_column(label="Device")
-                dpg.add_table_column(label="Mount point")
-                dpg.add_table_column(label="File System type")
-                dpg.add_table_column(label="Used")
-                dpg.add_table_column(label="Free")
-                dpg.add_table_column(label="Total")
-
-                prts = psutil.disk_partitions()
-                for prt in prts:
-                    with dpg.table_row():
-                        for row in range(8):
-                            dpg.add_text(f"{prt.device}", color=(0, 255, 0))
-                            dpg.add_text(f"{prt.mountpoint}")
-                            dpg.add_text(f"{prt.fstype}")
-                            try:
-                                usage = psutil.disk_usage(prt.mountpoint)
-                            except PermissionError:
-                                dpg.add_text("Can't determine")
-                                continue
-                            dpg.add_text(f"{humanize.naturalsize(usage.used)}({usage.percent}%)")
-                            dpg.add_text(f"{humanize.naturalsize(usage.free)}")
-                            dpg.add_text(f"{humanize.naturalsize(usage.total)}")
-
-        with dpg.collapsing_header(label="Network"):
-            addr_list = psutil.net_if_addrs()
-            for name, addresses in addr_list.items():
-                with dpg.group(horizontal=True):
-                    dpg.add_text("Interface Name: ")
-                    dpg.add_text(f"{name}", color=(0, 255, 0))
-                for address in addresses:
-                    if address.family == socket.AF_INET:
-                        dpg.add_text(f"IP Address: {address.address}", bullet=True)
-                        dpg.add_text(f"Subnet Mask: {address.netmask}", bullet=True)
-                    if address.family == psutil.AF_LINK:
-                        dpg.add_text(f"MAC Address: {address.address}", bullet=True)
-
-        # with dpg.collapsing_header(label="Operating System"):
-            # if platform.system() == 'Windows':
-                # try:
-                    # BRAND = subprocess.check_output('wmic csproduct get vendor', shell=True)
-                    # BRAND = BRAND.decode('utf-8').strip().split('\n')[1]
-                    # MODEL = subprocess.check_output('wmic csproduct get name', shell=True)
-                    # MODEL = MODEL.decode('utf-8').strip().split('\n')[1]
-
-                    # dpg.add_text(f"Brand: {BRAND}", bullet=True)
-                    # dpg.add_text(f"Model: {MODEL}", bullet=True)
-                # except subprocess.CalledProcessError:
-                    # dpg.add_text("Brand: Can't determine", bullet=True)
-                    # dpg.add_text("Model: Can't determine", bullet=True)
-        with dpg.collapsing_header(label="Operating System"):
-            if platform.system() == 'Windows':
+        def close(self):
+            self.running = False
+            self.stop.set()
+            for job in self._jobs.values():          # nothing is left waiting after the window closes
                 try:
-                    # Metodă modernă folosind PowerShell în loc de wmic
-                    brand_cmd = 'powershell -Command "Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty Manufacturer"'
-                    BRAND = subprocess.check_output(brand_cmd, shell=True, stderr=subprocess.DEVNULL)
-                    BRAND = BRAND.decode('utf-8').strip()
-                    
-                    model_cmd = 'powershell -Command "Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object -ExpandProperty Model"'
-                    MODEL = subprocess.check_output(model_cmd, shell=True, stderr=subprocess.DEVNULL)
-                    MODEL = MODEL.decode('utf-8').strip()
+                    self.root.after_cancel(job)
+                except tk.TclError:
+                    pass
+            self.root.destroy()
 
-                    dpg.add_text(f"Brand: {BRAND}", bullet=True)
-                    dpg.add_text(f"Model: {MODEL}", bullet=True)
-                except (subprocess.CalledProcessError, Exception) as e:
-                    # Fallback - încearcă să citești din registry
-                    try:
-                        if winreg:
-                            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
-                                                r"SYSTEM\CurrentControlSet\Control\SystemInformation")
-                            try:
-                                BRAND = winreg.QueryValueEx(key, "SystemManufacturer")[0]
-                            except:
-                                BRAND = "Can't determine"
-                            try:
-                                MODEL = winreg.QueryValueEx(key, "SystemProductName")[0]
-                            except:
-                                MODEL = "Can't determine"
-                            winreg.CloseKey(key)
-                            
-                            dpg.add_text(f"Brand: {BRAND}", bullet=True)
-                            dpg.add_text(f"Model: {MODEL}", bullet=True)
-                        else:
-                            dpg.add_text("Brand: Can't determine", bullet=True)
-                            dpg.add_text("Model: Can't determine", bullet=True)
-                    except:
-                        dpg.add_text("Brand: Can't determine", bullet=True)
-                        dpg.add_text("Model: Can't determine", bullet=True)
 
-            elif platform.system() == 'Linux':
-                try:
-                    BRAND = subprocess.check_output('dmidecode -s system-manufacturer', shell=True)
-                    BRAND = BRAND.decode('utf-8').strip()
-                    MODEL = subprocess.check_output('dmidecode -s system-product-name', shell=True)
-                    MODEL = MODEL.decode('utf-8').strip()
-
-                    dpg.add_text(f"Brand: {BRAND}", bullet=True)
-                    dpg.add_text(f"Model: {MODEL}", bullet=True)
-                except subprocess.CalledProcessError:
-                    dpg.add_text("Brand: Can't determine", bullet=True)
-                    dpg.add_text("Model: Can't determine", bullet=True)
-
-            # uname = platform.uname()
-            # dpg.add_text(f"System: {uname.system}", bullet=True)
-            # if uname.system == "Windows":
-                # if int(uname.version[5:]) > 22000:
-                    # dpg.add_text("Version: 11", bullet=True)
-            # dpg.add_text(f"Machine: {uname.machine}", bullet=True)
-
-            # timestamp = psutil.boot_time()
-            # bt = datetime.fromtimestamp(timestamp)
-            # boot = bt.strftime("%m/%d/%Y %I:%M:%S %p")
-            # dpg.add_text(f"Last boot timestamp: {boot}", bullet=True)
-
-            # if platform.system() == "Windows":
-                # with dpg.tree_node(label="BIOS"):
-                    # bios = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS")
-                    # vendor = winreg.QueryValueEx(bios, "BIOSVendor")
-                    # version = winreg.QueryValueEx(bios, "BIOSVersion")
-
-                    # dpg.add_text(f"Vendor: {vendor[0]}", bullet=True)
-                    # dpg.add_text(f"Version: {version[0]}", bullet=True)
-            uname = platform.uname()
-            dpg.add_text(f"System: {uname.system}", bullet=True)
-            if uname.system == "Windows":
-                try:
-                    if int(uname.version.split('.')[2]) > 22000:
-                        dpg.add_text("Version: 11", bullet=True)
-                    else:
-                        dpg.add_text(f"Version: 10 (Build {uname.version.split('.')[2]})", bullet=True)
-                except:
-                    dpg.add_text(f"Version: {uname.release}", bullet=True)
-            dpg.add_text(f"Machine: {uname.machine}", bullet=True)
-
-            timestamp = psutil.boot_time()
-            bt = datetime.fromtimestamp(timestamp)
-            boot = bt.strftime("%m/%d/%Y %I:%M:%S %p")
-            dpg.add_text(f"Last boot timestamp: {boot}", bullet=True)
-
-            if platform.system() == "Windows":
-                with dpg.tree_node(label="BIOS"):
-                    try:
-                        if winreg:
-                            bios = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS")
-                            try:
-                                vendor = winreg.QueryValueEx(bios, "BIOSVendor")
-                                dpg.add_text(f"Vendor: {vendor[0]}", bullet=True)
-                            except:
-                                dpg.add_text("Vendor: Can't determine", bullet=True)
-                            
-                            try:
-                                version = winreg.QueryValueEx(bios, "BIOSVersion")
-                                dpg.add_text(f"Version: {version[0]}", bullet=True)
-                            except:
-                                dpg.add_text("Version: Can't determine", bullet=True)
-                            
-                            winreg.CloseKey(bios)
-                        else:
-                            dpg.add_text("BIOS info not available", bullet=True)
-                    except Exception as e:
-                        dpg.add_text(f"Could not read BIOS info", bullet=True)
-
-    threading.Thread(target=update_gpu_temperature, daemon=True).start()
-    threading.Thread(target=get_gpu_util, daemon=True).start()
-
-    time.sleep(0.1)
-
-    # dpg.create_viewport(
-        # title="System Information Gatherer",
-        # #small_icon="res/icon.ico",
-        # #large_icon="res/icon.ico",
-        # resizable=False,
-        # max_width=WIN_WIDTH,
-        # max_height=WIN_HEIGHT
-    # )
-    # dpg.setup_dearpygui()
-    # dpg.set_primary_window(main_window, True)
-    # dpg.show_viewport()
-    # dpg.start_dearpygui()
-    # dpg.destroy_context()
-    # După ce ai creat toate thread-urile
-    threading.Thread(target=update_gpu_temperature, daemon=True).start()
-    threading.Thread(target=get_gpu_util, daemon=True).start()
-
-    # Creează și verifică viewport-ul
-    try:
-        dpg.create_viewport(
-            title="System Information Gatherer",
-            resizable=False,
-            max_width=WIN_WIDTH,
-            max_height=WIN_HEIGHT
-        )
-        dpg.setup_dearpygui()
-        dpg.set_primary_window(main_window, True)
-        dpg.show_viewport()
-        
-        # Așteaptă ca viewport-ul să fie gata
-        while dpg.is_dearpygui_running():
-            dpg.render_dearpygui_frame()
-            
-    except Exception as e:
-        print(f"Error initializing viewport: {e}")
-    finally:
-        dpg.destroy_context()
+    rootsysinfo = tk.Tk()
+    app_sysinfo = SystemInfo95(rootsysinfo)
+    rootsysinfo.mainloop()
 
 if screenvar == 7:
     import sqlite3, os as _os
@@ -44714,32 +47134,31 @@ if netwvar == 14:
             # Rularea buclei principale
             validation.mainloop()
     
-    import logging
+    import os
+    import csv
     import time
-    import psutil
     from datetime import datetime
-    from threading import Thread, Lock
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import filedialog
 
-    import matplotlib
-    matplotlib.use('TkAgg')
-    import matplotlib.pyplot as plt
+    import psutil
 
-
-    # Constants for network data indexing
-    __BYTES_SENT__ = 0
-    __BYTES_RECV__ = 1
-    __PACKETS_SENT__ = 2
-    __PACKETS_RECV__ = 3
-    __ERR_IN__ = 4
-    __ERR_OUT__ = 5
-    __DROP_IN__ = 6
-    __DROP_OUT__ = 7
+    SM_FACE, SM_SHADOW, SM_LIGHT, SM_NAVY, SM_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    SM_FONT = ("MS Sans Serif", 8)
+    SM_FONT_B = ("MS Sans Serif", 8, "bold")
+    SM_DOWN, SM_UP = "#00ff00", "#ffff00"          # download / upload lines on the black graph
+    SM_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+    SM_INTERVAL_MS = 500           # as before: a sample every 0.5 s
+    SM_DURATIONS = {"1 minute": 1, "5 minutes": 5, "15 minutes": 15}
 
 
     class Tracker:
-        """Tracker for monitoring internet speed."""
+        """Tracker for monitoring internet speed (one adapter, or all of them when nic is None)."""
 
-        def __init__(self):
+        def __init__(self, nic=None):
+            self.nic = nic
             self.__reset_bytes_recv_vars__()
             self.__reset_bytes_sent_vars__()
             self.init_total_sent = self.__get_bytes_sent_total__()
@@ -44747,22 +47166,27 @@ if netwvar == 14:
 
         def get_total_data_used(self):
             """Returns the data used since the tracker started."""
-            return ((self.__get_bytes_sent_total__() - self.init_total_sent) +
-                    (self.__get_bytes_recv_total__() - self.init_total_recv))
+            return self.get_total_sent() + self.get_total_recv()
+
+        def get_total_sent(self):
+            return self.__get_bytes_sent_total__() - self.init_total_sent
+
+        def get_total_recv(self):
+            return self.__get_bytes_recv_total__() - self.init_total_recv
 
         def get_current_upload_speed(self):
             """Returns the current upload speed in bytes per second."""
             dtime = time.time() - self.last_bytes_sent_time
             dsent = self.__get_bytes_sent_total__() - self.last_bytes_sent_total
             self.__reset_bytes_sent_vars__()
-            return dsent / dtime if dtime != 0 else 0
+            return max(0, dsent) / dtime if dtime != 0 else 0
 
         def get_current_download_speed(self):
             """Returns the current download speed in bytes per second."""
             dtime = time.time() - self.last_bytes_recv_time
             drecv = self.__get_bytes_recv_total__() - self.last_bytes_recv_total
             self.__reset_bytes_recv_vars__()
-            return drecv / dtime if dtime != 0 else 0
+            return max(0, drecv) / dtime if dtime != 0 else 0
 
         def __reset_bytes_sent_vars__(self):
             self.last_bytes_sent_total = self.__get_bytes_sent_total__()
@@ -44772,158 +47196,493 @@ if netwvar == 14:
             self.last_bytes_recv_total = self.__get_bytes_recv_total__()
             self.last_bytes_recv_time = time.time()
 
+        def __counters__(self):
+            if self.nic:
+                counters = psutil.net_io_counters(pernic=True).get(self.nic)
+                if counters is not None:
+                    return counters
+            return psutil.net_io_counters(pernic=False)
+
         def __get_bytes_sent_total__(self):
-            return psutil.net_io_counters(pernic=False)[__BYTES_SENT__]
+            return self.__counters__().bytes_sent
 
         def __get_bytes_recv_total__(self):
-            return psutil.net_io_counters(pernic=False)[__BYTES_RECV__]
+            return self.__counters__().bytes_recv
 
 
-    # Logger configuration
-    logger = logging.getLogger(__name__)
-
-    # Duration of data displayed on the graph (in minutes)
-    DATA_DURATION = 5
-
-    # Variables for storing data
-    speeds_recv = []
-    speeds_sent = []
-    times = []
-    data_lock = Lock()
-
-    # Control flag for threads
-    running = True
+    def nice_size(value):
+        value = float(value)
+        for unit in ("bytes", "KB", "MB", "GB", "TB"):
+            if value < 1024 or unit == "TB":
+                return ("%d %s" % (value, unit)) if unit == "bytes" else ("%.2f %s" % (value, unit))
+            value /= 1024.0
 
 
-    def collect_data(tracker):
-        """Thread function to collect network speed data."""
-        global running
-        last_total_data_used = 0
-        
-        while running:
+    def nice_speed(mbits):
+        if mbits < 1:
+            return "%.0f Kb/s" % (mbits * 1000)
+        return "%.2f Mb/s" % mbits
+
+
+    class SpeedMonitor95:
+        def __init__(self, root):
+            self.root = root
+            root.title("Internet Speed Monitor")
+            root.resizable(False, False)
+            root.configure(bg=SM_FACE)
+            self.custom_frame = SM_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.minimizing = False
+            # Fix: the data lives in the window, not in globals of the Bitpack file (a second start begins clean)
+            self.speeds_recv, self.speeds_sent, self.times = [], [], []
+            self.duration_var = tk.StringVar(value="5 minutes")
+            self.adapter_var = tk.StringVar(value="All adapters")
+            self.show_down = tk.IntVar(value=1)
+            self.show_up = tk.IntVar(value=1)
+            self.on_top = tk.IntVar(value=0)
+            self.paused = False
+            self.job = None
+            self.last_total_data_used = 0.0
+
+            self._build_titlebar()
+            self._build_menu()
+            self._build_body()
+            root.update_idletasks()
+            w, h = root.winfo_reqwidth(), root.winfo_reqheight()
+            root.geometry("+%d+%d" % (max(0, (root.winfo_screenwidth() - w) // 2),
+                                      max(0, (root.winfo_screenheight() - h) // 2)))
+            root.protocol("WM_DELETE_WINDOW", self.close)
+            root.bind("<space>", lambda e: self.toggle_pause())
+            if self.custom_frame:
+                root.configure(bd=2, relief="raised")
+                root.after(10, self._enable_custom_frame)
+            self.reset()
+
+        # ===== Windows 95 frame =======================================================================
+        def _build_titlebar(self):
+            root = self.root
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = {"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"}
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if SM_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=SM_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=SM_NAVY, bd=0, highlightthickness=0)
+            icon.create_rectangle(1, 2, 15, 14, fill=SM_BLACK, outline=SM_FACE)        # a tiny graph
+            icon.create_line(2, 11, 5, 8, 8, 10, 11, 5, 14, 7, fill=SM_DOWN)
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Internet Speed Monitor", bg=SM_NAVY, fg=SM_LIGHT, font=SM_FONT_B, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, title, icon)
+            self.caption_button(bar, "close", self.close).pack(side="right", padx=(2, 2))
+            self.caption_button(bar, "min", self._minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=SM_FACE, fg=SM_BLACK,
+                             activebackground=SM_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=SM_NAVY if active else SM_SHADOW)
+            self.caption_parts[1].config(fg=SM_LIGHT if active else SM_FACE)
+
+        def _enable_custom_frame(self):
+            self.root.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.root
             try:
-                time.sleep(0.5)
-                
-                # Calculate speeds (converted to Mb/s)
-                down_speed = 8 * (tracker.get_current_download_speed() / (2**20))
-                up_speed = 8 * (tracker.get_current_upload_speed() / (2**20))
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
 
-                # Store data
-                add_data(down_speed, up_speed)
+        def _on_map(self, event):
+            if event.widget is self.root and self.minimizing and self.root.state() == "normal":
+                self.minimizing = False
+                self.root.overrideredirect(True)
+                self.root.after(10, self._apply_taskbar_style)
 
-                # Calculate and display total data used
-                total_data_used = round(tracker.get_total_data_used() / (2**20), 3)
-                write_data_used(last_total_data_used, total_data_used)
-                last_total_data_used = total_data_used
-                
-            except Exception as e:
-                logger.error(f"Error collecting data: {e}")
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.root.overrideredirect(False)
+            self.root.iconify()
 
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
 
-    def update_plot(fig, ax):
-        """Update the plot with current data."""
-        global running
-        
-        while running:
-            try:
-                with data_lock:
-                    if len(times) > 0:
-                        ax.clear()
-                        
-                        # Draw curves
-                        ax.plot(times, speeds_recv, 'b-', linewidth=2, label='Download')
-                        ax.plot(times, speeds_sent, 'r-', linewidth=2, label='Upload')
-                        
-                        ax.legend(loc='upper left')
-                        ax.set_ylabel('Mb/s', fontsize=10)
-                        ax.set_xlabel('Time', fontsize=10)
-                        ax.set_title('Internet Speed Monitor', fontsize=12, fontweight='bold')
-                        ax.tick_params(axis='x', labelsize=8, rotation=45)
-                        ax.tick_params(axis='y', labelsize=8)
-                        ax.grid(True, alpha=0.3)
-                        
-                        fig.canvas.draw_idle()
-                        fig.canvas.flush_events()
-                
-                plt.pause(0.1)
-                
-            except Exception as e:
-                logger.error(f"Error updating plot: {e}")
-                break
+        def _caption_drag(self, event):
+            if self.custom_frame:
+                self.root.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
 
+        # ===== message box (always in front) ==========================================================
+        def message(self, title, text):
+            root = self.root
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=SM_FACE, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+            bar = tk.Frame(win, bg=SM_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=SM_NAVY, fg=SM_LIGHT, font=SM_FONT_B).pack(side="left", padx=4)
+            self.caption_button(bar, "close", win.destroy).pack(side="right", padx=2)
+            body = tk.Frame(win, bg=SM_FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            picture = tk.Canvas(body, width=32, height=32, bg=SM_FACE, highlightthickness=0)
+            picture.create_oval(2, 2, 30, 30, fill=SM_LIGHT, outline=SM_BLACK)
+            picture.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+            picture.pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=SM_FACE, font=SM_FONT, justify="left", wraplength=360).pack(side="left")
+            self._button(win, "OK", win.destroy, default=True).pack(pady=(4, 12))
+            win.bind("<Return>", lambda e: win.destroy())
+            win.bind("<Escape>", lambda e: win.destroy())
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
 
-    def main():
-        """Main function that runs the monitoring."""
-        global running
-        
-        tracker = Tracker()
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(10, 6))
-        plt.subplots_adjust(bottom=0.15)
-        plt.ion()
-        plt.show(block=False)
-        
-        logger.info("Internet speed monitoring started...")
-        logger.info("Close the plot window to stop monitoring.")
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
 
-        # Start data collection thread
-        data_thread = Thread(target=collect_data, args=(tracker,), daemon=True)
-        data_thread.start()
+        # ===== layout =================================================================================
+        def _button(self, parent, text, command, width=10, default=False):
+            return tk.Button(parent, text=text, command=command, width=width, font=SM_FONT_B if default else SM_FONT,
+                             bg=SM_FACE, fg=SM_BLACK, activebackground=SM_FACE, relief="raised", bd=2,
+                             highlightthickness=1 if default else 0, highlightbackground=SM_BLACK, takefocus=0)
 
-        try:
-            # Run plot updates in main thread
-            update_plot(fig, ax)
-            
-        except KeyboardInterrupt:
-            logger.info("Monitoring stopped by user.")
-        finally:
-            running = False
-            data_thread.join(timeout=1)
-            plt.close('all')
+        def _build_menu(self):
+            bar = tk.Frame(self.root, bg=SM_FACE)
+            bar.pack(side="top", fill="x")
 
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=SM_FONT, bg=SM_FACE, fg=SM_BLACK, activebackground=SM_NAVY,
+                                       activeforeground=SM_LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=SM_FONT, bg=SM_FACE, fg=SM_BLACK, activebackground=SM_NAVY,
+                               activeforeground=SM_LIGHT, selectcolor=SM_BLACK)
+                button.config(menu=menu)
+                return menu
 
-    def add_data(down_speed, up_speed):
-        """Adds new data to the speed lists."""
-        with data_lock:
-            # Check if old data needs to be removed
-            if len(times) > 1:
-                duration_minutes = divmod((times[-1] - times[0]).total_seconds(), 60)[0]
-                if duration_minutes >= DATA_DURATION:
-                    del times[0]
-                    del speeds_recv[0]
-                    del speeds_sent[0]
-            
-            # Add new data
-            speeds_recv.append(down_speed)
-            speeds_sent.append(up_speed)
-            times.append(datetime.now())
+            m = menubutton("File")
+            m.add_command(label="Save Samples as CSV...", accelerator="Ctrl+S", command=self.save_csv)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.close)
+            m = menubutton("View")
+            for label in SM_DURATIONS:
+                m.add_radiobutton(label="Last " + label, variable=self.duration_var, value=label, command=self.redraw)
+            m.add_separator()
+            m.add_checkbutton(label="Download Line", variable=self.show_down, command=self.redraw)
+            m.add_checkbutton(label="Upload Line", variable=self.show_up, command=self.redraw)
+            m.add_separator()
+            m.add_checkbutton(label="Always on Top", variable=self.on_top,
+                              command=lambda: self.root.attributes("-topmost", bool(self.on_top.get())))
+            m = menubutton("Monitor")
+            m.add_command(label="Pause / Resume", accelerator="Space", command=self.toggle_pause)
+            m.add_command(label="Reset Totals and Graph", command=self.reset)
+            m = menubutton("Help")
+            m.add_command(label="About", command=lambda: self.message(
+                "About Internet Speed Monitor",
+                "Internet Speed Monitor\n\nShows how fast this computer is downloading and uploading right now "
+                "(all programs together), measured twice a second, and how much data was used since the monitor "
+                "started.\n\nIt does not run a speed test: it shows the traffic that is really happening."))
+            self.root.bind("<Control-s>", lambda e: self.save_csv())
 
+        def _group(self, parent, title):
+            return tk.LabelFrame(parent, text=" %s " % title, font=SM_FONT, bg=SM_FACE, bd=2, relief="groove")
 
-    def write_data_used(last_total_data_used, total_data_used):
-        """Displays the total amount of data used."""
-        if total_data_used != last_total_data_used:
-            if total_data_used > last_total_data_used + 1:
-                logger.warning(f'!! {total_data_used} MB used.')
-            elif total_data_used > last_total_data_used + 0.5:
-                logger.info(f'! {total_data_used} MB used.')
+        def _build_body(self):
+            root = self.root
+            self.status = tk.Label(root, text="", font=SM_FONT, bg=SM_FACE, anchor="w", relief="sunken", bd=1, padx=4)
+            self.status.pack(side="bottom", fill="x", padx=2, pady=(4, 2))
+
+            body = tk.Frame(root, bg=SM_FACE)
+            body.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+
+            # ---- top row: modem lights, current values, totals
+            top = tk.Frame(body, bg=SM_FACE)
+            top.pack(fill="x")
+            lights = self._group(top, "Activity")
+            lights.pack(side="left", fill="y")
+            self.lights = tk.Canvas(lights, width=92, height=50, bg=SM_FACE, highlightthickness=0)
+            self.lights.pack(padx=6, pady=4)
+            self.led_rd = self.lights.create_oval(14, 6, 30, 22, fill="#004000", outline=SM_BLACK)
+            self.led_sd = self.lights.create_oval(60, 6, 76, 22, fill="#404000", outline=SM_BLACK)
+            self.lights.create_text(22, 36, text="RD", font=SM_FONT_B)
+            self.lights.create_text(68, 36, text="SD", font=SM_FONT_B)
+
+            now = self._group(top, "Current speed")
+            now.pack(side="left", fill="both", expand=True, padx=(6, 0))
+            grid = tk.Frame(now, bg=SM_FACE)
+            grid.pack(fill="x", padx=8, pady=4)
+            self.values = {}
+            rows = (("Download", SM_DOWN), ("Upload", SM_UP))
+            for r, (name, colour) in enumerate(rows):
+                swatch = tk.Canvas(grid, width=12, height=12, bg=SM_BLACK, highlightthickness=1,
+                                   highlightbackground=SM_SHADOW)
+                swatch.create_line(1, 6, 11, 6, fill=colour, width=2)
+                swatch.grid(row=r, column=0, padx=(0, 4))
+                tk.Label(grid, text=name + ":", font=SM_FONT, bg=SM_FACE, anchor="w", width=9).grid(row=r, column=1,
+                                                                                                   sticky="w")
+                self.values[name] = tk.Label(grid, text="-", font=("MS Sans Serif", 10, "bold"), bg=SM_FACE, anchor="w",
+                                             width=11)
+                self.values[name].grid(row=r, column=2, sticky="w")
+                self.values[name + " peak"] = tk.Label(grid, text="", font=SM_FONT, bg=SM_FACE, fg=SM_SHADOW, anchor="w")
+                self.values[name + " peak"].grid(row=r, column=3, sticky="w", padx=(6, 0))
+
+            totals = self._group(top, "Since start")
+            totals.pack(side="left", fill="y", padx=(6, 0))
+            tgrid = tk.Frame(totals, bg=SM_FACE)
+            tgrid.pack(padx=8, pady=4)
+            for r, name in enumerate(("Received", "Sent", "Total used", "Time")):
+                tk.Label(tgrid, text=name + ":", font=SM_FONT, bg=SM_FACE, anchor="w").grid(row=r, column=0, sticky="w")
+                self.values[name] = tk.Label(tgrid, text="-", font=SM_FONT_B, bg=SM_FACE, anchor="e", width=11)
+                self.values[name].grid(row=r, column=1, sticky="e")
+
+            # ---- graph
+            graph = self._group(body, "Speed (Mb/s)")
+            graph.pack(fill="x", pady=(6, 0))
+            options = tk.Frame(graph, bg=SM_FACE)
+            options.pack(fill="x", padx=8, pady=(4, 0))
+            tk.Label(options, text="Adapter:", font=SM_FONT, bg=SM_FACE).pack(side="left")
+            adapters = ["All adapters"] + sorted(psutil.net_io_counters(pernic=True).keys())
+            menu = tk.OptionMenu(options, self.adapter_var, *adapters, command=lambda _v: self.reset())
+            menu.config(font=SM_FONT, bg=SM_LIGHT, activebackground=SM_LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                        width=22, anchor="w")
+            menu["menu"].config(font=SM_FONT, bg=SM_FACE, activebackground=SM_NAVY, activeforeground=SM_LIGHT)
+            menu.pack(side="left", padx=(4, 12))
+            tk.Label(options, text="Show:", font=SM_FONT, bg=SM_FACE).pack(side="left")
+            self.duration_menu = tk.OptionMenu(options, self.duration_var, *SM_DURATIONS.keys(),
+                                               command=lambda _v: self.redraw())
+            self.duration_menu.config(font=SM_FONT, bg=SM_LIGHT, activebackground=SM_LIGHT, relief="sunken", bd=2,
+                                      highlightthickness=0, width=9, anchor="w")
+            self.duration_menu["menu"].config(font=SM_FONT, bg=SM_FACE, activebackground=SM_NAVY,
+                                              activeforeground=SM_LIGHT)
+            self.duration_menu.pack(side="left", padx=(4, 0))
+            self.pause_button = self._button(options, "Pause", self.toggle_pause, width=8)
+            self.pause_button.pack(side="right")
+            self._button(options, "Reset", self.reset, width=8).pack(side="right", padx=(0, 4))
+            self.canvas = tk.Canvas(graph, width=620, height=220, bg=SM_BLACK, relief="sunken", bd=2,
+                                    highlightthickness=0)
+            self.canvas.pack(padx=8, pady=(6, 8))
+
+            # ---- data used log (what went to logging before, invisible in the .exe)
+            log = self._group(body, "Data used")
+            log.pack(fill="x", pady=(6, 0))
+            holder = tk.Frame(log, bg=SM_LIGHT, bd=2, relief="sunken")
+            holder.pack(fill="x", padx=8, pady=(4, 8))
+            scroll = tk.Scrollbar(holder, orient="vertical")
+            scroll.pack(side="right", fill="y")
+            self.log = tk.Text(holder, height=4, font=("Courier New", 9), bg=SM_LIGHT, bd=0, highlightthickness=0,
+                               wrap="none", state="disabled", cursor="arrow", yscrollcommand=scroll.set)
+            self.log.pack(side="left", fill="x", expand=True)
+            scroll.config(command=self.log.yview)
+            self.log.tag_config("warning", foreground="#c00000", font=("Courier New", 9, "bold"))
+            self.log.tag_config("info", foreground="#806000")
+
+        # ===== the original workflow, in the window's own thread ======================================
+        def reset(self):
+            adapter = self.adapter_var.get()
+            self.tracker = Tracker(None if adapter == "All adapters" else adapter)
+            self.speeds_recv, self.speeds_sent, self.times = [], [], []
+            self.peak_down = self.peak_up = 0.0
+            self.last_total_data_used = 0.0
+            self.started = time.time()
+            self.started_text = datetime.now().strftime("%H:%M:%S")
+            self.log.config(state="normal")
+            self.log.delete("1.0", "end")
+            self.log.config(state="disabled")
+            self.write_log("Monitoring %s from %s." % (adapter.lower() if adapter == "All adapters" else adapter,
+                                                       self.started_text), None)
+            if self.job is None and not self.paused:
+                self.job = self.root.after(SM_INTERVAL_MS, self.collect_data)
+            self.redraw()
+
+        def toggle_pause(self):
+            self.paused = not self.paused
+            self.pause_button.config(text="Resume" if self.paused else "Pause", relief="sunken" if self.paused else "raised")
+            if self.paused:
+                if self.job is not None:
+                    self.root.after_cancel(self.job)
+                    self.job = None
+                self.status.config(text="Paused.")
             else:
-                logger.debug(f'{total_data_used} MB used.')
+                self.tracker.get_current_download_speed()     # the pause does not count as one long sample
+                self.tracker.get_current_upload_speed()
+                self.job = self.root.after(SM_INTERVAL_MS, self.collect_data)
+
+        def collect_data(self):
+            """A sample every 0.5 s (as before), then the totals, the log and the graph."""
+            self.job = None
+            try:
+                # Fix: Mb/s with 1 000 000 bits (as providers and speed tests count), not 2**20
+                down_speed = 8 * self.tracker.get_current_download_speed() / 1e6
+                up_speed = 8 * self.tracker.get_current_upload_speed() / 1e6
+                self.add_data(down_speed, up_speed)
+                total_data_used = round(self.tracker.get_total_data_used() / (2 ** 20), 3)
+                self.write_data_used(self.last_total_data_used, total_data_used)
+                self.last_total_data_used = total_data_used
+                self.update_readouts(down_speed, up_speed)
+                self.redraw()
+            except Exception as exc:                 # the monitor keeps running; the problem is shown
+                self.status.config(text="Error collecting data: %s" % exc)
+            if not self.paused:
+                self.job = self.root.after(SM_INTERVAL_MS, self.collect_data)
+
+        def add_data(self, down_speed, up_speed):
+            """Adds new data to the speed lists (the oldest leaves after 15 minutes, the longest view)."""
+            now = datetime.now()
+            while self.times and (now - self.times[0]).total_seconds() > 15 * 60:
+                del self.times[0]
+                del self.speeds_recv[0]
+                del self.speeds_sent[0]
+            self.speeds_recv.append(down_speed)
+            self.speeds_sent.append(up_speed)
+            self.times.append(now)
+
+        def write_data_used(self, last_total_data_used, total_data_used):
+            """The original thresholds: a jump of more than 1 MB is a warning, more than 0.5 MB a notice."""
+            if total_data_used != last_total_data_used:
+                if total_data_used > last_total_data_used + 1:
+                    self.write_log("!! %.1f MB used." % total_data_used, "warning")
+                elif total_data_used > last_total_data_used + 0.5:
+                    self.write_log("!  %.1f MB used." % total_data_used, "info")
+
+        def write_log(self, text, tag):
+            self.log.config(state="normal")
+            self.log.insert("end", "%s  %s\n" % (datetime.now().strftime("%H:%M:%S"), text), tag or ())
+            lines = int(self.log.index("end-1c").split(".")[0])
+            if lines > 500:
+                self.log.delete("1.0", "%d.0" % (lines - 500))
+            self.log.see("end")
+            self.log.config(state="disabled")
+
+        def update_readouts(self, down, up):
+            self.peak_down, self.peak_up = max(self.peak_down, down), max(self.peak_up, up)
+            self.values["Download"].config(text=nice_speed(down))
+            self.values["Upload"].config(text=nice_speed(up))
+            self.values["Download peak"].config(text="peak " + nice_speed(self.peak_down))
+            self.values["Upload peak"].config(text="peak " + nice_speed(self.peak_up))
+            self.values["Received"].config(text=nice_size(self.tracker.get_total_recv()))
+            self.values["Sent"].config(text=nice_size(self.tracker.get_total_sent()))
+            self.values["Total used"].config(text=nice_size(self.tracker.get_total_data_used()))
+            elapsed = int(time.time() - self.started)
+            self.values["Time"].config(text="%02d:%02d:%02d" % (elapsed // 3600, elapsed % 3600 // 60, elapsed % 60))
+            self.lights.itemconfig(self.led_rd, fill="#00ff00" if down > 0.01 else "#004000")   # modem lights
+            self.lights.itemconfig(self.led_sd, fill="#ffff00" if up > 0.01 else "#404000")
+            self.status.config(text="Monitoring since %s   |   %s used   |   sample every 0.5 s" % (
+                self.started_text, nice_size(self.tracker.get_total_data_used())))
+
+        def redraw(self):
+            canvas = self.canvas
+            canvas.delete("all")
+            width, height = 620, 220
+            left, bottom = 48, 20
+            plot_w, plot_h = width - left - 8, height - bottom - 10
+            minutes = SM_DURATIONS[self.duration_var.get()]
+            span = minutes * 60
+            now = datetime.now()
+            visible = [(t, d, u) for t, d, u in zip(self.times, self.speeds_recv, self.speeds_sent)
+                       if (now - t).total_seconds() <= span]
+            peak = max([d for _, d, _ in visible] + [u for _, _, u in visible] + [0.1])
+            top_value = next(v for v in (0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000)
+                             if v >= peak * 1.1) if peak * 1.1 <= 10000 else peak * 1.1
+
+            for i in range(5):                                       # horizontal grid and scale
+                y = 10 + plot_h * i / 4
+                canvas.create_line(left, y, left + plot_w, y, fill="#004000")
+                value = top_value * (4 - i) / 4
+                canvas.create_text(left - 4, y, text=("%.2f" % value).rstrip("0").rstrip(".") or "0", anchor="e",
+                                   fill="#00c000", font=("Courier New", 8))
+            for i in range(minutes * 2 + 1 if minutes < 15 else 16):  # vertical grid with time marks
+                step = span / (minutes * 2 if minutes < 15 else 15)
+                x = left + plot_w - plot_w * (i * step) / span
+                canvas.create_line(x, 10, x, 10 + plot_h, fill="#004000")
+                if i % (2 if minutes < 15 else 5) == 0:
+                    seconds = int(i * step)
+                    label = "now" if seconds == 0 else "-%dm" % (seconds // 60) if seconds % 60 == 0 else "-%ds" % seconds
+                    canvas.create_text(x, height - 8, text=label, fill="#00c000", font=("Courier New", 8))
+
+            def line(values, colour):
+                points = []
+                for t, value in values:
+                    age = (now - t).total_seconds()
+                    points += [left + plot_w - plot_w * age / span, 10 + plot_h - plot_h * min(value, top_value) / top_value]
+                if len(points) >= 4:
+                    canvas.create_line(*points, fill=colour, width=2)
+
+            if self.show_up.get():
+                line([(t, u) for t, _, u in visible], SM_UP)
+            if self.show_down.get():
+                line([(t, d) for t, d, _ in visible], SM_DOWN)
+            if self.paused:
+                canvas.create_text(left + plot_w / 2, 10 + plot_h / 2, text="PAUSED", fill="#00ff00",
+                                   font=("Courier New", 16, "bold"))
+
+        # ===== CSV and closing ========================================================================
+        def save_csv(self):
+            if not self.times:
+                self.status.config(text="Nothing to save yet.")
+                return
+            path = filedialog.asksaveasfilename(parent=self.root, title="Save Samples", defaultextension=".csv",
+                                                initialfile="speed %s.csv" % datetime.now().strftime("%Y-%m-%d %H-%M"),
+                                                filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
+            if not path:
+                return
+            try:
+                with open(path, "w", newline="", encoding="utf-8") as fh:
+                    writer = csv.writer(fh, delimiter=";")
+                    writer.writerow(["time", "download Mb/s", "upload Mb/s"])
+                    for t, d, u in zip(self.times, self.speeds_recv, self.speeds_sent):
+                        writer.writerow([t.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3], "%.3f" % d, "%.3f" % u])
+                self.status.config(text="Saved %d samples: %s" % (len(self.times), path))
+            except OSError as exc:
+                self.message("Save Samples", "The file could not be saved:\n%s" % exc)
+
+        def close(self):
+            """Fix: closing the window really stops the monitor (before, the loop kept running unseen)."""
+            if self.job is not None:
+                try:
+                    self.root.after_cancel(self.job)
+                except tk.TclError:
+                    pass
+                self.job = None
+            self.root.destroy()
 
 
-    if __name__ == '__main__':
-        # Configure logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-
-        try:
-            main()
-        except Exception as e:
-            logger.exception('Unexpected error')
-            running = False
+    rootspeed = tk.Tk()
+    app_speed = SpeedMonitor95(rootspeed)
+    rootspeed.mainloop()
 
 if crpvar2 == 155:
     import sqlite3, os as _os
@@ -80444,518 +83203,453 @@ if hardmvar == 1994:
             # Rularea buclei principale
             validation.mainloop()
 
-    class CyberpunkSystemMonitor:
+    import os
+    import time
+    import queue
+    import threading
+    import subprocess
+    from datetime import datetime
+    import tkinter as tk
+    import tkinter.font as tkfont
+
+    import psutil
+
+    HM_FACE, HM_SHADOW, HM_LIGHT, HM_NAVY, HM_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    HM_FONT = ("MS Sans Serif", 8)
+    HM_FONT_B = ("MS Sans Serif", 8, "bold")
+    HM_FONT_BIG = ("MS Sans Serif", 14, "bold")
+    HM_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+    HM_NO_WINDOW = 0x08000000 if HM_IS_WINDOWS else 0
+    HM_LINES = {"CPU": "#00ff00", "Memory": "#ffff00", "Storage": "#00ffff", "Network": "#ff8000", "GPU": "#ff40ff"}
+    HM_HISTORY = 40                # samples in each small graph (1 per second)
+
+
+    def hm_size(value, per_second=False):
+        value = float(value)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if value < 1024 or unit == "TB":
+                text = ("%d %s" % (value, unit)) if unit == "B" else ("%.1f %s" % (value, unit))
+                return text + ("/s" if per_second else "")
+            value /= 1024.0
+
+
+    def hm_nvidia():
+        """NVIDIA GPUs through nvidia-smi, without a console window. [] when there is none."""
+        try:
+            result = subprocess.run(["nvidia-smi", "--query-gpu=name,utilization.gpu,memory.used,memory.total,"
+                                     "temperature.gpu", "--format=csv,noheader,nounits"],
+                                    capture_output=True, text=True, timeout=5, creationflags=HM_NO_WINDOW)
+        except (OSError, subprocess.SubprocessError):
+            return []
+        gpus = []
+        for line in result.stdout.splitlines() if result.returncode == 0 else []:
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) == 5:
+                def number(text):
+                    try:
+                        return float(text)
+                    except ValueError:
+                        return None
+                gpus.append({"name": parts[0], "load": number(parts[1]) or 0.0, "mem_used": number(parts[2]),
+                             "mem_total": number(parts[3]), "temp": number(parts[4])})
+        return gpus
+
+
+    def hm_processes(cores):
+        """Process count and the top processes by CPU (normalised to 0-100 % like Task Manager)."""
+        rows = []
+        count = 0
+        for proc in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info"]):
+            count += 1
+            info = proc.info
+            if info["pid"] == 0 or (info["name"] or "").lower() in ("system idle process", "idle"):
+                continue      # Fix: the idle process is not a real load (it was always first, at hundreds of %)
+            cpu = (info["cpu_percent"] or 0.0) / cores
+            memory = info["memory_info"].rss if info["memory_info"] else 0
+            rows.append((cpu, info["name"] or "?", info["pid"], memory))
+        rows.sort(key=lambda r: (r[0], r[3]), reverse=True)
+        return count, rows[:8]
+
+
+    def hm_background(events, stop, cores):
+        """Slow readings in their own thread. It gets only the queue and the stop signal - never the window -
+        so it can never touch tkinter (the old thread called root.after() directly)."""
+        while not stop.is_set():
+            try:
+                events.put(("processes", hm_processes(cores)))
+            except Exception:
+                pass
+            events.put(("gpus", hm_nvidia()))
+            stop.wait(2.0)
+
+
+    class HardwareMonitor95:
         def __init__(self, roothwmn):
             self.roothwmn = roothwmn
-            self.roothwmn.title("Hardware Monitor")
-            self.roothwmn.geometry("800x800")
-            self.roothwmn.resizable(True, True)
-            
-            # Set window to always be on top
-            self.roothwmn.attributes('-topmost', True)
-            
-            # Cyberpunk neon colors (dark theme)
-            self.colors = {
-                "bg": "#0f111a",           # Very dark background
-                "card_bg": "#1a1c25",      # Slightly lighter card background
-                "text": "#ffffff",         # Main white text
-                "subtitle": "#8a8d98",     # Secondary light gray text
-                "accent": "#8a2be2",       # Dark purple accent
-                "cpu": "#00ffff",          # Neon cyan for CPU
-                "ram": "#ff00ff",          # Neon magenta for RAM
-                "disk": "#7df9ff",         # Light cyan for Disk
-                "gpu": "#bf00ff",          # Bright purple for GPU
-                "border": "#2a2d3a",       # Card border color
-                "highlight": "#614BC0"     # Highlight color
-            }
-            
-            # Window configuration
-            self.roothwmn.configure(bg=self.colors["bg"])
-            
-            # Style configuration
-            style = ttk.Style()
-            style.theme_use('clam')
-            
-            # Progressbar styling
-            style.configure("CPU.Horizontal.TProgressbar", 
-                            troughcolor=self.colors["border"], 
-                            background=self.colors["cpu"])
-            
-            style.configure("RAM.Horizontal.TProgressbar", 
-                            troughcolor=self.colors["border"], 
-                            background=self.colors["ram"])
-                            
-            style.configure("Disk.Horizontal.TProgressbar", 
-                            troughcolor=self.colors["border"], 
-                            background=self.colors["disk"])
-                            
-            style.configure("GPU.Horizontal.TProgressbar", 
-                            troughcolor=self.colors["border"], 
-                            background=self.colors["gpu"])
-            
-            # Main frame
-            main_frame = tk.Frame(roothwmn, bg=self.colors["bg"], padx=20, pady=20)
-            main_frame.pack(fill=tk.BOTH, expand=True)
-            
-            # Header
-            header_frame = tk.Frame(main_frame, bg=self.colors["bg"])
-            header_frame.pack(fill=tk.X, pady=(0, 20))
-            
-            title_label = tk.Label(header_frame, 
-                                  text="HARDWARE·MONITOR", 
-                                  font=("Consolas", 24, "bold"), 
-                                  bg=self.colors["bg"], 
-                                  fg=self.colors["cpu"])
-            title_label.pack(side=tk.LEFT)
-            
-            # Display real time and additional data
-            time_frame = tk.Frame(header_frame, bg=self.colors["bg"])
-            time_frame.pack(side=tk.RIGHT)
-            
-            self.time_label = tk.Label(time_frame, 
-                                      text="", 
-                                      font=("Consolas", 12), 
-                                      bg=self.colors["bg"], 
-                                      fg=self.colors["ram"])
-            self.time_label.pack(side=tk.TOP, anchor=tk.E)
-            
-            self.uptime_label = tk.Label(time_frame, 
-                                        text="", 
-                                        font=("Consolas", 10), 
-                                        bg=self.colors["bg"], 
-                                        fg=self.colors["subtitle"])
-            self.uptime_label.pack(side=tk.TOP, anchor=tk.E)
-            
-            # Create grid for cards
-            resources_frame = tk.Frame(main_frame, bg=self.colors["bg"])
-            resources_frame.pack(fill=tk.BOTH, expand=True)
-            
-            # Grid layout for cards
-            resources_frame.columnconfigure(0, weight=1)
-            resources_frame.columnconfigure(1, weight=1)
-            resources_frame.rowconfigure(0, weight=1)
-            resources_frame.rowconfigure(1, weight=1)
-            
-            # Card dimensions - ensure all cards have the same size
-            card_width = 350
-            card_height = 200
-            
-            # CPU Card
-            self.cpu_card = self.create_card(resources_frame, "CPU", self.colors["cpu"], 0, 0, width=card_width, height=card_height)
-            
-            # RAM Card
-            self.ram_card = self.create_card(resources_frame, "RAM", self.colors["ram"], 0, 1, width=card_width, height=card_height)
-            
-            # Disk Card
-            self.disk_card = self.create_card(resources_frame, "STORAGE", self.colors["disk"], 1, 0, width=card_width, height=card_height)
-            
-            # GPU Card
-            if gpu_available:
-                self.gpu_card = self.create_card(resources_frame, "GPU", self.colors["gpu"], 1, 1, width=card_width, height=card_height)
-            else:
-                # If GPU is not available, create a network card
-                self.network_card = self.create_card(resources_frame, "NETWORK", self.colors["gpu"], 1, 1, width=card_width, height=card_height)
-                self.prev_net_io = psutil.net_io_counters()
-                self.network_speed = {"download": 0, "upload": 0}
-            
-            # Footer with advanced statistics
-            footer_frame = tk.Frame(main_frame, bg=self.colors["bg"], pady=10)
-            footer_frame.pack(fill=tk.X)
-            
-            # Processes
-            self.processes_label = tk.Label(footer_frame, 
-                                          text="Processes: 0", 
-                                          font=("Consolas", 10), 
-                                          bg=self.colors["bg"], 
-                                          fg=self.colors["text"])
-            self.processes_label.pack(side=tk.LEFT, padx=(0, 20))
-            
-            # Temperature (if available)
-            self.temp_label = tk.Label(footer_frame, 
-                                      text="", 
-                                      font=("Consolas", 10), 
-                                      bg=self.colors["bg"], 
-                                      fg=self.colors["text"])
-            self.temp_label.pack(side=tk.LEFT, padx=(0, 20))
-            
-            # Top processes
-            top_processes_frame = tk.Frame(main_frame, bg=self.colors["bg"], pady=10)
-            top_processes_frame.pack(fill=tk.X)
-            
-            top_label = tk.Label(top_processes_frame,
-                               text="TOP PROCESSES (CPU)",
-                               font=("Consolas", 10, "bold"),
-                               bg=self.colors["bg"],
-                               fg=self.colors["cpu"])
-            top_label.pack(anchor=tk.W)
-            
-            self.processes_info = tk.Label(top_processes_frame,
-                                         text="",
-                                         font=("Consolas", 9),
-                                         bg=self.colors["bg"],
-                                         fg=self.colors["text"],
-                                         justify=tk.LEFT)
-            self.processes_info.pack(anchor=tk.W, pady=(5, 0))
-            
-            # Thread for updating data
-            self.running = True
-            self.update_thread = threading.Thread(target=self.update_stats)
-            self.update_thread.daemon = True
-            self.update_thread.start()
-            
-            # When closing the window
-            self.roothwmn.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-        def create_card(self, parent, title, color, row, column, width=None, height=None):
-            # Card frame with fixed dimensions
-            card = tk.Frame(parent, bg=self.colors["card_bg"], padx=15, pady=15, 
-                           highlightbackground=color, highlightthickness=1, 
-                           relief=tk.FLAT, bd=0, width=width, height=height)
-            card.grid(row=row, column=column, padx=10, pady=10, sticky="nsew")
-            
-            # Ensure the card maintains its size
-            if width and height:
-                card.pack_propagate(False)
-            
-            # Card title with icon
-            title_frame = tk.Frame(card, bg=self.colors["card_bg"])
-            title_frame.pack(fill=tk.X, pady=(0, 10))
-            
-            title_label = tk.Label(title_frame, text=title, 
-                                  font=("Consolas", 16, "bold"), 
-                                  fg=color, bg=self.colors["card_bg"])
-            title_label.pack(side=tk.LEFT)
-            
-            value_label = tk.Label(title_frame, text="0%", 
-                                  font=("Consolas", 16), 
-                                  fg=self.colors["text"], bg=self.colors["card_bg"])
-            value_label.pack(side=tk.RIGHT)
-            
-            # Progress bar
-            if title == "CPU":
-                progress = ttk.Progressbar(card, style="CPU.Horizontal.TProgressbar", 
-                                         length=200, mode="determinate")
-            elif title == "RAM":
-                progress = ttk.Progressbar(card, style="RAM.Horizontal.TProgressbar", 
-                                         length=200, mode="determinate")
-            elif title == "STORAGE":
-                progress = ttk.Progressbar(card, style="Disk.Horizontal.TProgressbar", 
-                                         length=200, mode="determinate")
-            else:  # GPU or NETWORK
-                progress = ttk.Progressbar(card, style="GPU.Horizontal.TProgressbar", 
-                                         length=200, mode="determinate")
-            
-            progress.pack(fill=tk.X, pady=10)
-            
-            # Advanced: small histograms for history
-            history_frame = tk.Frame(card, bg=self.colors["card_bg"], height=30)
-            history_frame.pack(fill=tk.X, pady=(10, 5))
-            
-            # Create 20 small bars for history
-            history_bars = []
-            for i in range(20):
-                bar = tk.Frame(history_frame, width=8, bg=self.colors["border"])
-                bar.pack(side=tk.LEFT, padx=1)
-                bar.place(rely=1.0, relheight=0.1, x=i*10, anchor="sw", width=8)
-                history_bars.append(bar)
-            
-            # Info labels
-            info_frame = tk.Frame(card, bg=self.colors["card_bg"])
-            info_frame.pack(fill=tk.X, pady=5)
-            
-            info_label = tk.Label(info_frame, text="", 
-                                 font=("Consolas", 10), 
-                                 fg=self.colors["text"], bg=self.colors["card_bg"])
-            info_label.pack(anchor=tk.W)
-            
-            detail_label = tk.Label(info_frame, text="", 
-                                  font=("Consolas", 9), 
-                                  fg=self.colors["subtitle"], bg=self.colors["card_bg"])
-            detail_label.pack(anchor=tk.W, pady=(5, 0))
-            
-            # Extra label for advanced details
-            extra_label = tk.Label(info_frame, text="", 
-                                 font=("Consolas", 9), 
-                                 fg=self.colors["subtitle"], bg=self.colors["card_bg"])
-            extra_label.pack(anchor=tk.W, pady=(5, 0))
-            
-            return {
-                "frame": card,
-                "title": title_label,
-                "value": value_label,
-                "progress": progress,
-                "info": info_label,
-                "detail": detail_label,
-                "extra": extra_label,
-                "history": history_bars,
-                "history_data": [0] * 20  # Store history for the graph
-            }
-        
+            roothwmn.title("Hardware Monitor")
+            roothwmn.resizable(False, False)
+            roothwmn.configure(bg=HM_FACE)
+            self.custom_frame = HM_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.minimizing = False
+            self.on_top = tk.IntVar(value=1)          # as before: always on top (now it can be switched off)
+            self.events = queue.Queue()
+            self.stop = threading.Event()
+            self.cores = psutil.cpu_count() or 1
+            self.history = {name: [0.0] * HM_HISTORY for name in HM_LINES}
+            self.has_gpu = False
+            self.job = None
+            self.drive = (os.environ.get("SystemDrive", "C:") + "\\") if HM_IS_WINDOWS else "/"
+            self.last = {"time": time.time(), "net": psutil.net_io_counters(), "disk": self._disk_io()}
+            psutil.cpu_percent(interval=None)
+
+            self._build_titlebar()
+            self._build_menu()
+            self._build_body()
+            roothwmn.attributes("-topmost", True)
+            roothwmn.update_idletasks()
+            w, h = roothwmn.winfo_reqwidth(), roothwmn.winfo_reqheight()
+            roothwmn.geometry("+%d+%d" % (max(0, (roothwmn.winfo_screenwidth() - w) // 2),
+                                          max(0, (roothwmn.winfo_screenheight() - h) // 2)))
+            roothwmn.protocol("WM_DELETE_WINDOW", self.on_closing)
+            if self.custom_frame:
+                roothwmn.configure(bd=2, relief="raised")
+                roothwmn.after(10, self._enable_custom_frame)
+
+            threading.Thread(target=hm_background, args=(self.events, self.stop, self.cores), daemon=True).start()
+            self.update_stats()
+
+        # ===== Windows 95 frame =======================================================================
+        def _build_titlebar(self):
+            root = self.roothwmn
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = {"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"}
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if HM_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=HM_NAVY, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=HM_NAVY, bd=0, highlightthickness=0)
+            for i, h in enumerate((6, 10, 4, 12)):                                     # a little bar meter
+                icon.create_rectangle(1 + i * 4, 15 - h, 4 + i * 4, 15, fill="#00ff00", outline=HM_BLACK)
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Hardware Monitor", bg=HM_NAVY, fg=HM_LIGHT, font=HM_FONT_B, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, title, icon)
+            self.caption_button(bar, "close", self.on_closing).pack(side="right", padx=(2, 2))
+            self.caption_button(bar, "min", self._minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=HM_FACE, fg=HM_BLACK,
+                             activebackground=HM_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=HM_NAVY if active else HM_SHADOW)
+            self.caption_parts[1].config(fg=HM_LIGHT if active else HM_FACE)
+
+        def _enable_custom_frame(self):
+            self.roothwmn.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.roothwmn
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force(),
+                                    root.attributes("-topmost", bool(self.on_top.get()))))
+
+        def _on_map(self, event):
+            if event.widget is self.roothwmn and self.minimizing and self.roothwmn.state() == "normal":
+                self.minimizing = False
+                self.roothwmn.overrideredirect(True)
+                self.roothwmn.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.roothwmn.overrideredirect(False)
+            self.roothwmn.iconify()
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.roothwmn.winfo_x(), event.y_root - self.roothwmn.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame:
+                self.roothwmn.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        # ===== layout =================================================================================
+        def _build_menu(self):
+            bar = tk.Frame(self.roothwmn, bg=HM_FACE)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=HM_FONT, bg=HM_FACE, fg=HM_BLACK, activebackground=HM_NAVY,
+                                       activeforeground=HM_LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=HM_FONT, bg=HM_FACE, fg=HM_BLACK, activebackground=HM_NAVY,
+                               activeforeground=HM_LIGHT, selectcolor=HM_BLACK)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Exit", command=self.on_closing)
+            m = menubutton("View")
+            m.add_checkbutton(label="Always on Top", variable=self.on_top,
+                              command=lambda: self.roothwmn.attributes("-topmost", bool(self.on_top.get())))
+
+        def _card(self, parent, title, row, column):
+            card = tk.LabelFrame(parent, text=" %s " % title, font=HM_FONT, bg=HM_FACE, bd=2, relief="groove")
+            card.grid(row=row, column=column, padx=4, pady=4, sticky="nsew")
+            top = tk.Frame(card, bg=HM_FACE)
+            top.pack(fill="x", padx=8, pady=(4, 2))
+            value = tk.Label(top, text="0%", font=HM_FONT_BIG, bg=HM_FACE, width=6, anchor="w")
+            value.pack(side="left")
+            graph = tk.Canvas(top, width=170, height=44, bg=HM_BLACK, relief="sunken", bd=2, highlightthickness=0)
+            graph.pack(side="right")
+            bar = tk.Canvas(card, width=262, height=16, bg=HM_LIGHT, relief="sunken", bd=2, highlightthickness=0)
+            bar.pack(padx=8, pady=(2, 4), anchor="w")
+            lines = []
+            for _ in range(3):
+                label = tk.Label(card, text="", font=HM_FONT, bg=HM_FACE, anchor="w")
+                label.pack(fill="x", padx=8)
+                lines.append(label)
+            tk.Frame(card, bg=HM_FACE, height=4).pack()
+            return {"frame": card, "value": value, "graph": graph, "bar": bar, "lines": lines, "name": title}
+
+        def _build_body(self):
+            root = self.roothwmn
+            self.status = tk.Label(root, text="", font=HM_FONT, bg=HM_FACE, anchor="w", relief="sunken", bd=1, padx=4)
+            self.status.pack(side="bottom", fill="x", padx=2, pady=(4, 2))
+            body = tk.Frame(root, bg=HM_FACE)
+            body.pack(fill="both", expand=True, padx=6, pady=(4, 0))
+            self.grid = tk.Frame(body, bg=HM_FACE)
+            self.grid.pack(fill="x")
+            self.cards = {"CPU": self._card(self.grid, "CPU", 0, 0), "Memory": self._card(self.grid, "Memory", 0, 1),
+                          "Storage": self._card(self.grid, "Storage (%s)" % self.drive.rstrip("\\"), 1, 0),
+                          "Network": self._card(self.grid, "Network (Mb/s)", 1, 1)}
+            self.cards["Storage"]["name"] = "Storage"
+            self.cards["Network"]["name"] = "Network"
+
+            procs = tk.LabelFrame(body, text=" Top processes (CPU) ", font=HM_FONT, bg=HM_FACE, bd=2, relief="groove")
+            procs.pack(fill="x", padx=4, pady=(4, 0))
+            holder = tk.Frame(procs, bg=HM_LIGHT, bd=2, relief="sunken")
+            holder.pack(fill="x", padx=8, pady=6)
+            mono = tkfont.Font(root, family="Courier New", size=9)
+            char = mono.measure("0")
+            header = tk.Frame(holder, bg=HM_FACE)
+            header.pack(fill="x")
+            for title, chars in (("Name", 32), ("PID", 9), ("CPU", 9), ("Memory", 0)):
+                if chars:
+                    cell = tk.Frame(header, width=chars * char, height=18, bg=HM_FACE)
+                    cell.pack(side="left")
+                    cell.pack_propagate(False)
+                    parent = cell
+                else:
+                    parent = header
+                tk.Label(parent, text=title, font=HM_FONT, bg=HM_FACE, relief="raised", bd=1, anchor="w",
+                         padx=3).pack(side="left", fill="both", expand=True)
+            self.proc_list = tk.Listbox(holder, height=6, font=("Courier New", 9), bd=0, highlightthickness=0,
+                                        activestyle="none", selectbackground=HM_NAVY, selectforeground=HM_LIGHT)
+            self.proc_list.pack(fill="x")
+            self.proc_list.insert("end", " reading the process list...")
+
+        def _draw_bar(self, canvas, fraction):
+            canvas.delete("all")
+            width = int(canvas.cget("width"))
+            for i in range(int((width - 4) * max(0.0, min(1.0, fraction))) // 9):
+                canvas.create_rectangle(3 + i * 9, 3, 3 + i * 9 + 7, 15, fill=HM_NAVY, outline="")
+
+        def _draw_graph(self, card, key):
+            """Fix: a real line graph of the last 40 seconds (the old history bars all covered each other)."""
+            canvas = card["graph"]
+            canvas.delete("all")
+            width, height = 170, 44
+            for x in range(0, width, 17):
+                canvas.create_line(x, 0, x, height, fill="#004000")
+            for y in range(0, height, 11):
+                canvas.create_line(0, y, width, y, fill="#004000")
+            data = self.history[key]
+            step = width / (len(data) - 1)
+            points = []
+            for i, value in enumerate(data):
+                points += [i * step, height - 2 - min(100.0, value) / 100.0 * (height - 4)]
+            canvas.create_line(*points, fill=HM_LINES[key], width=2)
+
+        def _push(self, key, value):
+            self.history[key] = self.history[key][1:] + [value]
+
+        # ===== live values ============================================================================
+        def _disk_io(self):
+            try:
+                return psutil.disk_io_counters()
+            except Exception:
+                return None
+
         def update_stats(self):
-            # History data for graphs
-            history = {
-                "cpu": [0] * 20,
-                "ram": [0] * 20,
-                "disk": [0] * 20,
-                "gpu": [0] * 20 if gpu_available else None,
-                "network": None if gpu_available else [0] * 20
-            }
-            
-            while self.running:
-                # Update time
-                current_time = datetime.now().strftime("%H:%M:%S")
-                uptime_seconds = time.time() - psutil.boot_time()
-                uptime_days = int(uptime_seconds // 86400)
-                uptime_hours = int((uptime_seconds % 86400) // 3600)
-                uptime_minutes = int((uptime_seconds % 3600) // 60)
-                
-                # Update CPU
-                cpu_percent = psutil.cpu_percent(interval=0.1)
-                cpu_count_physical = psutil.cpu_count(logical=False)
-                cpu_count_logical = psutil.cpu_count()
-                
-                # Add data to history
-                history["cpu"].pop(0)
-                history["cpu"].append(cpu_percent)
-                
-                cpu_freq = psutil.cpu_freq()
-                if cpu_freq:
-                    cpu_freq_current = cpu_freq.current
-                    cpu_freq_min = cpu_freq.min if hasattr(cpu_freq, 'min') else "N/A"
-                    cpu_freq_max = cpu_freq.max if hasattr(cpu_freq, 'max') else "N/A"
-                else:
-                    cpu_freq_current = cpu_freq_min = cpu_freq_max = "N/A"
-                
-                # Update RAM
-                ram = psutil.virtual_memory()
-                ram_percent = ram.percent
-                ram_used = ram.used / (1024 ** 3)  # Convert to GB
-                ram_total = ram.total / (1024 ** 3)
-                ram_available = ram.available / (1024 ** 3)
-                ram_cached = ram.cached / (1024 ** 3) if hasattr(ram, 'cached') else 0
-                
-                # Add data to history
-                history["ram"].pop(0)
-                history["ram"].append(ram_percent)
-                
-                # Update Disk
-                disk = psutil.disk_usage('/')
-                disk_percent = disk.percent
-                disk_used = disk.used / (1024 ** 3)
-                disk_total = disk.total / (1024 ** 3)
-                
-                # IO Info
-                try:
-                    disk_io = psutil.disk_io_counters()
-                    disk_read_mb = disk_io.read_bytes / (1024 ** 2)
-                    disk_write_mb = disk_io.write_bytes / (1024 ** 2)
-                except:
-                    disk_read_mb = disk_write_mb = 0
-                
-                # Add data to history
-                history["disk"].pop(0)
-                history["disk"].append(disk_percent)
-                
-                # Process network information if we don't have GPU
-                if not gpu_available:
-                    net_io = psutil.net_io_counters()
-                    net_sent = (net_io.bytes_sent - self.prev_net_io.bytes_sent) / 1024  # KB/s
-                    net_recv = (net_io.bytes_recv - self.prev_net_io.bytes_recv) / 1024  # KB/s
-                    self.network_speed["upload"] = net_sent
-                    self.network_speed["download"] = net_recv
-                    self.prev_net_io = net_io
-                    
-                    # Add data to history (use download as primary value)
-                    net_percent = min(net_recv / 1000 * 100, 100)  # Limit to 100%
-                    history["network"].pop(0)
-                    history["network"].append(net_percent)
-                
-                # Processes
-                num_processes = len(psutil.pids())
-                
-                # Top 3 processes by CPU usage
-                top_processes = []
-                for proc in sorted(psutil.process_iter(['pid', 'name', 'cpu_percent']), 
-                                 key=lambda p: p.info['cpu_percent'] if p.info['cpu_percent'] is not None else 0, 
-                                 reverse=True)[:3]:
-                    try:
-                        if proc.info['cpu_percent'] > 0:
-                            top_processes.append(f"{proc.info['name'][:15]:<15} - {proc.info['cpu_percent']:>5.1f}%")
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                
-                # Temperatures (if available)
-                temp_info = ""
-                try:
-                    temps = psutil.sensors_temperatures()
-                    if temps:
-                        for name, entries in temps.items():
-                            for entry in entries:
-                                temp_info += f"{name}: {entry.current}°C | "
-                                break  # only the first temperature per sensor
-                except:
-                    pass
-                
-                # Update GUI (in the main thread)
-                self.roothwmn.after(10, self.update_gui, current_time, 
-                               uptime_days, uptime_hours, uptime_minutes,
-                               cpu_percent, cpu_count_physical, cpu_count_logical, 
-                               cpu_freq_current, cpu_freq_min, cpu_freq_max,
-                               ram_percent, ram_used, ram_total, ram_available, ram_cached,
-                               disk_percent, disk_used, disk_total, disk_read_mb, disk_write_mb,
-                               num_processes, top_processes, temp_info, history)
-                
-                # Update GPU (if available)
-                if gpu_available:
-                    try:
-                        gpus = GPUtil.getGPUs()
-                        if gpus:
-                            gpu = gpus[0]  # Use the first GPU
-                            gpu_percent = gpu.load * 100
-                            gpu_mem_percent = (gpu.memoryUsed / gpu.memoryTotal) * 100
-                            gpu_mem_used = gpu.memoryUsed
-                            gpu_mem_total = gpu.memoryTotal
-                            gpu_temp = gpu.temperature
-                            
-                            # Add data to history
-                            history["gpu"].pop(0)
-                            history["gpu"].append(gpu_percent)
-                            
-                            self.roothwmn.after(10, self.update_gpu_gui, 
-                                           gpu_percent, gpu_mem_percent, 
-                                           gpu_mem_used, gpu_mem_total, 
-                                           gpu.name, gpu_temp, history["gpu"])
-                    except Exception as e:
-                        print(f"Error updating GPU information: {e}")
-                else:
-                    # Update Network GUI if we don't have GPU
-                    self.roothwmn.after(10, self.update_network_gui, 
-                                   self.network_speed["download"], 
-                                   self.network_speed["upload"], 
-                                   history["network"])
-                
-                time.sleep(0.5)  # Update every 0.5 seconds
-        
-        def update_history_bars(self, history_bars, history_data, color):
-            # Update history bars
-            for i, value in enumerate(history_data):
-                # Calculate relative height (0.1 - 1.0) based on percentage (0-100)
-                height = max(0.1, value / 100)
-                # Update bar height and color
-                alpha = int(min(255, value * 2.55))  # 0-255 based on value
-                bar_color = color  # base color with alpha
-                history_bars[i].place(relheight=height, relwidth=1.0)
-        
-        def update_gui(self, current_time, uptime_days, uptime_hours, uptime_minutes,
-                      cpu_percent, cpu_count_physical, cpu_count_logical, 
-                      cpu_freq_current, cpu_freq_min, cpu_freq_max,
-                      ram_percent, ram_used, ram_total, ram_available, ram_cached,
-                      disk_percent, disk_used, disk_total, disk_read_mb, disk_write_mb,
-                      num_processes, top_processes, temp_info, history):
-            # Update time and uptime
-            self.time_label.config(text=f"{current_time}")
-            uptime_text = f"Uptime: "
-            if uptime_days > 0:
-                uptime_text += f"{uptime_days}d "
-            uptime_text += f"{uptime_hours}h {uptime_minutes}m"
-            self.uptime_label.config(text=uptime_text)
-            
-            # Update processes and temperature
-            self.processes_label.config(text=f"Processes: {num_processes}")
-            if temp_info:
-                self.temp_label.config(text=temp_info)
-            
-            # Update top processes
-            if top_processes:
-                self.processes_info.config(text="\n".join(top_processes))
-            
-            # Update CPU
-            self.cpu_card["value"].config(text=f"{cpu_percent:.1f}%")
-            self.cpu_card["progress"]["value"] = cpu_percent
-            self.cpu_card["info"].config(text=f"Physical: {cpu_count_physical} cores | Logical: {cpu_count_logical} threads")
-            
-            # Format for CPU frequency
-            freq_text = f"Frequency: {cpu_freq_current:.0f} MHz" if isinstance(cpu_freq_current, (int, float)) else f"Frequency: {cpu_freq_current}"
-            if isinstance(cpu_freq_min, (int, float)) and isinstance(cpu_freq_max, (int, float)):
-                self.cpu_card["extra"].config(text=f"Min: {cpu_freq_min:.0f} MHz | Max: {cpu_freq_max:.0f} MHz")
-            
-            self.cpu_card["detail"].config(text=freq_text)
-            
-            # Update CPU history bars
-            self.update_history_bars(self.cpu_card["history"], history["cpu"], self.colors["cpu"])
-            
-            # Update RAM
-            self.ram_card["value"].config(text=f"{ram_percent:.1f}%")
-            self.ram_card["progress"]["value"] = ram_percent
-            self.ram_card["info"].config(text=f"Used: {ram_used:.2f} GB of {ram_total:.2f} GB")
-            self.ram_card["detail"].config(text=f"Available: {ram_available:.2f} GB")
-            self.ram_card["extra"].config(text=f"Cache: {ram_cached:.2f} GB")
-            
-            # Update RAM history bars
-            self.update_history_bars(self.ram_card["history"], history["ram"], self.colors["ram"])
-            
-            # Update Disk
-            self.disk_card["value"].config(text=f"{disk_percent:.1f}%")
-            self.disk_card["progress"]["value"] = disk_percent
-            self.disk_card["info"].config(text=f"Used: {disk_used:.2f} GB of {disk_total:.2f} GB")
-            self.disk_card["detail"].config(text=f"Available: {disk_total - disk_used:.2f} GB")
-            self.disk_card["extra"].config(text=f"I/O: {disk_read_mb:.1f} MB read | {disk_write_mb:.1f} MB written")
-            
-            # Update Disk history bars
-            self.update_history_bars(self.disk_card["history"], history["disk"], self.colors["disk"])
-        
-        def update_gpu_gui(self, gpu_percent, gpu_mem_percent, gpu_mem_used, gpu_mem_total, gpu_name, gpu_temp, history_data):
-            if gpu_available:
-                self.gpu_card["value"].config(text=f"{gpu_percent:.1f}%")
-                self.gpu_card["progress"]["value"] = gpu_percent
-                self.gpu_card["info"].config(text=f"{gpu_name}")
-                self.gpu_card["detail"].config(text=f"Memory: {gpu_mem_used:.0f}/{gpu_mem_total:.0f} MB ({gpu_mem_percent:.1f}%)")
-                self.gpu_card["extra"].config(text=f"Temperature: {gpu_temp}°C")
-                
-                # Update GPU history bars
-                self.update_history_bars(self.gpu_card["history"], history_data, self.colors["gpu"])
-        
-        def update_network_gui(self, download_speed, upload_speed, history_data):
-            if not gpu_available:
-                # Calculate a relative percentage for the progress bar
-                # Assume 10 MB/s = 100%
-                download_percent = min(download_speed / 10000 * 100, 100)
-                
-                self.network_card["value"].config(text=f"{download_percent:.1f}%")
-                self.network_card["progress"]["value"] = download_percent
-                
-                # Format units of measurement
-                if download_speed > 1024:
-                    download_text = f"{download_speed/1024:.2f} MB/s"
-                else:
-                    download_text = f"{download_speed:.2f} KB/s"
-                    
-                if upload_speed > 1024:
-                    upload_text = f"{upload_speed/1024:.2f} MB/s"
-                else:
-                    upload_text = f"{upload_speed:.2f} KB/s"
-                
-                self.network_card["info"].config(text=f"Download: {download_text}")
-                self.network_card["detail"].config(text=f"Upload: {upload_text}")
-                
-                # Packet information
-                try:
-                    net_stats = psutil.net_io_counters()
-                    self.network_card["extra"].config(text=f"Packets: {net_stats.packets_recv} received | {net_stats.packets_sent} sent")
-                except:
-                    pass
-                
-                # Update Network history bars
-                self.update_history_bars(self.network_card["history"], history_data, self.colors["gpu"])
-        
+            """Every second, in the window's thread (psutil is instant for these)."""
+            self.job = None
+            now = time.time()
+            seconds = max(0.001, now - self.last["time"])
+
+            cpu = psutil.cpu_percent(interval=None)
+            freq = psutil.cpu_freq()
+            card = self.cards["CPU"]
+            self._push("CPU", cpu)
+            card["value"].config(text="%.0f%%" % cpu)
+            self._draw_bar(card["bar"], cpu / 100.0)
+            self._draw_graph(card, "CPU")
+            card["lines"][0].config(text="Physical: %s cores   Logical: %s threads" % (psutil.cpu_count(logical=False),
+                                                                                   self.cores))
+            if freq:
+                card["lines"][1].config(text="Frequency: %.0f MHz" % freq.current)
+                card["lines"][2].config(text="Min: %.0f MHz   Max: %.0f MHz" % (freq.min, freq.max)
+                                        if freq.max else "")
+
+            ram = psutil.virtual_memory()
+            card = self.cards["Memory"]
+            self._push("Memory", ram.percent)
+            card["value"].config(text="%.0f%%" % ram.percent)
+            self._draw_bar(card["bar"], ram.percent / 100.0)
+            self._draw_graph(card, "Memory")
+            card["lines"][0].config(text="Used: %s of %s" % (hm_size(ram.used), hm_size(ram.total)))
+            card["lines"][1].config(text="Available: %s" % hm_size(ram.available))
+            swap = psutil.swap_memory()
+            card["lines"][2].config(text="Swap: %s of %s used" % (hm_size(swap.used), hm_size(swap.total)))
+
+            card = self.cards["Storage"]
+            try:
+                disk = psutil.disk_usage(self.drive)
+                card["value"].config(text="%.0f%%" % disk.percent)
+                self._draw_bar(card["bar"], disk.percent / 100.0)
+                card["lines"][0].config(text="Used: %s of %s" % (hm_size(disk.used), hm_size(disk.total)))
+                card["lines"][1].config(text="Free: %s" % hm_size(disk.free))
+            except OSError as exc:
+                card["lines"][0].config(text="Can't read %s: %s" % (self.drive, exc))
+            io_now = self._disk_io()
+            if io_now is not None and self.last["disk"] is not None:
+                read = max(0, io_now.read_bytes - self.last["disk"].read_bytes) / seconds
+                write = max(0, io_now.write_bytes - self.last["disk"].write_bytes) / seconds
+                # Fix: real read / write speeds (it showed the totals since Windows started, as if they were rates)
+                card["lines"][2].config(text="Read: %s   Write: %s" % (hm_size(read, True), hm_size(write, True)))
+                busy = 0.0
+                if getattr(io_now, "busy_time", None) is not None and getattr(self.last["disk"], "busy_time", None):
+                    busy = min(100.0, (io_now.busy_time - self.last["disk"].busy_time) / (seconds * 10))
+                self._push("Storage", busy if busy else min(100.0, (read + write) / (100 * 2 ** 20) * 100))
+            self._draw_graph(card, "Storage")
+            self.last["disk"] = io_now
+
+            net = psutil.net_io_counters()
+            down = max(0, net.bytes_recv - self.last["net"].bytes_recv) / seconds    # Fix: per real second
+            up = max(0, net.bytes_sent - self.last["net"].bytes_sent) / seconds
+            card = self.cards["Network"]
+            mbits = 8 * down / 1e6
+            scale = next((s for s in (1, 10, 100, 1000, 10000) if mbits <= s), 10000)
+            self._push("Network", mbits / scale * 100)      # the graph scales to 1, 10, 100... Mb/s
+            card["value"].config(text="%.1f" % mbits if mbits < 100 else "%.0f" % mbits)
+            self._draw_bar(card["bar"], mbits / scale)
+            self._draw_graph(card, "Network")
+            card["lines"][0].config(text="Download: %s  (%.2f Mb/s)" % (hm_size(down, True), mbits))
+            card["lines"][1].config(text="Upload: %s  (%.2f Mb/s)" % (hm_size(up, True), 8 * up / 1e6))
+            card["lines"][2].config(text="Packets: %d received | %d sent   (scale %d Mb/s)" % (
+                net.packets_recv, net.packets_sent, scale))
+            self.last.update(time=now, net=net)
+
+            self._drain_events()
+            uptime = int(now - psutil.boot_time())
+            temps = self._temperatures()
+            self.status.config(text="%s   |   Up time %dd %dh %dm%s" % (
+                datetime.now().strftime("%H:%M:%S"), uptime // 86400, uptime % 86400 // 3600, uptime % 3600 // 60,
+                ("   |   " + temps) if temps else ""))
+            self.job = self.roothwmn.after(1000, self.update_stats)
+
+        def _temperatures(self):
+            try:
+                sensors = psutil.sensors_temperatures()          # not available on Windows
+            except AttributeError:
+                return ""
+            parts = []
+            for name, entries in (sensors or {}).items():
+                if entries:
+                    parts.append("%s %.0f\u00b0C" % (name, entries[0].current))
+            return "  ".join(parts[:3])
+
+        def _drain_events(self):
+            try:
+                while True:
+                    kind, data = self.events.get_nowait()
+                    if kind == "processes":
+                        self._show_processes(*data)
+                    elif kind == "gpus":
+                        self._show_gpus(data)
+            except queue.Empty:
+                pass
+
+        def _show_processes(self, count, rows):
+            self.proc_list.delete(0, "end")
+            for cpu, name, pid, memory in rows:
+                self.proc_list.insert("end", " %-31s %-8s %6.1f%%  %s" % (name[:31], pid, cpu, hm_size(memory)))
+            self.status_processes = count
+            self.cards["CPU"]["frame"].config(text=" CPU  -  %d processes " % count)
+
+        def _show_gpus(self, gpus):
+            """Fix: the GPU card appears only when an NVIDIA GPU really answers (not just when GPUtil is installed)."""
+            if not gpus:
+                return
+            if not self.has_gpu:
+                self.has_gpu = True
+                self.cards["GPU"] = self._card(self.grid, "GPU", 2, 0)
+                self.cards["GPU"]["frame"].grid(columnspan=2, sticky="ew")
+            gpu = gpus[0]
+            card = self.cards["GPU"]
+            self._push("GPU", gpu["load"])
+            card["value"].config(text="%.0f%%" % gpu["load"])
+            self._draw_bar(card["bar"], gpu["load"] / 100.0)
+            self._draw_graph(card, "GPU")
+            card["lines"][0].config(text=gpu["name"] + (("   (+%d more)" % (len(gpus) - 1)) if len(gpus) > 1 else ""))
+            if gpu["mem_used"] is not None and gpu["mem_total"]:
+                card["lines"][1].config(text="Memory: %.0f / %.0f MB (%.0f%%)" % (
+                    gpu["mem_used"], gpu["mem_total"], 100 * gpu["mem_used"] / gpu["mem_total"]))
+            card["lines"][2].config(text="Temperature: %s" % ("%.0f\u00b0C" % gpu["temp"] if gpu["temp"] is not None
+                                                              else "-"))
+
         def on_closing(self):
-            self.running = False
+            """Stops the sampling and the background thread, then closes (nothing is left waiting)."""
+            self.stop.set()
+            if self.job is not None:
+                try:
+                    self.roothwmn.after_cancel(self.job)
+                except tk.TclError:
+                    pass
+                self.job = None
             self.roothwmn.destroy()
+
 
     def main():
         roothwmn = tk.Tk()
-        app = CyberpunkSystemMonitor(roothwmn)
+        app = HardwareMonitor95(roothwmn)
         roothwmn.mainloop()
+        return app
+
 
     if __name__ == "__main__":
         main()
@@ -100984,116 +103678,452 @@ if kbbbvar == 5189:
             # Rularea buclei principale
             validation.mainloop()
 
-    import tkinter as tk
-    from tkinter import ttk, font, messagebox, colorchooser
-    import sqlite3
+    import os
     import json
+    import sqlite3
     from datetime import datetime
+    import tkinter as tk
+    from tkinter import font, colorchooser
+
+    KB_FACE, KB_SHADOW, KB_LIGHT, KB_NAVY, KB_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    KB_FONT = ("MS Sans Serif", 8)
+    KB_FONT_B = ("MS Sans Serif", 8, "bold")
+    KB_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+    KB_SIZES = ["8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "26", "28", "36", "48", "72"]
+    KB_BASIC_COLORS = [            # the 48 "Basic colors" of the Windows 95 Color dialog
+        "#FF8080", "#FFFF80", "#80FF80", "#00FF80", "#80FFFF", "#0080FF", "#FF80C0", "#FF80FF",
+        "#FF0000", "#FFFF00", "#80FF00", "#00FF40", "#00FFFF", "#0080C0", "#8080C0", "#FF00FF",
+        "#804040", "#FF8040", "#00FF00", "#008080", "#004080", "#8080FF", "#800040", "#FF0080",
+        "#800000", "#FF8000", "#008000", "#008040", "#0000FF", "#0000A0", "#800080", "#8000FF",
+        "#400000", "#804000", "#004000", "#004040", "#000080", "#000040", "#400040", "#400080",
+        "#000000", "#808000", "#808040", "#808080", "#408080", "#C0C0C0", "#400040", "#FFFFFF",
+    ]
 
 
     class Win95KnowledgeBase:
         def __init__(self, rootKBBB):
             self.rootKBBB = rootKBBB
             self.rootKBBB.title("Retro Knowledge Base")
-            self.rootKBBB.geometry("800x600")
+            self.rootKBBB.configure(bg=KB_FACE)
+            x = max(0, (rootKBBB.winfo_screenwidth() - 860) // 2)
+            y = max(0, (rootKBBB.winfo_screenheight() - 620) // 2)
+            self.rootKBBB.geometry("860x620+%d+%d" % (x, y))
+            self.rootKBBB.minsize(640, 420)
 
             # Windows 95 colors
-            self.win95_bg = "#c0c0c0"
-            self.win95_button = "#c0c0c0"
-            self.win95_text_bg = "#ffffff"
-            self.win95_text_fg = "#000000"
-            self.win95_active = "#000080"
-
+            self.win95_bg = KB_FACE
+            self.win95_button = KB_FACE
+            self.win95_text_bg = KB_LIGHT
+            self.win95_text_fg = KB_BLACK
+            self.win95_active = KB_NAVY
             self.default_font = font.Font(family="MS Sans Serif", size=10)
-
-            self.rootKBBB.configure(bg=self.win95_bg)
+            self._fonts = {}                   # Fix: one font per style, reused (a new one was made every time)
 
             self.db_path = "Config/dbo_bitpack.db"
-
             self.procedures = {}
             self.current_procedure = None
+            self.db_names = {}                 # procedure -> its name in the database (None = not saved yet)
+            self.saved_state = {}              # procedure -> what is in the database (to know what changed)
+            self.list_names = []               # the names shown in the list, in order
+            self.custom_frame = KB_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
 
             self.create_ui()
             self.load_all_procedures()
-
             if not self.procedures:
                 self.new_procedure()
 
-        # ──────────────────────────────────────────────────────────────
-        # DATABASE
-        # ──────────────────────────────────────────────────────────────
+            self.rootKBBB.protocol("WM_DELETE_WINDOW", self.exit_app)
+            self.rootKBBB.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            if self.custom_frame:
+                self.rootKBBB.configure(bd=2, relief="raised")
+                self.rootKBBB.after(10, self._enable_custom_frame)
+
+        # ══════════════════════════════════════════════════════════════
+        # WINDOWS 95 FRAME
+        # ══════════════════════════════════════════════════════════════
+
+        def _build_titlebar(self):
+            root = self.rootKBBB
+            marlett = "Marlett" in font.families(root)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if KB_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=KB_NAVY, height=20)
+            bar.pack(side=tk.TOP, fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=KB_NAVY, bd=0, highlightthickness=0)
+            icon.create_rectangle(2, 2, 13, 15, fill="#800000", outline=KB_BLACK)          # a book
+            icon.create_rectangle(4, 2, 13, 13, fill="#ffff80", outline=KB_BLACK)
+            icon.create_line(6, 5, 11, 5, fill=KB_BLACK)
+            icon.create_line(6, 8, 11, 8, fill=KB_BLACK)
+            icon.pack(side=tk.LEFT, padx=(2, 3))
+            title = tk.Label(bar, text="Retro Knowledge Base", bg=KB_NAVY, fg=KB_LIGHT, font=KB_FONT_B, anchor="w")
+            title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.caption_parts = (bar, title, icon)
+            self.caption_button(bar, "close", self.exit_app).pack(side=tk.RIGHT, padx=(2, 2))
+            self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+            self.btn_max.pack(side=tk.RIGHT)
+            self.caption_button(bar, "min", self._minimize).pack(side=tk.RIGHT)
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=KB_FACE, fg=KB_BLACK,
+                             activebackground=KB_FACE, relief=tk.RAISED, bd=2, highlightthickness=0, takefocus=0)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=KB_NAVY if active else KB_SHADOW)
+            self.caption_parts[1].config(fg=KB_LIGHT if active else KB_FACE)
+
+        def _enable_custom_frame(self):
+            self.rootKBBB.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootKBBB
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootKBBB
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootKBBB.overrideredirect(False)
+            self.rootKBBB.iconify()
+
+        def toggle_maximize(self):
+            root = self.rootKBBB
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if KB_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            if hasattr(self, "btn_max"):
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.rootKBBB.winfo_x(), event.y_root - self.rootKBBB.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.rootKBBB.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _grip_press(self, event):
+            self._resize = (event.x_root, event.y_root, self.rootKBBB.winfo_width(), self.rootKBBB.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.rootKBBB.geometry("%dx%d" % (max(640, width + event.x_root - x0), max(420, height + event.y_root - y0)))
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it. A click in a text field gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        # ══════════════════════════════════════════════════════════════
+        # WINDOWS 95 DIALOGS (always in front)
+        # ══════════════════════════════════════════════════════════════
+
+        def _dialog_window(self, title):
+            root = self.rootKBBB
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=KB_FACE, bd=2, relief=tk.RAISED)
+            win.transient(root)
+            win.attributes("-topmost", True)
+            bar = tk.Frame(win, bg=KB_NAVY, height=20)
+            bar.pack(fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=KB_NAVY, fg=KB_LIGHT, font=KB_FONT_B).pack(side=tk.LEFT, padx=4)
+            close_button = self.caption_button(bar, "close", win.destroy)
+            close_button.pack(side=tk.RIGHT, padx=2)
+            return win, close_button
+
+        def _run_modal(self, win):
+            """Show a dialog centred in front of the window and wait until it closes."""
+            root = self.rootKBBB
+            try:
+                previous = root.focus_get()
+            except (KeyError, tk.TclError):
+                previous = None
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+            root.wait_window(win)
+            try:
+                (previous if previous is not None and previous.winfo_exists() else root).focus_force()
+            except tk.TclError:
+                pass
+
+        def _button(self, parent, text, command, width=10, default=False):
+            return tk.Button(parent, text=text, command=command, width=width, font=KB_FONT_B if default else KB_FONT,
+                             bg=KB_FACE, fg=KB_BLACK, activebackground=KB_FACE, relief=tk.RAISED, bd=2,
+                             highlightthickness=1 if default else 0, highlightbackground=KB_BLACK, takefocus=0)
+
+        def message(self, title, text, icon="info", buttons=("OK",), default=0):
+            """Modal Windows 95 message box. Returns the pressed button."""
+            win, close_button = self._dialog_window(title)
+            result = {"value": buttons[-1] if len(buttons) > 1 else None}
+
+            def answer(value):
+                result["value"] = value
+                win.destroy()
+
+            close_button.config(command=lambda: answer(buttons[-1]))
+            body = tk.Frame(win, bg=KB_FACE)
+            body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(12, 6))
+            picture = tk.Canvas(body, width=32, height=32, bg=KB_FACE, highlightthickness=0)
+            if icon == "error":
+                picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                picture.create_line(22, 10, 10, 22, fill="white", width=3)
+            elif icon == "warning":
+                picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=KB_BLACK)
+                picture.create_text(16, 19, text="!", fill=KB_BLACK, font=("Times New Roman", 15, "bold"))
+            else:
+                picture.create_oval(2, 2, 30, 30, fill=KB_LIGHT, outline=KB_BLACK)
+                picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                    font=("Times New Roman", 16, "bold"))
+            picture.pack(side=tk.LEFT, anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=KB_FACE, font=KB_FONT, justify="left", wraplength=360).pack(side=tk.LEFT)
+            row = tk.Frame(win, bg=KB_FACE)
+            row.pack(pady=(4, 12))
+            for index, label in enumerate(buttons):
+                self._button(row, label, lambda v=label: answer(v), width=9, default=index == default).pack(
+                    side=tk.LEFT, padx=4)
+            win.bind("<Return>", lambda e: answer(buttons[default]))
+            win.bind("<Escape>", lambda e: answer(buttons[-1]))
+            self._run_modal(win)
+            return result["value"]
+
+        def choose_color(self, title):
+            """The Windows 95 Color dialog: 48 basic colors, plus More Colors... for any other."""
+            win, close_button = self._dialog_window(title)
+            result = {"color": None}
+            chosen = {"color": None, "cell": None}
+            body = tk.Frame(win, bg=KB_FACE)
+            body.pack(padx=12, pady=(10, 4))
+            tk.Label(body, text="Basic colors:", font=KB_FONT, bg=KB_FACE, anchor="w", underline=0).grid(
+                row=0, column=0, columnspan=8, sticky="w", pady=(0, 4))
+            cells = []
+
+            def pick(color, cell):
+                if chosen["cell"] is not None:
+                    chosen["cell"].config(highlightbackground=KB_FACE)
+                chosen.update(color=color, cell=cell)
+                cell.config(highlightbackground=KB_BLACK)
+                preview.config(bg=color)
+
+            for index, color in enumerate(KB_BASIC_COLORS):
+                cell = tk.Frame(body, bg=color, width=22, height=18, bd=2, relief=tk.SUNKEN, highlightthickness=2,
+                                highlightbackground=KB_FACE)
+                cell.grid(row=1 + index // 8, column=index % 8, padx=2, pady=2)
+                cell.bind("<Button-1>", lambda e, c=color, w=cell: pick(c, w))
+                cell.bind("<Double-Button-1>", lambda e, c=color, w=cell: (pick(c, w), finish()))
+                cells.append(cell)
+            bottom = tk.Frame(body, bg=KB_FACE)
+            bottom.grid(row=8, column=0, columnspan=8, sticky="ew", pady=(8, 0))
+            tk.Label(bottom, text="Color:", font=KB_FONT, bg=KB_FACE).pack(side=tk.LEFT)
+            preview = tk.Frame(bottom, bg=KB_FACE, width=60, height=22, bd=2, relief=tk.SUNKEN)
+            preview.pack(side=tk.LEFT, padx=6)
+
+            def finish():
+                result["color"] = chosen["color"]
+                win.destroy()
+
+            def more():
+                color = colorchooser.askcolor(title=title, parent=self.rootKBBB, color=chosen["color"])[1]
+                if color:
+                    chosen.update(color=color)
+                    preview.config(bg=color)
+
+            buttons = tk.Frame(win, bg=KB_FACE)
+            buttons.pack(fill=tk.X, padx=12, pady=(6, 12))
+            self._button(buttons, "OK", finish, width=8, default=True).pack(side=tk.LEFT)
+            self._button(buttons, "Cancel", win.destroy, width=8).pack(side=tk.LEFT, padx=6)
+            self._button(buttons, "More Colors...", more, width=13).pack(side=tk.RIGHT)
+            win.bind("<Return>", lambda e: finish())
+            win.bind("<Escape>", lambda e: win.destroy())
+            self._run_modal(win)
+            return result["color"]
+
+        # ══════════════════════════════════════════════════════════════
+        # DATABASE (table kb_retro_procedures, made by setup_database_ALL)
+        # ══════════════════════════════════════════════════════════════
+
+        def _state_of(self, name):
+            data = self.procedures[name]
+            return (data["title"], data["content"], json.dumps(data["tags"]))
 
         def load_all_procedures(self):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name, title, content, tags FROM kb_retro_procedures ORDER BY name"
-            )
-            rows = cursor.fetchall()
-            conn.close()
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name, title, content, tags FROM kb_retro_procedures ORDER BY name"
+                )
+                rows = cursor.fetchall()
+                conn.close()
+            except sqlite3.Error as e:         # Fix: a missing table no longer stops the tool at start
+                self.rootKBBB.after(300, lambda e=e: self.message(
+                    "Knowledge Base",
+                    "The procedures could not be read from %s:\n%s\n\nRun the database setup of Bitpack "
+                    "(setup_database_ALL) so the table kb_retro_procedures exists." % (self.db_path, e), "warning"))
+                rows = []
 
             self.procedures = {}
             for name, title, content, tags_json in rows:
-                tags = json.loads(tags_json) if tags_json else []
-                self.procedures[name] = {
-                    "title": title,
-                    "content": content or "",
-                    "tags": tags,
-                }
+                try:
+                    tags = json.loads(tags_json) if tags_json else []
+                except ValueError:
+                    tags = []
+                content = content or ""
+                if content.endswith("\n"):     # Fix: the newline every old save added at the end
+                    content = content.rstrip("\n")
+                self.procedures[name] = {"title": title or name, "content": content, "tags": tags}
+                self.db_names[name] = name
+                self.saved_state[name] = self._state_of(name)
 
             self.update_procedure_list()
-
             if self.procedures:
-                self.current_procedure = list(self.procedures.keys())[0]
+                self.current_procedure = sorted(self.procedures.keys())[0]
                 self.load_procedure(self.current_procedure)
+                self.update_procedure_list()
 
-        def save_procedure_to_db(self):
-            if not self.current_procedure:
-                return
-            self.save_procedure()
-
-            proc_data = self.procedures[self.current_procedure]
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            try:
-                tags_json = json.dumps(proc_data["tags"])
+        def _write_procedure(self, cursor, name):
+            """Insert or update one procedure; a renamed one updates its own row (it was duplicated before)."""
+            proc_data = self.procedures[name]
+            tags_json = json.dumps(proc_data["tags"])
+            now = datetime.now().isoformat()
+            old_name = self.db_names.get(name)
+            if old_name is not None:
                 cursor.execute(
-                    "SELECT id FROM kb_retro_procedures WHERE name = ?",
-                    (self.current_procedure,),
+                    "UPDATE kb_retro_procedures SET name=?, title=?, content=?, tags=?, modified_at=? WHERE name=?",
+                    (name, proc_data["title"], proc_data["content"], tags_json, now, old_name),
                 )
-                exists = cursor.fetchone()
-                now = datetime.now().isoformat()
-                if exists:
-                    cursor.execute(
-                        "UPDATE kb_retro_procedures SET title=?, content=?, tags=?, modified_at=? WHERE name=?",
-                        (proc_data["title"], proc_data["content"], tags_json, now, self.current_procedure),
-                    )
-                else:
-                    cursor.execute(
-                        "INSERT INTO kb_retro_procedures (name, title, content, tags, created_at, modified_at) VALUES (?,?,?,?,?,?)",
-                        (self.current_procedure, proc_data["title"], proc_data["content"], tags_json, now, now),
-                    )
+                if cursor.rowcount:
+                    return
+            cursor.execute(
+                "INSERT INTO kb_retro_procedures (name, title, content, tags, created_at, modified_at) VALUES (?,?,?,?,?,?)",
+                (name, proc_data["title"], proc_data["content"], tags_json, now, now),
+            )
+
+        def save_procedure_to_db(self, names=None):
+            """Saves the current procedure (or the given ones). Returns True when everything was saved."""
+            if not self.current_procedure:
+                return True
+            if not self.save_procedure():
+                return False
+            names = names or [self.current_procedure]
+            try:
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                for name in names:
+                    self._write_procedure(cursor, name)
                 conn.commit()
-                self.status_bar.config(text=f"Procedure '{self.current_procedure}' saved to database")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save to database: {str(e)}")
-            finally:
                 conn.close()
+            except sqlite3.Error as e:
+                self.message("Error", "Failed to save to database:\n%s" % e, "error")
+                return False
+            for name in names:
+                self.db_names[name] = name
+                self.saved_state[name] = self._state_of(name)
+            self.update_procedure_list()
+            self.status_bar.config(text=("Procedure '%s' saved to database" % names[0]) if len(names) == 1
+                                   else "%d procedures saved to database" % len(names))
+            return True
+
+        def save_all(self):
+            self.save_procedure()
+            changed = self.unsaved_procedures()
+            if not changed:
+                self.status_bar.config(text="Everything is already saved.")
+                return True
+            return self.save_procedure_to_db(changed)
 
         def delete_procedure_from_db(self, proc_name):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
+            db_name = self.db_names.get(proc_name)
+            if db_name is None:
+                return True                       # never saved: nothing to delete in the database
             try:
-                cursor.execute("DELETE FROM kb_retro_procedures WHERE name = ?", (proc_name,))
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM kb_retro_procedures WHERE name = ?", (db_name,))
                 conn.commit()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to delete from database: {str(e)}")
-            finally:
                 conn.close()
+                return True
+            except sqlite3.Error as e:
+                self.message("Error", "Failed to delete from database:\n%s" % e, "error")
+                return False
 
-        # ──────────────────────────────────────────────────────────────
-        # TAG SERIALIZATION / DESERIALIZATION
-        # ──────────────────────────────────────────────────────────────
+        def unsaved_procedures(self):
+            return [name for name in self.procedures
+                    if self.db_names.get(name) is None or self.saved_state.get(name) != self._state_of(name)]
+
+        # ══════════════════════════════════════════════════════════════
+        # TAG SERIALIZATION / DESERIALIZATION (same format as before)
+        # ══════════════════════════════════════════════════════════════
 
         def _serialize_tags(self):
             """
@@ -101102,31 +104132,22 @@ if kbbbvar == 5189:
             """
             tags = []
             for tag_name in self.text_editor.tag_names():
-                if tag_name == "sel":
+                if tag_name == "sel" or tag_name == "found":
                     continue
-
                 ranges = self.text_editor.tag_ranges(tag_name)
                 if not ranges:
                     continue
-
-                # Extract formatting info encoded in the tag name
-                bold = False
-                italic = False
-                underline = False
-                size = None
-                fg = None
-                bg = None
-
+                bold = italic = underline = False
+                size = fg = bg = None
                 if tag_name.startswith("fmt_"):
-                    # format: fmt_<B0or1><I0or1><U0or1>_<size>
                     try:
-                        rest = tag_name[4:]   # e.g. "B1I0U1_12"
+                        rest = tag_name[4:]
                         parts = rest.split("_")
-                        flags = parts[0]       # "B1I0U1"
-                        bold    = flags[1] == "1"
-                        italic  = flags[3] == "1"
+                        flags = parts[0]
+                        bold = flags[1] == "1"
+                        italic = flags[3] == "1"
                         underline = flags[5] == "1"
-                        size    = int(parts[1])
+                        size = int(parts[1])
                     except Exception:
                         pass
                 elif tag_name.startswith("fg_"):
@@ -101134,22 +104155,21 @@ if kbbbvar == 5189:
                 elif tag_name.startswith("bg_"):
                     bg = tag_name[3:]
                 else:
-                    # Legacy / unknown tag – skip silently
                     continue
-
                 for i in range(0, len(ranges), 2):
                     tags.append({
-                        "name": tag_name,
-                        "start": str(ranges[i]),
-                        "end": str(ranges[i + 1]),
-                        "bold": bold,
-                        "italic": italic,
-                        "underline": underline,
-                        "size": size,
-                        "fg": fg,
-                        "bg": bg,
+                        "name": tag_name, "start": str(ranges[i]), "end": str(ranges[i + 1]),
+                        "bold": bold, "italic": italic, "underline": underline, "size": size, "fg": fg, "bg": bg,
                     })
             return tags
+
+        def _font_for(self, bold, italic, size):
+            key = (bold, italic, size or 10)
+            if key not in self._fonts:
+                self._fonts[key] = font.Font(family="MS Sans Serif", size=size or 10,
+                                             weight="bold" if bold else "normal",
+                                             slant="italic" if italic else "roman")
+            return self._fonts[key]
 
         def _apply_tag(self, tag_name, start, end, bold=False, italic=False, underline=False,
                        size=None, fg=None, bg=None):
@@ -101160,42 +104180,31 @@ if kbbbvar == 5189:
             if bg:
                 kwargs["background"] = bg
             if bold or italic or size is not None:
-                f = font.Font(
-                    family="MS Sans Serif",
-                    size=size or 10,
-                    weight="bold" if bold else "normal",
-                    slant="italic" if italic else "roman",
-                )
-                kwargs["font"] = f
+                kwargs["font"] = self._font_for(bold, italic, size)
             if underline:
                 kwargs["underline"] = True
-
             self.text_editor.tag_configure(tag_name, **kwargs)
             self.text_editor.tag_add(tag_name, start, end)
+            self.text_editor.tag_raise("sel")
 
         def _deserialize_tags(self, tags):
-            """Apply a list of serialised tag dicts back to the text widget."""
             for t in tags:
                 fg = t.get("fg")
                 bg = t.get("bg")
-                # Ensure colors have # prefix
                 if fg and not fg.startswith("#"):
                     fg = "#" + fg
                 if bg and not bg.startswith("#"):
                     bg = "#" + bg
-                self._apply_tag(
-                    t["name"], t["start"], t["end"],
-                    bold=t.get("bold", False),
-                    italic=t.get("italic", False),
-                    underline=t.get("underline", False),
-                    size=t.get("size"),
-                    fg=fg,
-                    bg=bg,
-                )
+                try:
+                    self._apply_tag(t["name"], t["start"], t["end"], bold=t.get("bold", False),
+                                    italic=t.get("italic", False), underline=t.get("underline", False),
+                                    size=t.get("size"), fg=fg, bg=bg)
+                except (tk.TclError, KeyError):
+                    continue
 
-        # ──────────────────────────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════
         # FORMATTING HELPERS
-        # ──────────────────────────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════
 
         def _get_selection(self):
             try:
@@ -101213,106 +104222,126 @@ if kbbbvar == 5189:
             return f"fmt_B{int(bold)}I{int(italic)}U{int(underline)}_{size}"
 
         def _get_fmt_at(self, index):
-            """Return (bold, italic, underline, size) reading the first fmt_ tag at index."""
             bold = italic = underline = False
-            size = self._current_size()
+            size = 10
             for tag in self.text_editor.tag_names(index):
                 if tag.startswith("fmt_"):
                     try:
-                        rest = tag[4:]
-                        parts = rest.split("_")
+                        parts = tag[4:].split("_")
                         flags = parts[0]
-                        bold      = flags[1] == "1"
-                        italic    = flags[3] == "1"
-                        underline = flags[5] == "1"
-                        size      = int(parts[1])
+                        bold, italic, underline = flags[1] == "1", flags[3] == "1", flags[5] == "1"
+                        size = int(parts[1])
                     except Exception:
                         pass
                     break
             return bold, italic, underline, size
 
         def _apply_fmt(self, start, end, bold, italic, underline, size):
-            # Remove any existing fmt_ tags in range
             for tag in list(self.text_editor.tag_names()):
                 if tag.startswith("fmt_"):
                     self.text_editor.tag_remove(tag, start, end)
+            self._apply_tag(self._fmt_tag_name(bold, italic, underline, size), start, end,
+                            bold=bold, italic=italic, underline=underline, size=size)
+            self._changed()
 
-            tag_name = self._fmt_tag_name(bold, italic, underline, size)
-            self._apply_tag(tag_name, start, end, bold=bold, italic=italic,
-                            underline=underline, size=size)
+        def _need_selection(self, what):
+            start, end = self._get_selection()
+            if not start:
+                self.status_bar.config(text="Select text to apply %s." % what)
+            return start, end
 
         def toggle_bold(self):
-            start, end = self._get_selection()
-            if not start:
-                self.status_bar.config(text="Select text to apply Bold.")
-                return
-            b, i, u, s = self._get_fmt_at(start)
-            self._apply_fmt(start, end, not b, i, u, s)
+            start, end = self._need_selection("Bold")
+            if start:
+                b, i, u, s = self._get_fmt_at(start)
+                self._apply_fmt(start, end, not b, i, u, s)
+            return "break"
 
         def toggle_italic(self):
-            start, end = self._get_selection()
-            if not start:
-                self.status_bar.config(text="Select text to apply Italic.")
-                return
-            b, i, u, s = self._get_fmt_at(start)
-            self._apply_fmt(start, end, b, not i, u, s)
+            start, end = self._need_selection("Italic")
+            if start:
+                b, i, u, s = self._get_fmt_at(start)
+                self._apply_fmt(start, end, b, not i, u, s)
+            return "break"
 
         def toggle_underline(self):
-            start, end = self._get_selection()
-            if not start:
-                self.status_bar.config(text="Select text to apply Underline.")
-                return
-            b, i, u, s = self._get_fmt_at(start)
-            self._apply_fmt(start, end, b, i, not u, s)
+            start, end = self._need_selection("Underline")
+            if start:
+                b, i, u, s = self._get_fmt_at(start)
+                self._apply_fmt(start, end, b, i, not u, s)
+            return "break"
 
-        def change_font_size(self, event=None):
-            start, end = self._get_selection()
-            if not start:
-                self.status_bar.config(text="Select text to change font size.")
-                return
-            b, i, u, _ = self._get_fmt_at(start)
-            self._apply_fmt(start, end, b, i, u, self._current_size())
+        def change_font_size(self, *_args):
+            start, end = self._need_selection("a font size")
+            if start:
+                b, i, u, _ = self._get_fmt_at(start)
+                self._apply_fmt(start, end, b, i, u, self._current_size())
 
         def choose_text_color(self):
-            color = colorchooser.askcolor(title="Choose text color")[1]
-            if not color:
-                return
-            start, end = self._get_selection()
+            start, end = self._need_selection("a color")
             if not start:
-                self.status_bar.config(text="Select text to apply color.")
                 return
-            tag_name = f"fg_{color.replace('#', '')}"
-            self._apply_tag(tag_name, start, end, fg=color)
+            color = self.choose_color("Text Color")
+            if color:
+                self.text_editor.tag_add(tk.SEL, start, end)
+                self._apply_tag("fg_%s" % color.replace("#", ""), start, end, fg=color)
+                self._changed()
 
         def choose_bg_color(self):
-            color = colorchooser.askcolor(title="Choose background color")[1]
-            if not color:
-                return
-            start, end = self._get_selection()
+            start, end = self._need_selection("a highlight color")
             if not start:
-                self.status_bar.config(text="Select text to apply BG color.")
                 return
-            tag_name = f"bg_{color.replace('#', '')}"
-            self._apply_tag(tag_name, start, end, bg=color)
+            color = self.choose_color("Highlight Color")
+            if color:
+                self.text_editor.tag_add(tk.SEL, start, end)
+                self._apply_tag("bg_%s" % color.replace("#", ""), start, end, bg=color)
+                self._changed()
 
-        # ──────────────────────────────────────────────────────────────
+        def clear_formatting(self):
+            start, end = self._need_selection("Clear Formatting")
+            if start:
+                for tag in list(self.text_editor.tag_names()):
+                    if tag.startswith(("fmt_", "fg_", "bg_")):
+                        self.text_editor.tag_remove(tag, start, end)
+                self._changed()
+
+        # ══════════════════════════════════════════════════════════════
         # PROCEDURE MANAGEMENT
-        # ──────────────────────────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════
+
+        def _changed(self, *_args):
+            self.rootKBBB.after_idle(self._refresh_modified)
+
+        def _refresh_modified(self):
+            if not self.current_procedure or self.current_procedure not in self.procedures:
+                return
+            data = self.procedures[self.current_procedure]
+            now = (self.title_entry.get().strip() or self.current_procedure, self.text_editor.get("1.0", "end-1c"))
+            dirty = (self.db_names.get(self.current_procedure) is None or
+                     now != (data["title"], data["content"]) or
+                     self.saved_state.get(self.current_procedure) != self._state_of(self.current_procedure) or
+                     json.dumps(self._serialize_tags()) != json.dumps(data["tags"]))
+            self.modified_label.config(text="Modified" if dirty or self.unsaved_procedures() else "")
 
         def new_procedure(self):
+            if self.current_procedure and not self.save_procedure():   # Fix: the current edits are kept first
+                return
             count = 1
             while f"Procedure {count}" in self.procedures:
                 count += 1
-            self.current_procedure = f"Procedure {count}"
-            self.procedures[self.current_procedure] = {
-                "title": self.current_procedure,
-                "content": "",
-                "tags": [],
-            }
-            self.update_procedure_list()
+            name = f"Procedure {count}"
+            self._create(name)
+
+        def _create(self, name):
+            self.current_procedure = name
+            self.procedures[name] = {"title": name, "content": "", "tags": []}
+            self.db_names[name] = None
             self.clear_editor()
-            self.title_entry.insert(0, self.current_procedure)
-            self.status_bar.config(text=f"New procedure '{self.current_procedure}' created")
+            self.title_entry.insert(0, name)
+            self.update_procedure_list()
+            self.status_bar.config(text=f"New procedure '{name}' created (not saved yet)")
+            self.text_editor.focus_set()
+            self._changed()
 
         def add_new_procedure(self):
             name = self.new_procedure_name.get().strip()
@@ -101320,40 +104349,44 @@ if kbbbvar == 5189:
                 self.status_bar.config(text="Enter a name for the new procedure.")
                 return
             if name in self.procedures:
-                messagebox.showwarning("Warning", "A procedure with this name already exists")
+                self.message("Knowledge Base", "A procedure with this name already exists.", "warning")
                 return
-            if self.current_procedure:
-                self.save_procedure()
-            self.current_procedure = name
-            self.procedures[name] = {"title": name, "content": "", "tags": []}
-            self.update_procedure_list()
-            self.clear_editor()
-            self.title_entry.insert(0, name)
+            if self.current_procedure and not self.save_procedure():
+                return
             self.new_procedure_name.delete(0, tk.END)
-            self.status_bar.config(text=f"New procedure '{name}' created")
+            self._create(name)
 
         def update_procedure_list(self):
+            unsaved = set(self.unsaved_procedures())
+            query = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
+            names = sorted(self.procedures.keys(), key=str.lower)
+            if query:
+                names = [n for n in names if query in n.lower() or query in self.procedures[n]["content"].lower()
+                         or query in (self.procedures[n]["title"] or "").lower() or n == self.current_procedure]
+            self.list_names = names
             self.procedure_listbox.delete(0, tk.END)
-            for proc in sorted(self.procedures.keys()):
-                self.procedure_listbox.insert(tk.END, proc)
-            if self.current_procedure:
-                for i, proc in enumerate(sorted(self.procedures.keys())):
-                    if proc == self.current_procedure:
-                        self.procedure_listbox.selection_set(i)
-                        self.procedure_listbox.see(i)
-                        break
+            for name in names:
+                self.procedure_listbox.insert(tk.END, (" * " if name in unsaved else "   ") + name)
+            if self.current_procedure in names:
+                index = names.index(self.current_procedure)
+                self.procedure_listbox.selection_set(index)
+                self.procedure_listbox.see(index)
+            self.count_label.config(text="%d procedure(s)" % len(self.procedures))
+            self.modified_label.config(text="Modified" if unsaved else "")
 
         def load_selected_procedure(self, event=None):
             selection = self.procedure_listbox.curselection()
-            if not selection:
+            if not selection or selection[0] >= len(self.list_names):
                 return
-            procedure_name = self.procedure_listbox.get(selection[0])
+            procedure_name = self.list_names[selection[0]]
             if procedure_name == self.current_procedure:
                 return
-            if self.current_procedure:
-                self.save_procedure()
+            if self.current_procedure and not self.save_procedure():
+                self.update_procedure_list()
+                return
             self.current_procedure = procedure_name
             self.load_procedure(procedure_name)
+            self.update_procedure_list()
 
         def load_procedure(self, procedure_name):
             if procedure_name not in self.procedures:
@@ -101363,197 +104396,286 @@ if kbbbvar == 5189:
             self.title_entry.insert(0, procedure["title"])
             self.text_editor.insert("1.0", procedure["content"])
             self._deserialize_tags(procedure["tags"])
+            self.text_editor.edit_reset()      # Fix: Undo no longer brings back the previous procedure's text
+            self.text_editor.edit_modified(False)
+            self._highlight_search()
             self.status_bar.config(text=f"Procedure '{procedure_name}' loaded")
 
         def save_procedure(self):
+            """Keeps the editor's content in memory (not yet in the database). Returns False when not possible."""
             if not self.current_procedure:
-                return
+                return True
             new_title = self.title_entry.get().strip()
             if new_title and new_title != self.current_procedure:
                 if new_title in self.procedures:
-                    messagebox.showwarning("Warning", "A procedure with this name already exists")
+                    self.message("Knowledge Base", "A procedure with this name already exists.", "warning")
                     self.title_entry.delete(0, tk.END)
                     self.title_entry.insert(0, self.current_procedure)
-                    return
+                    return False
                 procedure_data = self.procedures.pop(self.current_procedure)
+                # the database name moves with the procedure, so saving updates its row instead of adding a copy
+                self.db_names[new_title] = self.db_names.pop(self.current_procedure, None)
+                if self.current_procedure in self.saved_state:
+                    self.saved_state[new_title] = self.saved_state.pop(self.current_procedure)
                 self.current_procedure = new_title
                 self.procedures[new_title] = procedure_data
 
-            content = self.text_editor.get("1.0", tk.END)
-            self.procedures[self.current_procedure]["content"] = content
-            self.procedures[self.current_procedure]["title"] = (
-                new_title if new_title else self.current_procedure
-            )
-            self.procedures[self.current_procedure]["tags"] = self._serialize_tags()
+            data = self.procedures[self.current_procedure]
+            data["content"] = self.text_editor.get("1.0", "end-1c")     # Fix: no extra newline at every save
+            data["title"] = new_title if new_title else self.current_procedure
+            data["tags"] = self._serialize_tags()
             self.update_procedure_list()
+            return True
 
         def delete_current_procedure(self):
             if not self.current_procedure:
-                messagebox.showwarning("Warning", "No procedure selected")
+                self.message("Knowledge Base", "No procedure selected.", "warning")
                 return
-            if messagebox.askyesno("Confirm Delete", f"Delete procedure '{self.current_procedure}'?"):
-                self.delete_procedure_from_db(self.current_procedure)
-                del self.procedures[self.current_procedure]
-                if self.procedures:
-                    self.current_procedure = list(self.procedures.keys())[0]
-                    self.update_procedure_list()
-                    self.load_procedure(self.current_procedure)
-                else:
-                    self.current_procedure = None
-                    self.clear_editor()
-                    self.new_procedure()
-                self.status_bar.config(text="Procedure deleted successfully")
+            if self.message("Confirm Delete", f"Delete procedure '{self.current_procedure}'?\nThis cannot be undone.",
+                            "warning", ("Yes", "No"), default=1) != "Yes":
+                return
+            if not self.delete_procedure_from_db(self.current_procedure):
+                return
+            name = self.current_procedure
+            del self.procedures[name]
+            self.db_names.pop(name, None)
+            self.saved_state.pop(name, None)
+            if self.procedures:
+                self.current_procedure = sorted(self.procedures.keys(), key=str.lower)[0]
+                self.load_procedure(self.current_procedure)
+                self.update_procedure_list()
+            else:
+                self.current_procedure = None
+                self.clear_editor()
+                self.new_procedure()
+            self.status_bar.config(text="Procedure '%s' deleted" % name)
 
         def clear_editor(self):
             self.text_editor.delete("1.0", tk.END)
             self.title_entry.delete(0, tk.END)
             for tag in list(self.text_editor.tag_names()):
-                if tag != "sel":
+                if tag not in ("sel", "found"):
                     self.text_editor.tag_delete(tag)
 
-        # ──────────────────────────────────────────────────────────────
+        def _highlight_search(self):
+            self.text_editor.tag_remove("found", "1.0", tk.END)
+            query = self.search_var.get().strip()
+            if not query:
+                return
+            start = "1.0"
+            while True:
+                start = self.text_editor.search(query, start, stopindex=tk.END, nocase=True)
+                if not start:
+                    break
+                end = "%s+%dc" % (start, len(query))
+                self.text_editor.tag_add("found", start, end)
+                start = end
+            first = self.text_editor.tag_nextrange("found", "1.0")
+            if first:
+                self.text_editor.see(first[0])
+
+        def search_changed(self, *_args):
+            self.update_procedure_list()
+            self._highlight_search()
+
+        def exit_app(self):
+            """Asks about unsaved procedures, then really closes (File > Exit used quit(), which left the window)."""
+            if self.current_procedure:
+                self.save_procedure()
+            unsaved = self.unsaved_procedures()
+            if unsaved:
+                names = "\n".join("  " + n for n in unsaved[:8]) + ("\n  ..." if len(unsaved) > 8 else "")
+                answer = self.message("Knowledge Base", "Save the changes to these procedures?\n\n" + names,
+                                      "question", ("Yes", "No", "Cancel"), default=0)
+                if answer == "Cancel" or answer is None:
+                    return
+                if answer == "Yes" and not self.save_procedure_to_db(unsaved):
+                    return
+            self.rootKBBB.destroy()
+
+        # ══════════════════════════════════════════════════════════════
         # UI CONSTRUCTION
-        # ──────────────────────────────────────────────────────────────
+        # ══════════════════════════════════════════════════════════════
 
         def create_ui(self):
-            main_frame = tk.Frame(self.rootKBBB, bg=self.win95_bg, bd=1, relief=tk.RAISED)
-            main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
+            root = self.rootKBBB
+            self._build_titlebar()
             self.create_menu()
 
-            # Toolbar
-            toolbar_frame = tk.Frame(main_frame, bg=self.win95_bg, bd=1, relief=tk.RAISED)
-            toolbar_frame.pack(fill=tk.X, padx=2, pady=2)
+            # status bar: message, count, modified, size grip
+            sbar = tk.Frame(root, bg=KB_FACE)
+            sbar.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=(0, 2))
+            grip = tk.Canvas(sbar, width=14, height=14, bg=KB_FACE, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if KB_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=KB_LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=KB_SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=KB_SHADOW)
+            grip.pack(side=tk.RIGHT, anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.modified_label = tk.Label(sbar, text="", font=KB_FONT, bg=KB_FACE, relief=tk.SUNKEN, bd=1, width=9)
+            self.modified_label.pack(side=tk.RIGHT, padx=1)
+            self.count_label = tk.Label(sbar, text="", font=KB_FONT, bg=KB_FACE, relief=tk.SUNKEN, bd=1, width=15,
+                                        anchor="w", padx=4)
+            self.count_label.pack(side=tk.RIGHT, padx=1)
+            self.status_bar = tk.Label(sbar, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W, font=KB_FONT,
+                                       bg=KB_FACE, padx=4)
+            self.status_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
 
-            def tb_btn(text, cmd, fnt=None):
-                b = tk.Button(
-                    toolbar_frame, text=text, bg=self.win95_button,
-                    relief=tk.RAISED, bd=2,
-                    font=fnt or self.default_font, command=cmd,
-                )
-                b.pack(side=tk.LEFT, padx=2, pady=2)
+            # toolbar
+            toolbar_frame = tk.Frame(root, bg=KB_FACE, bd=1, relief=tk.RAISED)
+            toolbar_frame.pack(side=tk.TOP, fill=tk.X)
+
+            def tb_btn(text, cmd, fnt=None, width=None):
+                b = tk.Button(toolbar_frame, text=text, bg=KB_FACE, relief=tk.RAISED, bd=2, font=fnt or KB_FONT,
+                              command=cmd, padx=6, pady=0, highlightthickness=0, takefocus=0)
+                if width:
+                    b.config(width=width)
+                b.pack(side=tk.LEFT, padx=1, pady=3)
                 return b
 
-            tb_btn("New",    self.new_procedure)
-            tb_btn("Save",   self.save_procedure_to_db)
+            def separator():
+                tk.Frame(toolbar_frame, bg=KB_FACE, width=2, height=22, bd=1, relief=tk.SUNKEN).pack(
+                    side=tk.LEFT, padx=5, pady=3)
+
+            tb_btn("New", self.new_procedure)
+            tb_btn("Save", self.save_procedure_to_db)
+            tb_btn("Save All", self.save_all)
             tb_btn("Delete", self.delete_current_procedure)
-
-            tk.Frame(toolbar_frame, width=10, bg=self.win95_bg).pack(side=tk.LEFT)
-
-            tb_btn("B", self.toggle_bold,
-                   font.Font(family="MS Sans Serif", size=10, weight="bold"))
-            tb_btn("I", self.toggle_italic,
-                   font.Font(family="MS Sans Serif", size=10, slant="italic"))
-            tb_btn("U", self.toggle_underline,
-                   font.Font(family="MS Sans Serif", size=10, underline=True))
-            tb_btn("Text Color", self.choose_text_color)
-            tb_btn("BG Color",   self.choose_bg_color)
-
-            tk.Label(toolbar_frame, text="Font:", bg=self.win95_bg,
-                     font=self.default_font).pack(side=tk.LEFT, padx=2, pady=2)
-
+            separator()
+            tb_btn("B", self.toggle_bold, ("MS Sans Serif", 9, "bold"), 2)
+            tb_btn("I", self.toggle_italic, ("Times New Roman", 10, "italic", "bold"), 2)
+            tb_btn("U", self.toggle_underline, ("MS Sans Serif", 9, "underline"), 2)
+            separator()
+            tb_btn("Text Color...", self.choose_text_color)
+            tb_btn("Highlight...", self.choose_bg_color)
+            separator()
+            tk.Label(toolbar_frame, text="Size:", bg=KB_FACE, font=KB_FONT).pack(side=tk.LEFT, padx=(2, 2))
             self.font_size_var = tk.StringVar(value="10")
-            font_sizes = ["8","9","10","11","12","14","16","18","20","22","24","26","28","36","48","72"]
-            self.font_size_combo = ttk.Combobox(
-                toolbar_frame, textvariable=self.font_size_var,
-                values=font_sizes, width=3,
-            )
-            self.font_size_combo.pack(side=tk.LEFT, padx=2, pady=2)
-            self.font_size_combo.bind("<<ComboboxSelected>>", self.change_font_size)
+            size_menu = tk.OptionMenu(toolbar_frame, self.font_size_var, *KB_SIZES, command=self.change_font_size)
+            size_menu.config(font=KB_FONT, bg=KB_LIGHT, activebackground=KB_LIGHT, relief=tk.SUNKEN, bd=2,
+                             highlightthickness=0, width=3, anchor="w")
+            size_menu["menu"].config(font=KB_FONT, bg=KB_FACE, activebackground=KB_NAVY, activeforeground=KB_LIGHT)
+            size_menu.pack(side=tk.LEFT, pady=3)
 
-            # Content area
-            content_frame = tk.Frame(main_frame, bg=self.win95_bg)
-            content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+            content_frame = tk.Frame(root, bg=KB_FACE)
+            content_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            # Left panel – procedure list
-            left_frame = tk.Frame(content_frame, bg=self.win95_bg, bd=1, relief=tk.SUNKEN, width=200)
-            left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=2, pady=2)
+            # left panel: search + procedure list + add
+            left_frame = tk.LabelFrame(content_frame, text=" Procedures ", font=KB_FONT, bg=KB_FACE, bd=2,
+                                       relief=tk.GROOVE, width=220)
+            left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 4))
             left_frame.pack_propagate(False)
-
-            tk.Label(left_frame, text="Procedures:", bg=self.win95_bg,
-                     font=self.default_font).pack(anchor=tk.W, padx=5, pady=5)
-
-            self.procedure_listbox = tk.Listbox(
-                left_frame, bg=self.win95_text_bg, relief=tk.SUNKEN, bd=2,
-                selectbackground=self.win95_active, font=self.default_font,
-            )
-            self.procedure_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            search_row = tk.Frame(left_frame, bg=KB_FACE)
+            search_row.pack(fill=tk.X, padx=6, pady=(4, 2))
+            tk.Label(search_row, text="Find:", font=KB_FONT, bg=KB_FACE).pack(side=tk.LEFT)
+            self.search_var = tk.StringVar()
+            self.search_entry = tk.Entry(search_row, textvariable=self.search_var, font=KB_FONT, bg=KB_LIGHT,
+                                         relief=tk.SUNKEN, bd=2, highlightthickness=0)
+            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+            self.search_var.trace_add("write", self.search_changed)
+            add_frame = tk.Frame(left_frame, bg=KB_FACE)
+            add_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=6, pady=(2, 6))
+            tk.Label(add_frame, text="New:", font=KB_FONT, bg=KB_FACE).pack(side=tk.LEFT)
+            tk.Button(add_frame, text="Add", bg=KB_FACE, relief=tk.RAISED, bd=2, font=KB_FONT, padx=4, pady=0,
+                      highlightthickness=0, takefocus=0, command=self.add_new_procedure).pack(side=tk.RIGHT)
+            self.new_procedure_name = tk.Entry(add_frame, bg=KB_LIGHT, relief=tk.SUNKEN, bd=2, font=KB_FONT,
+                                               highlightthickness=0, width=10)
+            self.new_procedure_name.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 2))
+            self.new_procedure_name.bind("<Return>", lambda e: self.add_new_procedure())
+            list_holder = tk.Frame(left_frame, bg=KB_LIGHT, bd=2, relief=tk.SUNKEN)
+            list_holder.pack(fill=tk.BOTH, expand=True, padx=6, pady=2)
+            list_scroll = tk.Scrollbar(list_holder, orient=tk.VERTICAL)
+            list_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            self.procedure_listbox = tk.Listbox(list_holder, bg=KB_LIGHT, relief=tk.FLAT, bd=0, highlightthickness=0,
+                                                selectbackground=KB_NAVY, selectforeground=KB_LIGHT, font=KB_FONT,
+                                                activestyle="none", exportselection=False,
+                                                yscrollcommand=list_scroll.set)
+            self.procedure_listbox.pack(fill=tk.BOTH, expand=True)
+            list_scroll.config(command=self.procedure_listbox.yview)
             self.procedure_listbox.bind("<<ListboxSelect>>", self.load_selected_procedure)
 
-            add_frame = tk.Frame(left_frame, bg=self.win95_bg)
-            add_frame.pack(fill=tk.X, padx=5, pady=5)
-
-            self.new_procedure_name = tk.Entry(
-                add_frame, bg=self.win95_text_bg, relief=tk.SUNKEN, bd=2, font=self.default_font,
-            )
-            self.new_procedure_name.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-            self.new_procedure_name.bind("<Return>", lambda e: self.add_new_procedure())
-
-            tk.Button(add_frame, text="+", bg=self.win95_button, relief=tk.RAISED, bd=2,
-                      font=self.default_font, command=self.add_new_procedure).pack(side=tk.RIGHT)
-
-            # Right panel – editor
-            right_frame = tk.Frame(content_frame, bg=self.win95_bg, bd=1, relief=tk.SUNKEN)
-            right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=2, pady=2)
-
-            title_frame = tk.Frame(right_frame, bg=self.win95_bg)
-            title_frame.pack(fill=tk.X, padx=5, pady=5)
-
-            tk.Label(title_frame, text="Title:", bg=self.win95_bg,
-                     font=self.default_font).pack(side=tk.LEFT, padx=(0, 5))
-
-            self.title_entry = tk.Entry(
-                title_frame, bg=self.win95_text_bg, relief=tk.SUNKEN, bd=2, font=self.default_font,
-            )
+            # right panel: title + editor
+            right_frame = tk.Frame(content_frame, bg=KB_FACE)
+            right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            title_frame = tk.Frame(right_frame, bg=KB_FACE)
+            title_frame.pack(fill=tk.X, pady=(2, 4))
+            tk.Label(title_frame, text="Title:", bg=KB_FACE, font=KB_FONT_B).pack(side=tk.LEFT, padx=(0, 5))
+            self.title_entry = tk.Entry(title_frame, bg=KB_LIGHT, relief=tk.SUNKEN, bd=2, font=self.default_font,
+                                        highlightthickness=0)
             self.title_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-            self.text_editor = tk.Text(
-                right_frame, bg=self.win95_text_bg, fg=self.win95_text_fg,
-                relief=tk.SUNKEN, bd=2, font=self.default_font, wrap=tk.WORD, undo=True,
-            )
-            self.text_editor.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-            scrollbar = tk.Scrollbar(self.text_editor, command=self.text_editor.yview)
+            self.title_entry.bind("<KeyRelease>", self._changed)
+            editor_holder = tk.Frame(right_frame, bg=KB_LIGHT, bd=2, relief=tk.SUNKEN)
+            editor_holder.pack(fill=tk.BOTH, expand=True)
+            scrollbar = tk.Scrollbar(editor_holder, orient=tk.VERTICAL)
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            self.text_editor.config(yscrollcommand=scrollbar.set)
-
-            self.status_bar = tk.Label(
-                main_frame, text="Ready", bd=1, relief=tk.SUNKEN, anchor=tk.W,
-                font=font.Font(family="MS Sans Serif", size=8), bg=self.win95_bg,
-            )
-            self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+            self.text_editor = tk.Text(editor_holder, bg=KB_LIGHT, fg=KB_BLACK, relief=tk.FLAT, bd=0,
+                                       font=self.default_font, wrap=tk.WORD, undo=True, highlightthickness=0,
+                                       padx=6, pady=4, selectbackground=KB_NAVY, selectforeground=KB_LIGHT,
+                                       yscrollcommand=scrollbar.set)
+            self.text_editor.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.config(command=self.text_editor.yview)
+            self.text_editor.tag_configure("found", background="#ffff00")
+            self.text_editor.bind("<<Modified>>", lambda e: (self._changed(), self.text_editor.edit_modified(False)))
+            for key, action in (("<Control-b>", self.toggle_bold), ("<Control-i>", self.toggle_italic),
+                                ("<Control-u>", self.toggle_underline)):
+                self.text_editor.bind(key, lambda e, a=action: a())
+            root.bind("<Control-s>", lambda e: (self.save_procedure_to_db(), "break")[1])
+            root.bind("<Control-n>", lambda e: (self.new_procedure(), "break")[1])
+            root.bind("<Control-f>", lambda e: (self.search_entry.focus_force(), "break")[1])
 
         def create_menu(self):
-            menubar = tk.Menu(self.rootKBBB)
+            bar = tk.Frame(self.rootKBBB, bg=KB_FACE)
+            bar.pack(side=tk.TOP, fill=tk.X)
 
-            file_menu = tk.Menu(menubar, tearoff=0)
-            file_menu.add_command(label="Save", command=self.save_procedure_to_db)
-            file_menu.add_separator()
-            file_menu.add_command(label="Exit", command=self.rootKBBB.quit)
-            menubar.add_cascade(label="File", menu=file_menu)
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=KB_FONT, bg=KB_FACE, fg=KB_BLACK, activebackground=KB_NAVY,
+                                       activeforeground=KB_LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side=tk.LEFT)
+                menu = tk.Menu(button, tearoff=0, font=KB_FONT, bg=KB_FACE, fg=KB_BLACK, activebackground=KB_NAVY,
+                               activeforeground=KB_LIGHT)
+                button.config(menu=menu)
+                return menu
 
-            edit_menu = tk.Menu(menubar, tearoff=0)
-            edit_menu.add_command(label="Cut",   command=lambda: self.text_editor.event_generate("<<Cut>>"))
-            edit_menu.add_command(label="Copy",  command=lambda: self.text_editor.event_generate("<<Copy>>"))
-            edit_menu.add_command(label="Paste", command=lambda: self.text_editor.event_generate("<<Paste>>"))
-            edit_menu.add_separator()
-            edit_menu.add_command(label="Bold",      command=self.toggle_bold)
-            edit_menu.add_command(label="Italic",    command=self.toggle_italic)
-            edit_menu.add_command(label="Underline", command=self.toggle_underline)
-            edit_menu.add_command(label="Text color", command=self.choose_text_color)
-            edit_menu.add_command(label="BG color",   command=self.choose_bg_color)
-            menubar.add_cascade(label="Edit", menu=edit_menu)
-
-            help_menu = tk.Menu(menubar, tearoff=0)
-            help_menu.add_command(label="About", command=self.show_about)
-            menubar.add_cascade(label="Help", menu=help_menu)
-
-            self.rootKBBB.config(menu=menubar)
+            editor = lambda event: (lambda: self.text_editor.event_generate(event))   # noqa: E731
+            m = menubutton("File")
+            m.add_command(label="New Procedure", accelerator="Ctrl+N", command=self.new_procedure)
+            m.add_command(label="Save", accelerator="Ctrl+S", command=self.save_procedure_to_db)
+            m.add_command(label="Save All", command=self.save_all)
+            m.add_separator()
+            m.add_command(label="Delete Procedure...", command=self.delete_current_procedure)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.exit_app)
+            m = menubutton("Edit")
+            m.add_command(label="Undo", accelerator="Ctrl+Z", command=editor("<<Undo>>"))
+            m.add_command(label="Redo", accelerator="Ctrl+Y", command=editor("<<Redo>>"))
+            m.add_separator()
+            m.add_command(label="Cut", accelerator="Ctrl+X", command=editor("<<Cut>>"))
+            m.add_command(label="Copy", accelerator="Ctrl+C", command=editor("<<Copy>>"))
+            m.add_command(label="Paste", accelerator="Ctrl+V", command=editor("<<Paste>>"))
+            m.add_command(label="Select All", command=lambda: self.text_editor.tag_add(tk.SEL, "1.0", "end-1c"))
+            m.add_separator()
+            m.add_command(label="Find in Procedures", accelerator="Ctrl+F",
+                          command=lambda: self.search_entry.focus_force())
+            m = menubutton("Format")
+            m.add_command(label="Bold", accelerator="Ctrl+B", command=self.toggle_bold)
+            m.add_command(label="Italic", accelerator="Ctrl+I", command=self.toggle_italic)
+            m.add_command(label="Underline", accelerator="Ctrl+U", command=self.toggle_underline)
+            m.add_separator()
+            m.add_command(label="Text Color...", command=self.choose_text_color)
+            m.add_command(label="Highlight Color...", command=self.choose_bg_color)
+            m.add_separator()
+            m.add_command(label="Clear Formatting", command=self.clear_formatting)
+            m = menubutton("Help")
+            m.add_command(label="About", command=self.show_about)
 
         def show_about(self):
-            messagebox.showinfo(
+            self.message(
                 "About Knowledge Base",
-                "Retro Knowledge Base v1.1\n\nA knowledge/procedure management system.",
+                "Retro Knowledge Base v1.2\n\nA knowledge / procedure management system. Procedures are kept in the "
+                "Bitpack database; a * in the list marks the ones with unsaved changes.",
             )
 
 
@@ -196510,6 +199632,12 @@ if pwdchkVAR == 9965:
             # Rularea bucflei principale
             validation.mainloop()
 
+    import math
+    import os
+    import re
+    import tkinter as tk
+    import tkinter.font as tkfont
+
     # ── Windows 95 colour palette ──────────────────────────────────────────────
     BG          = "#c0c0c0"
     DARK_SHADOW = "#808080"
@@ -196520,9 +199648,12 @@ if pwdchkVAR == 9965:
     INSET_BORDER= "#808080"
     BTN_FACE    = "#c0c0c0"
     TEXT_BLACK  = "#000000"
+    W95_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
 
     # Strength colours (muted, period-appropriate)
     COLORS = {
+        "None":       "#808080",
         "Very Weak":  "#ff0000",
         "Weak":       "#ff6600",
         "Fair":       "#cccc00",
@@ -196535,32 +199666,44 @@ if pwdchkVAR == 9965:
     FONT_TITLE  = ("MS Sans Serif", 8, "bold")
     FONT_MONO   = ("Courier New", 9)
 
-
-    # ── Helper: draw a Win95 raised/sunken bevel ──────────────────────────────
-    def bevel(parent, x, y, w, h, sunken=False):
-        top = DARK_SHADOW if sunken else LIGHT_EDGE
-        bot = LIGHT_EDGE  if sunken else DARK_SHADOW
-        # top & left
-        parent.create_line(x, y+h, x, y, fill=top, width=1)
-        parent.create_line(x, y, x+w, y, fill=top, width=1)
-        # bottom & right
-        parent.create_line(x, y+h, x+w, y+h, fill=bot, width=1)
-        parent.create_line(x+w, y, x+w, y+h, fill=bot, width=1)
+    COMMON_WORDS = r"(password|parola|qwerty|azerty|letmein|admin|welcome|monkey|dragon|iloveyou|secret|login|bitpack)"
+    SEQUENCES = ("0123456789", "abcdefghijklmnopqrstuvwxyz", "qwertyuiop", "asdfghjkl", "zxcvbnm")
 
 
     # ── Password analysis ──────────────────────────────────────────────────────
-    def analyse(pwd):
-        score   = 0
-        checks  = {}
+    def _has_pattern(pwd):
+        """Common words, 4 repeated characters (aaaa, 1111), 4-character runs of a sequence
+        in either direction (1234, 4321, abcd, qwer), or a year (1950-2039)."""
+        low = pwd.lower()
+        if re.search(COMMON_WORDS, low):
+            return True
+        if re.search(r"(.)\1\1\1", low):
+            return True
+        for seq in SEQUENCES:
+            for i in range(len(seq) - 3):
+                part = seq[i:i + 4]
+                if part in low or part[::-1] in low:
+                    return True
+        return bool(re.search(r"(19[5-9]\d|20[0-3]\d)", low))
 
+
+    def analyse(pwd):
+        if not pwd:   # Fix: an empty field is "None", not "Very Weak"
+            checks = {"Length >= 8": False, "Length >= 12": False, "Uppercase letter": False,
+                      "Lowercase letter": False, "Digit": False, "Special character": False,
+                      "No common pattern": False}
+            return "None", 0, checks, 0.0
+
+        checks  = {}
         checks["Length >= 8"]       = len(pwd) >= 8
         checks["Length >= 12"]      = len(pwd) >= 12
-        checks["Uppercase letter"]  = bool(re.search(r"[A-Z]", pwd))
-        checks["Lowercase letter"]  = bool(re.search(r"[a-z]", pwd))
-        checks["Digit"]             = bool(re.search(r"\d", pwd))
-        checks["Special character"] = bool(re.search(r"[!@#$%^&*()\-_=+\[\]{};:',.<>?/\\|`~]", pwd))
-        checks["No common pattern"] = not bool(re.search(
-            r"(1234|abcd|password|qwerty|letmein|admin|welcome|monkey|dragon)", pwd, re.I))
+        # Fix: letters with diacritics (Ș, ă...) count as upper / lower case
+        checks["Uppercase letter"]  = any(c.isupper() for c in pwd)
+        checks["Lowercase letter"]  = any(c.islower() for c in pwd)
+        checks["Digit"]             = any(c.isdigit() for c in pwd)
+        # Fix: every character that is not a letter or a digit is special (space, quotes, euro sign...)
+        checks["Special character"] = any(not c.isalnum() for c in pwd)
+        checks["No common pattern"] = not _has_pattern(pwd)
 
         score = sum(checks.values())
 
@@ -196570,17 +199713,36 @@ if pwdchkVAR == 9965:
         elif score <= 6: strength = "Strong"
         else:            strength = "Very Strong"
 
-        entropy_bits = 0
         pool = 0
-        if re.search(r"[a-z]", pwd): pool += 26
-        if re.search(r"[A-Z]", pwd): pool += 26
-        if re.search(r"\d",    pwd): pool += 10
-        if re.search(r"[^a-zA-Z0-9]", pwd): pool += 32
-        if pool > 0 and len(pwd) > 0:
-            import math
-            entropy_bits = round(len(pwd) * math.log2(pool), 1)
+        if any(c.islower() for c in pwd): pool += 26
+        if any(c.isupper() for c in pwd): pool += 26
+        if any(c.isdigit() for c in pwd): pool += 10
+        if any(not c.isalnum() for c in pwd): pool += 32
+        entropy_bits = round(len(pwd) * math.log2(pool), 1) if pool else 0.0
+        if not checks["No common pattern"]:
+            entropy_bits = round(entropy_bits / 2, 1)   # a known pattern is guessed much sooner
 
         return strength, score, checks, entropy_bits
+
+
+    def crack_time(entropy_bits):
+        """Average time for an offline attack at 10 billion guesses per second."""
+        if entropy_bits <= 0:
+            return "-"
+        seconds = (2 ** entropy_bits) / 2 / 1e10
+        for limit, unit in ((60, "seconds"), (3600, "minutes"), (86400, "hours"), (86400 * 365, "days")):
+            if seconds < limit:
+                divisor = {"seconds": 1, "minutes": 60, "hours": 3600, "days": 86400}[unit]
+                value = seconds / divisor
+                return "instantly" if unit == "seconds" and value < 1 else "%.0f %s" % (value, unit)
+        years = seconds / (86400 * 365)
+        if years < 1000:
+            return "%.0f years" % years
+        if years < 1e6:
+            return "%.0f thousand years" % (years / 1e3)
+        if years < 1e9:
+            return "%.0f million years" % (years / 1e6)
+        return "billions of years"
 
 
     # ── Main application ───────────────────────────────────────────────────────
@@ -196590,39 +199752,186 @@ if pwdchkVAR == 9965:
             rootpswchk.title("Password Security Checker")
             rootpswchk.resizable(False, False)
             rootpswchk.configure(bg=BG)
+            self.custom_frame = W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.minimizing = False
+            self.show_var = tk.IntVar(value=0)       # shared by the "Show" box and View > Show Password
 
             self._build_window()
+            rootpswchk.update_idletasks()
+            w, h = rootpswchk.winfo_reqwidth(), rootpswchk.winfo_reqheight()
+            x = max(0, (rootpswchk.winfo_screenwidth() - w) // 2)
+            y = max(0, (rootpswchk.winfo_screenheight() - h) // 2)
+            rootpswchk.geometry("+%d+%d" % (x, y))
+            rootpswchk.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            if self.custom_frame:
+                rootpswchk.configure(bd=2, relief="raised")
+                rootpswchk.after(10, self._enable_custom_frame)
+            rootpswchk.after(150, lambda: self.entry.focus_force())
+
+        # ── Windows 95 window frame ───────────────────────────────────────────
+        def _build_titlebar(self):
+            root = self.rootpswchk
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = ({"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"})
+            glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if W95_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            self.tb = tk.Frame(root, bg=TITLE_BAR, height=20)
+            self.tb.pack(fill="x", padx=1, pady=(1, 0))
+            self.tb.pack_propagate(False)
+            icon = tk.Canvas(self.tb, width=16, height=16, bg=TITLE_BAR, bd=0, highlightthickness=0)
+            icon.create_arc(4, 1, 12, 11, start=0, extent=180, style="arc", outline="#c0c0c0", width=2)   # padlock
+            icon.create_rectangle(3, 7, 13, 15, fill="#ffd700", outline=TEXT_BLACK)
+            icon.create_rectangle(7, 9, 9, 13, fill=TEXT_BLACK, outline="")
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(self.tb, text="Password Security Checker", bg=TITLE_BAR, fg=TITLE_TEXT,
+                             font=FONT_TITLE, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (self.tb, title, icon)
+
+            def caption_button(key, command):
+                return tk.Button(self.tb, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=BTN_FACE, fg=TEXT_BLACK,
+                                 activebackground=BTN_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", root.destroy).pack(side="right", padx=(2, 2))
+            caption_button("min", self._minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=TITLE_BAR if active else DARK_SHADOW)
+            self.caption_parts[1].config(fg=TITLE_TEXT if active else BG)
+
+        def _enable_custom_frame(self):
+            self.rootpswchk.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootpswchk
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force(), self.entry.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootpswchk
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootpswchk.overrideredirect(False)
+            self.rootpswchk.iconify()
+
+        def _caption_press(self, event):
+            root = self.rootpswchk
+            self._drag = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame:
+                self.rootpswchk.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it. A click in a text field gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        # ── Windows 95 message box (always in front) ──────────────────────────
+        def _message(self, title, text):
+            root = self.rootpswchk
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=BG, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+            bar = tk.Frame(win, bg=TITLE_BAR, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=TITLE_BAR, fg=TITLE_TEXT, font=FONT_TITLE).pack(side="left", padx=4)
+
+            def close():
+                win.destroy()
+                self.entry.focus_force()
+
+            tk.Button(bar, text=self.glyphs["close"], command=close,
+                      font=("Marlett", 7) if self.glyphs["close"] == "r" else ("MS Sans Serif", 7, "bold"),
+                      image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=BTN_FACE,
+                      relief="raised", bd=2, highlightthickness=0, takefocus=0).pack(side="right", padx=2)
+            body = tk.Frame(win, bg=BG)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            picture = tk.Canvas(body, width=32, height=32, bg=BG, highlightthickness=0)
+            picture.create_oval(2, 2, 30, 30, fill=INSET_BG, outline=TEXT_BLACK)
+            picture.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+            picture.pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=BG, fg=TEXT_BLACK, font=FONT, justify="left", wraplength=330).pack(side="left")
+            ok = self._w95_btn(win, "OK", close)
+            ok.config(font=FONT_BOLD, highlightthickness=1, highlightbackground=TEXT_BLACK, width=8)
+            ok.pack(pady=(4, 12))
+            win.bind("<Return>", lambda e: close())
+            win.bind("<Escape>", lambda e: close())
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
 
         # ── outer window chrome ──────────────────────────────────────────────
         def _build_window(self):
             rootpswchk = self.rootpswchk
+            self._build_titlebar()
+            self._build_menu()
 
-            # Title bar (painted manually for authenticity)
-            self.tb = tk.Frame(rootpswchk, bg=TITLE_BAR, height=20)
-            self.tb.pack(fill="x", padx=2, pady=(2, 0))
-            self.tb.pack_propagate(False)
-
-            tk.Label(self.tb, text="Password Security Checker",
-                     bg=TITLE_BAR, fg=TITLE_TEXT,
-                     font=FONT_TITLE).pack(side="left", padx=4)
-
-            # close button placeholder
-            close_btn = tk.Label(self.tb, text="X", bg=BTN_FACE, fg=TEXT_BLACK,
-                                 font=FONT_BOLD, relief="raised", bd=1,
-                                 padx=3, pady=0, width=2)
-            close_btn.pack(side="right", padx=2, pady=2)
-            close_btn.bind("<Button-1>", lambda e: self.rootpswchk.destroy())
+            # ── Status bar (packed first so it always stays at the bottom) ─────
+            self.status = tk.Label(rootpswchk, text="Type a password to begin.",
+                                   bg=BG, fg=TEXT_BLACK,
+                                   font=FONT, anchor="w", relief="sunken", bd=1, padx=4)
+            self.status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
 
             # ── main body ────────────────────────────────────────────────────
             body = tk.Frame(rootpswchk, bg=BG, bd=0)
             body.pack(fill="both", expand=True, padx=2, pady=2)
 
             # ── GroupBox: Enter Password ──────────────────────────────────
-            grp1 = self._groupbox(body, "Enter Password", 10, 10, 370, 80)
-            grp1.pack(padx=8, pady=(8, 0), fill="x")
+            grp1 = self._groupbox(body, "Enter Password")
+            grp1.pack(padx=8, pady=(6, 0), fill="x")
 
             inner1 = tk.Frame(grp1, bg=BG)
-            inner1.pack(fill="x", padx=8, pady=(12, 8))
+            inner1.pack(fill="x", padx=8, pady=(6, 8))
 
             tk.Label(inner1, text="Password:", bg=BG, fg=TEXT_BLACK,
                      font=FONT).grid(row=0, column=0, sticky="w")
@@ -196633,84 +199942,81 @@ if pwdchkVAR == 9965:
             self.entry = tk.Entry(inner1, textvariable=self.pwd_var,
                                   show="*", font=FONT_MONO,
                                   bg=INSET_BG, fg=TEXT_BLACK,
-                                  relief="sunken", bd=2, width=34)
+                                  relief="sunken", bd=2, width=34, highlightthickness=0)
             self.entry.grid(row=0, column=1, padx=(6, 0))
+            self.entry.bind("<Escape>", lambda e: self._clear())
 
-            self.show_var = tk.IntVar(value=0)
             self.chk = tk.Checkbutton(inner1, text="Show", variable=self.show_var,
                                       bg=BG, fg=TEXT_BLACK, font=FONT,
-                                      activebackground=BG,
+                                      activebackground=BG, selectcolor=INSET_BG, highlightthickness=0,
                                       command=self._toggle_show)
             self.chk.grid(row=0, column=2, padx=(6, 0))
 
             # ── GroupBox: Strength Meter ──────────────────────────────────
-            grp2 = self._groupbox(body, "Strength Meter", 10, 100, 370, 80)
+            grp2 = self._groupbox(body, "Strength Meter")
             grp2.pack(padx=8, pady=(6, 0), fill="x")
 
             inner2 = tk.Frame(grp2, bg=BG)
-            inner2.pack(fill="x", padx=8, pady=(12, 8))
+            inner2.pack(fill="x", padx=8, pady=(6, 8))
 
-            # bar container (sunken inset)
-            bar_frame = tk.Frame(inner2, bg=INSET_BG, relief="sunken", bd=2,
-                                 height=20, width=280)
-            bar_frame.pack(side="left")
-            bar_frame.pack_propagate(False)
-
-            self.bar_canvas = tk.Canvas(bar_frame, bg=INSET_BG,
-                                        height=20, width=280,
-                                        highlightthickness=0)
-            self.bar_canvas.pack()
-            self.bar_rect  = self.bar_canvas.create_rectangle(0, 0, 0, 20,
-                                                               fill="#000080",
-                                                               outline="")
+            # bar container (sunken inset): 7 Windows 95 progress blocks, one per check passed
+            self.bar_canvas = tk.Canvas(inner2, bg=INSET_BG, height=18, width=282,
+                                        highlightthickness=0, relief="sunken", bd=2)
+            self.bar_canvas.pack(side="left")
+            self.blocks = [self.bar_canvas.create_rectangle(4 + i * 40, 4, 4 + i * 40 + 36, 18,
+                                                            fill=INSET_BG, outline="")
+                           for i in range(7)]
 
             self.lbl_strength = tk.Label(inner2, text="None",
                                          bg=BG, fg=TEXT_BLACK,
-                                         font=FONT_BOLD, width=12)
+                                         font=FONT_BOLD, width=12, anchor="w")
             self.lbl_strength.pack(side="left", padx=(10, 0))
 
             # ── GroupBox: Details ─────────────────────────────────────────
-            grp3 = self._groupbox(body, "Details", 10, 190, 370, 200)
+            grp3 = self._groupbox(body, "Details")
             grp3.pack(padx=8, pady=(6, 0), fill="x")
 
             inner3 = tk.Frame(grp3, bg=BG)
-            inner3.pack(fill="x", padx=8, pady=(12, 8))
+            inner3.pack(fill="x", padx=8, pady=(6, 8))
 
             self.detail_text = tk.Text(inner3, bg=INSET_BG, fg=TEXT_BLACK,
                                        font=FONT_MONO, relief="sunken", bd=2,
-                                       height=9, width=46,
+                                       height=7, width=46, highlightthickness=0,
                                        state="disabled", cursor="arrow",
-                                       wrap="none")
-            self.detail_text.pack()
+                                       wrap="none", takefocus=0)
+            self.detail_text.pack(fill="x")
+            self.detail_text.tag_config("pass", foreground="#008000", font=("Courier New", 9, "bold"))
+            self.detail_text.tag_config("fail", foreground="#cc0000", font=("Courier New", 9, "bold"))
+            self.detail_text.tag_config("idle", foreground=DARK_SHADOW)
 
-            # scrollbar
-            sb = tk.Scrollbar(inner3, orient="vertical",
-                              command=self.detail_text.yview)
-            # not packed by default – only if needed; keep it simple
-
-            # ── GroupBox: Entropy ─────────────────────────────────────────
-            grp4 = self._groupbox(body, "Statistics", 10, 400, 370, 60)
+            # ── GroupBox: Statistics ──────────────────────────────────────
+            grp4 = self._groupbox(body, "Statistics")
             grp4.pack(padx=8, pady=(6, 0), fill="x")
 
             inner4 = tk.Frame(grp4, bg=BG)
-            inner4.pack(fill="x", padx=8, pady=(12, 8))
+            inner4.pack(fill="x", padx=8, pady=(6, 8))
 
             tk.Label(inner4, text="Length:", bg=BG, fg=TEXT_BLACK,
                      font=FONT).grid(row=0, column=0, sticky="w")
             self.lbl_len = tk.Label(inner4, text="0", bg=BG, fg=TEXT_BLACK,
-                                    font=FONT, width=4, anchor="w")
+                                    font=FONT_BOLD, width=4, anchor="w")
             self.lbl_len.grid(row=0, column=1, sticky="w", padx=(4, 20))
 
             tk.Label(inner4, text="Est. Entropy:", bg=BG, fg=TEXT_BLACK,
                      font=FONT).grid(row=0, column=2, sticky="w")
             self.lbl_entropy = tk.Label(inner4, text="0.0 bits", bg=BG,
-                                        fg=TEXT_BLACK, font=FONT, width=10,
+                                        fg=TEXT_BLACK, font=FONT_BOLD, width=10,
                                         anchor="w")
             self.lbl_entropy.grid(row=0, column=3, sticky="w", padx=4)
 
+            tk.Label(inner4, text="Time to crack:", bg=BG, fg=TEXT_BLACK,
+                     font=FONT).grid(row=1, column=0, columnspan=2, sticky="w", pady=(3, 0))
+            self.lbl_crack = tk.Label(inner4, text="-", bg=BG, fg=TEXT_BLACK, font=FONT_BOLD, anchor="w")
+            self.lbl_crack.grid(row=1, column=2, columnspan=2, sticky="w", pady=(3, 0))
+
             # ── Buttons ───────────────────────────────────────────────────
             btn_frame = tk.Frame(body, bg=BG)
-            btn_frame.pack(padx=8, pady=(8, 10), anchor="e")
+            btn_frame.pack(padx=8, pady=(8, 8), anchor="e")
 
             self._w95_btn(btn_frame, "Clear",
                           self._clear).pack(side="left", padx=(0, 6))
@@ -196719,20 +200025,48 @@ if pwdchkVAR == 9965:
             self._w95_btn(btn_frame, "Quit",
                           self.rootpswchk.destroy).pack(side="left")
 
-            # ── Status bar ────────────────────────────────────────────────
-            self.status = tk.Label(body, text="Type a password to begin.",
-                                   bg=DARK_SHADOW, fg=TITLE_TEXT,
-                                   font=FONT, anchor="w", relief="sunken", bd=1)
-            self.status.pack(fill="x", padx=8, pady=(0, 4))
-
             # initial state
             self._update_ui("", *analyse(""))
 
+        def _build_menu(self):
+            bar = tk.Frame(self.rootpswchk, bg=BG)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=FONT, bg=BG, fg=TEXT_BLACK, activebackground=TITLE_BAR,
+                                       activeforeground=TITLE_TEXT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = tk.Menu(button, tearoff=0, font=FONT, bg=BG, fg=TEXT_BLACK, activebackground=TITLE_BAR,
+                               activeforeground=TITLE_TEXT, selectcolor=TEXT_BLACK)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Exit", command=self.rootpswchk.destroy)
+            m = menubutton("Edit")
+            m.add_command(label="Clear", accelerator="Esc", command=self._clear)
+            m = menubutton("View")
+            m.add_checkbutton(label="Show Password", variable=self.show_var, onvalue=1, offvalue=0,
+                              command=self._toggle_show)
+            m = menubutton("Help")
+            m.add_command(label="Tips for a Strong Password", command=lambda: self._message(
+                "Tips",
+                "- Use at least 12 characters - a short sentence works well.\n"
+                "- Mix upper and lower case, digits and symbols.\n"
+                "- Avoid names, dates, keyboard runs (qwerty, 1234) and repeated characters.\n"
+                "- Use a different password for every account."))
+            m.add_command(label="About", command=lambda: self._message(
+                "About Password Security Checker",
+                "Password Security Checker\n\nThe password is only analysed in this window: it is never saved, "
+                "sent or written anywhere."))
+            self.view_menu = m
+
         # ── Windows 95 group-box frame ────────────────────────────────────────
-        def _groupbox(self, parent, title, x, y, w, h):
-            frame = tk.LabelFrame(parent, text=title,
+        def _groupbox(self, parent, title, *_unused):
+            frame = tk.LabelFrame(parent, text=" " + title + " ",
                                   bg=BG, fg=TEXT_BLACK,
-                                  font=FONT_BOLD,
+                                  font=FONT,
                                   relief="groove", bd=2)
             return frame
 
@@ -196740,10 +200074,8 @@ if pwdchkVAR == 9965:
         def _w95_btn(self, parent, text, cmd):
             btn = tk.Button(parent, text=text, command=cmd,
                             font=FONT, bg=BTN_FACE, fg=TEXT_BLACK,
-                            relief="raised", bd=2, padx=10, pady=3,
-                            activebackground=BG, cursor="arrow")
-            btn.bind("<ButtonPress-1>",   lambda e, b=btn: b.config(relief="sunken"))
-            btn.bind("<ButtonRelease-1>", lambda e, b=btn: b.config(relief="raised"))
+                            relief="raised", bd=2, padx=10, pady=1, width=8,
+                            activebackground=BG, cursor="arrow", highlightthickness=0, takefocus=0)
             return btn
 
         # ── Callbacks ─────────────────────────────────────────────────────────
@@ -196756,7 +200088,9 @@ if pwdchkVAR == 9965:
 
         def _clear(self):
             self.pwd_var.set("")
-            self.entry.focus()
+            self.show_var.set(0)
+            self._toggle_show()
+            self.entry.focus_force()
 
         def _force_analyse(self):
             self._on_change()
@@ -196767,41 +200101,27 @@ if pwdchkVAR == 9965:
             colour = COLORS.get(strength, TEXT_BLACK)
             self.lbl_strength.config(text=strength, fg=colour)
 
-            # Progress bar (280 px wide, 7 possible score values 0-7)
-            max_score = 7
-            fill_w = int(280 * score / max_score)
-            self.bar_canvas.coords(self.bar_rect, 0, 0, fill_w, 20)
-            self.bar_canvas.itemconfig(self.bar_rect, fill=colour)
+            # Progress blocks: one per check passed
+            for i, block in enumerate(self.blocks):
+                self.bar_canvas.itemconfig(block, fill=colour if i < score else INSET_BG)
 
             # Statistics
             self.lbl_len.config(text=str(len(pwd)))
             self.lbl_entropy.config(text=f"{entropy} bits")
+            self.lbl_crack.config(text=crack_time(entropy) if pwd else "-")
 
-            # Details checklist
+            # Details checklist (written once)
             self.detail_text.config(state="normal")
             self.detail_text.delete("1.0", "end")
             for label, passed in checks.items():
-                mark = "[PASS]" if passed else "[FAIL]"
-                line = f"  {mark}  {label}\n"
-                self.detail_text.insert("end", line)
-                tag = f"tag_{label}"
-                end_idx = self.detail_text.index("end-1c")
-                # colour the mark
-                start = self.detail_text.search(mark, "1.0", "end")
-            # re-do with proper tagging
-            self.detail_text.delete("1.0", "end")
-            for i, (label, passed) in enumerate(checks.items(), start=1):
-                mark = "[PASS]" if passed else "[FAIL]"
-                fg   = "#008000" if passed else "#cc0000"
-                line = f"  {mark}  {label}\n"
-                self.detail_text.insert("end", line)
-                # tag the mark portion
-                line_start = f"{i}.0"
-                mark_start = f"{i}.2"
-                mark_end   = f"{i}.{2+len(mark)}"
-                self.detail_text.tag_add(f"t{i}", mark_start, mark_end)
-                self.detail_text.tag_config(f"t{i}", foreground=fg, font=FONT_BOLD)
-
+                if not pwd:
+                    self.detail_text.insert("end", "  [    ]  ", "idle")
+                elif passed:
+                    self.detail_text.insert("end", "  [PASS]  ", "pass")
+                else:
+                    self.detail_text.insert("end", "  [FAIL]  ", "fail")
+                self.detail_text.insert("end", label + "\n", "idle" if not pwd else ())
+            self.detail_text.delete("end-2c", "end-1c")
             self.detail_text.config(state="disabled")
 
             # Status bar
@@ -196813,20 +200133,13 @@ if pwdchkVAR == 9965:
                 msg = "Password is acceptable but could be improved."
             else:
                 msg = f"Password is {strength}."
-            self.status.config(text=f"  {msg}")
+            self.status.config(text=msg)
 
 
     # ── Entry point ────────────────────────────────────────────────────────────
     if __name__ == "__main__":
         rootpswchk = tk.Tk()
         rootpswchk.configure(bg=BG)
-
-        # Try to set the icon / window decorations
-        # try:
-            # rootpswchk.iconbitmap(default="")
-        # except Exception:
-            # pass
-
         app = App(rootpswchk)
         rootpswchk.mainloop()
         
@@ -197927,13 +201240,18 @@ if arpatablevar == 9091:
             validation.mainloop()
 
     # ─── Windows 95 Color Palette ───────────────────────────────────────────────
+    # Network Device Scanner - the original workflow (ping sweep, ARP cache, live host names) unchanged;
+    # only the interface is rebuilt in Windows 95 style. Paste this in place of everything from
+    # "# ─── Windows 95 Color Palette" to the end of the `if arpatablevar == 9091:` block.
+    import tkinter.font as tkfont
+
     BG         = "#c0c0c0"
     BG_DARK    = "#808080"
     BG_LIGHT   = "#ffffff"
     TITLE_BG   = "#000080"
     TITLE_FG   = "#ffffff"
     BTN_BG     = "#c0c0c0"
-    BTN_ACTIVE = "#d4d0c8"
+    BTN_ACTIVE = "#c0c0c0"
     BORDER_DK  = "#404040"
     TEXT_FG    = "#000000"
     SELECT_BG  = "#000080"
@@ -197944,6 +201262,8 @@ if arpatablevar == 9091:
     FONT_TITLE = ("MS Sans Serif", 8, "bold")
 
     REFRESH_OPTIONS = {"Off": 0, "30 sec": 30, "1 min": 60, "5 min": 300}
+    W95_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar (like the original scanner)
 
 
     def w95_frame(parent, **kw):
@@ -197958,11 +201278,15 @@ if arpatablevar == 9091:
             bg=BTN_BG, fg=TEXT_FG, activebackground=BTN_ACTIVE,
             activeforeground=TEXT_FG, relief="raised", bd=2,
             font=FONT_UI, width=width, cursor="arrow",
-            highlightthickness=1, highlightbackground=BORDER_DK
+            highlightthickness=0, disabledforeground=BG_DARK
         )
 
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, bg=BG, fg=TEXT_FG, font=FONT_UI,
+                       activebackground=SELECT_BG, activeforeground=SELECT_FG, disabledforeground=BG_DARK)
 
-    # ─── Network helpers ─────────────────────────────────────────────────────────
+
+    # ─── Network helpers (original, unchanged) ───────────────────────────────────
 
     def get_local_ip():
         try:
@@ -198084,53 +201408,157 @@ if arpatablevar == 9091:
             self._refresh_job  = None
             self._refresh_secs = 0
 
+            self._w95_init_window()       # interface only: Windows 95 frame
             self._build_title_bar()
             self._build_menu_bar()
             self._build_toolbar()
             self._build_info_bar()
+            self._build_status_bar()      # packed before the table so it always stays visible
             self._build_table()
-            self._build_status_bar()
 
+            self.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
             self.after(300, self._start_scan)
+
+        # ══ INTERFACE (Windows 95) ═══════════════════════════════════════════════════
+
+        def _w95_init_window(self):
+            x = max(0, (self.winfo_screenwidth() - 660) // 2)
+            y = max(0, (self.winfo_screenheight() - 520) // 2)
+            self.geometry(f"660x520+{x}+{y}")
+            self._maximized = False
+            self._normal_geometry = None
+            self._minimizing = False
+            if W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR:
+                self.configure(bd=2, relief="raised")
+                self.after(10, self._w95_custom_frame)
+
+        def _w95_custom_frame(self):
+            self.overrideredirect(True)
+            self._w95_taskbar_style()
+
+        def _w95_taskbar_style(self):
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            self.withdraw()
+            self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+        def _w95_on_map(self, event):
+            if event.widget is self and self._minimizing and self.state() == "normal":
+                self._minimizing = False
+                self.overrideredirect(True)
+                self.after(10, self._w95_taskbar_style)
+
+        def _w95_minimize(self):
+            if W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR:
+                self._minimizing = True
+                self.overrideredirect(False)
+            self.iconify()
+
+        def _toggle_zoom(self):
+            if self._maximized:
+                self.geometry(self._normal_geometry)
+            else:
+                self._normal_geometry = self.geometry()
+                x, y, width, height = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                if W95_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                self.geometry(f"{width}x{height}+{x}+{y}")
+            self._maximized = not self._maximized
+            self._btn_max.config(text=self._glyphs["restore" if self._maximized else "max"])
+
+        def _w95_drag_start(self, event):
+            self._drag = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _w95_drag_move(self, event):
+            if W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR and not self._maximized:
+                self.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
+
+        def _w95_grip_start(self, event):
+            self._resize = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+        def _w95_grip_move(self, event):
+            if not self._maximized:
+                x0, y0, width, height = self._resize
+                self.geometry(f"{max(540, width + event.x_root - x0)}x{max(400, height + event.y_root - y0)}")
+
+        def _w95_caption_active(self, active):
+            for widget in (self._caption, self._caption_title, self._caption_icon):
+                widget.config(bg=TITLE_BG if active else BG_DARK)
+            self._caption_title.config(fg=TITLE_FG if active else BG)
 
         # ── Title bar ────────────────────────────────────────────────────────────
         def _build_title_bar(self):
-            bar = tk.Frame(self, bg=TITLE_BG, height=22)
-            bar.pack(fill="x", side="top")
+            marlett = "Marlett" in tkfont.families(self)
+            self._glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                            else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if W95_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                              # the normal Windows title bar is used
+            bar = tk.Frame(self, bg=TITLE_BG, height=20)
+            bar.pack(fill="x", side="top", padx=1, pady=(1, 0))
             bar.pack_propagate(False)
-            tk.Label(bar, text="[NET]", bg=TITLE_BG, fg=TITLE_FG,
-                     font=FONT_BOLD, padx=4).pack(side="left")
-            tk.Label(bar, text="Network Device Scanner",
-                     bg=TITLE_BG, fg=TITLE_FG, font=FONT_TITLE).pack(side="left", padx=2)
-            for label, cmd in [("_", self.iconify), ("[ ]", self._toggle_zoom), ("X", self.destroy)]:
-                tk.Button(bar, text=label, font=FONT_BOLD,
-                          bg=BTN_BG, fg=TEXT_FG, activebackground=BTN_ACTIVE,
-                          relief="raised", bd=2, width=3,
-                          command=cmd, cursor="arrow").pack(side="right", padx=1, pady=1)
+            icon = tk.Canvas(bar, width=16, height=16, bg=TITLE_BG, bd=0, highlightthickness=0)
+            for x0, y0 in ((1, 1), (8, 6)):                         # two little computers on a cable
+                icon.create_rectangle(x0, y0, x0 + 7, y0 + 5, fill=BG, outline="black")
+                icon.create_rectangle(x0 + 1, y0 + 1, x0 + 6, y0 + 4, fill="#008080", outline="")
+            icon.create_line(4, 7, 4, 14, 11, 14, 11, 12, fill="#ffff00")
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Network Device Scanner", bg=TITLE_BG, fg=TITLE_FG,
+                             font=FONT_TITLE, anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self._caption, self._caption_title, self._caption_icon = bar, title, icon
+            glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
 
-        def _toggle_zoom(self):
-            self.state("normal" if self.state() == "zoomed" else "zoomed")
+            def caption_button(key, command):
+                return tk.Button(bar, text=self._glyphs[key], command=command, font=glyph_font,
+                                 image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0,
+                                 bg=BTN_BG, fg=TEXT_FG, activebackground=BTN_BG, relief="raised", bd=2,
+                                 highlightthickness=0, takefocus=0)
+
+            caption_button("close", self.destroy).pack(side="right", padx=(2, 2))
+            self._btn_max = caption_button("max", self._toggle_zoom)
+            self._btn_max.pack(side="right")
+            caption_button("min", self._w95_minimize).pack(side="right")
+            for widget in (bar, title, icon):
+                widget.bind("<ButtonPress-1>", self._w95_drag_start)
+                widget.bind("<B1-Motion>", self._w95_drag_move)
+                widget.bind("<Double-Button-1>", lambda e: self._toggle_zoom())
+            self.bind("<Activate>", lambda e: self._w95_caption_active(True) if e.widget is self else None)
+            self.bind("<Deactivate>", lambda e: self._w95_caption_active(False) if e.widget is self else None)
+            self.bind("<Map>", self._w95_on_map)
 
         # ── Menu bar ─────────────────────────────────────────────────────────────
         def _build_menu_bar(self):
-            mbar = tk.Frame(self, bg=BG, bd=1, relief="raised")
+            mbar = tk.Frame(self, bg=BG)
             mbar.pack(fill="x")
             menus = {
                 "File":  [("Export as TXT...", self._export_txt), None, ("Exit", self.destroy)],
-                "Scan":  [("Scan Now", self._start_scan), None, ("Clear Results", self._clear_table)],
-                "View":  [("Sort by IP",       lambda: self._sort_by("IP Address")),
-                          ("Sort by MAC",      lambda: self._sort_by("MAC Address")),
-                          ("Sort by Hostname", lambda: self._sort_by("Hostname"))],
+                "Scan":  [("Scan Now", self._start_scan), ("Stop", self._stop_scan), None,
+                          ("Clear Results", self._clear_table)],
+                "View":  [("Sort by IP",       lambda: self._header_sort("IP Address")),
+                          ("Sort by MAC",      lambda: self._header_sort("MAC Address")),
+                          ("Sort by Hostname", lambda: self._header_sort("Hostname"))],
                 "Help":  [("About...", self._show_about)],
             }
             for label, items in menus.items():
-                mb = tk.Menubutton(mbar, text=label, bg=BG, fg=TEXT_FG,
-                                   font=FONT_UI, relief="flat",
-                                   activebackground=SELECT_BG,
-                                   activeforeground=SELECT_FG, padx=6)
+                mb = tk.Menubutton(mbar, text=label, bg=BG, fg=TEXT_FG, font=FONT_UI, relief="flat", bd=0,
+                                   activebackground=SELECT_BG, activeforeground=SELECT_FG, padx=6, pady=2,
+                                   underline=0, highlightthickness=0)
                 mb.pack(side="left")
-                menu = tk.Menu(mb, tearoff=0, bg=BG, fg=TEXT_FG, font=FONT_UI,
-                               activebackground=SELECT_BG, activeforeground=SELECT_FG)
+                menu = w95_menu(mb)
                 mb["menu"] = menu
                 for item in items:
                     if item is None:
@@ -198140,44 +201568,241 @@ if arpatablevar == 9091:
 
         # ── Toolbar ──────────────────────────────────────────────────────────────
         def _build_toolbar(self):
-            tb = w95_frame(self)
-            tb.pack(fill="x", padx=2, pady=2)
+            tb = tk.Frame(self, bg=BG, bd=1, relief="raised")
+            tb.pack(fill="x")
 
-            self.btn_scan = w95_button(tb, "Scan", self._start_scan, width=10)
-            self.btn_scan.pack(side="left", padx=4, pady=3)
+            self.btn_scan = w95_button(tb, "Scan", self._start_scan, width=9)
+            self.btn_scan.pack(side="left", padx=(4, 1), pady=3)
 
-            self.btn_stop = w95_button(tb, "Stop", self._stop_scan, width=8)
-            self.btn_stop.pack(side="left", padx=2, pady=3)
+            self.btn_stop = w95_button(tb, "Stop", self._stop_scan, width=9)
+            self.btn_stop.pack(side="left", padx=1, pady=3)
             self.btn_stop.config(state="disabled")
 
-            tk.Frame(tb, bg=BORDER_DK, width=2, relief="sunken",
-                     bd=1).pack(side="left", fill="y", padx=6, pady=3)
+            tk.Frame(tb, bg=BG, width=2, height=22, relief="sunken", bd=1).pack(side="left", padx=6, pady=3)
 
-            tk.Label(tb, text="Auto-refresh:", bg=BG, fg=TEXT_FG,
-                     font=FONT_UI).pack(side="left", padx=(2, 0))
+            tk.Label(tb, text="Auto refresh:", bg=BG, fg=TEXT_FG, font=FONT_UI).pack(side="left", padx=(2, 4))
             self._refresh_var = tk.StringVar(value="Off")
-            opt = tk.OptionMenu(tb, self._refresh_var,
-                                *list(REFRESH_OPTIONS.keys()),
+            opt = tk.OptionMenu(tb, self._refresh_var, *list(REFRESH_OPTIONS.keys()),
                                 command=self._on_refresh_changed)
-            opt.config(bg=BTN_BG, fg=TEXT_FG, activebackground=BTN_ACTIVE,
-                       activeforeground=TEXT_FG, relief="raised", bd=2,
-                       font=FONT_UI, width=6, cursor="arrow", highlightthickness=0)
-            opt["menu"].config(bg=BG, fg=TEXT_FG, font=FONT_UI,
-                               activebackground=SELECT_BG, activeforeground=SELECT_FG)
-            opt.pack(side="left", padx=4, pady=3)
+            opt.config(bg=BG_LIGHT, fg=TEXT_FG, activebackground=BG_LIGHT, activeforeground=TEXT_FG,
+                       relief="sunken", bd=2, font=FONT_UI, width=6, cursor="arrow", highlightthickness=0,
+                       anchor="w")
+            opt["menu"].config(bg=BG, fg=TEXT_FG, font=FONT_UI, activebackground=SELECT_BG,
+                               activeforeground=SELECT_FG)
+            opt.pack(side="left", pady=3)
 
-            tk.Frame(tb, bg=BORDER_DK, width=2, relief="sunken",
-                     bd=1).pack(side="left", fill="y", padx=6, pady=3)
+            tk.Frame(tb, bg=BG, width=2, height=22, relief="sunken", bd=1).pack(side="left", padx=6, pady=3)
 
             self.btn_export = w95_button(tb, "Export TXT", self._export_txt, width=10)
-            self.btn_export.pack(side="left", padx=2, pady=3)
+            self.btn_export.pack(side="left", padx=1, pady=3)
             self.btn_clear = w95_button(tb, "Clear", self._clear_table, width=8)
-            self.btn_clear.pack(side="left", padx=2, pady=3)
+            self.btn_clear.pack(side="left", padx=1, pady=3)
 
-            self.clock_lbl = tk.Label(tb, text="", bg=BG, fg=TEXT_FG, font=FONT_UI,
-                                      bd=1, relief="sunken", padx=6)
+            self.clock_lbl = tk.Label(tb, text="", bg=BG, fg=TEXT_FG, font=FONT_UI, bd=1, relief="sunken", padx=6)
             self.clock_lbl.pack(side="right", padx=6, pady=3)
             self._update_clock()
+
+        # ── Info bar ─────────────────────────────────────────────────────────────
+        def _build_info_bar(self):
+            info = tk.LabelFrame(self, text="This Computer", bg=BG, fg=TEXT_FG, font=FONT_UI, bd=2,
+                                 relief="groove", padx=4, pady=2)
+            info.pack(fill="x", padx=6, pady=(4, 2))
+            try:
+                hn = socket.gethostname()
+            except Exception:
+                hn = "Unknown"
+            for label, value in [("Local IP:", get_local_ip()), ("Hostname:", hn), ("OS:", platform.system())]:
+                tk.Label(info, text=label, bg=BG, fg=TEXT_FG, font=FONT_BOLD).pack(side="left", padx=(4, 2))
+                tk.Label(info, text=value, bg=BG_LIGHT, fg=TEXT_FG, font=FONT_MONO, relief="sunken", bd=2,
+                         padx=4).pack(side="left", padx=(0, 8))
+
+        # ── Results table ─────────────────────────────────────────────────────────
+        def _build_table(self):
+            outer = w95_inset(self)
+            outer.pack(fill="both", expand=True, padx=6, pady=4)
+
+            # Header cells exactly as wide as the columns of the rows (see _row_text)
+            mono = tkfont.Font(self, family=FONT_MONO[0], size=FONT_MONO[1])
+            char = mono.measure("0")
+            col_chars = {"#": 7, "IP Address": 18, "MAC Address": 20, "Hostname": 0}
+            self._header_labels = {}
+            hf = tk.Frame(outer, bg=BG)
+            hf.pack(fill="x")
+            for col, chars in col_chars.items():
+                if chars:
+                    cell = tk.Frame(hf, bg=BG, width=chars * char, height=20)
+                    cell.pack(side="left")
+                    cell.pack_propagate(False)
+                    parent = cell
+                else:
+                    parent = hf
+                lbl = tk.Label(parent, text=col, font=FONT_UI, bg=BTN_BG, fg=TEXT_FG, relief="raised", bd=2,
+                               anchor="w", padx=3)
+                lbl.pack(side="left", fill="both", expand=True)
+                if col != "#":
+                    lbl.bind("<ButtonPress-1>", lambda e, w=lbl: w.config(relief="sunken"))
+                    lbl.bind("<ButtonRelease-1>", lambda e, w=lbl, c=col: (w.config(relief="raised"),
+                                                                           self._header_sort(c)))
+                self._header_labels[col] = lbl
+
+            lf = tk.Frame(outer, bg=BG_LIGHT)
+            lf.pack(fill="both", expand=True)
+
+            vsb = tk.Scrollbar(lf, orient="vertical")
+            vsb.pack(side="right", fill="y")
+            hsb = tk.Scrollbar(lf, orient="horizontal")
+            hsb.pack(side="bottom", fill="x")
+
+            self.listbox = tk.Listbox(
+                lf, font=FONT_MONO, bg=BG_LIGHT, fg=TEXT_FG,
+                selectbackground=SELECT_BG, selectforeground=SELECT_FG,
+                relief="flat", bd=0, activestyle="none",
+                yscrollcommand=vsb.set, xscrollcommand=hsb.set,
+                highlightthickness=0
+            )
+            self.listbox.pack(fill="both", expand=True)
+            vsb.config(command=self.listbox.yview)
+            hsb.config(command=self.listbox.xview)
+            self.listbox.bind("<<ListboxSelect>>", self._on_select)
+            self.listbox.bind("<Button-3>", self._w95_context_menu)
+
+        def _header_sort(self, col):
+            """Interface: sorts with the original _sort_by and shows the direction in the header."""
+            self._sort_by(col)
+            key_map = {"IP Address": "ip", "MAC Address": "mac", "Hostname": "hostname"}
+            for name, lbl in self._header_labels.items():
+                arrow = (" v" if self._sort_rev else " ^") if key_map.get(name) == self._sort_col else ""
+                lbl.config(text=name + arrow)
+
+        def _w95_context_menu(self, event):
+            index = self.listbox.nearest(event.y)
+            if not self._devices or index < 0 or index >= len(self._devices):
+                return
+            self.listbox.selection_clear(0, "end")
+            self.listbox.selection_set(index)
+            self._on_select(None)
+            dev = self._devices[index]
+            menu = w95_menu(self)
+            for label, value in (("Copy IP Address", dev.get("ip", "")), ("Copy MAC Address", dev.get("mac", "")),
+                                 ("Copy Hostname", dev.get("hostname") or "Unknown")):
+                menu.add_command(label=label, command=lambda v=value: (self.clipboard_clear(),
+                                                                       self.clipboard_append(v),
+                                                                       self._set_status(f"Copied: {v}")))
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        # ── Status bar ────────────────────────────────────────────────────────────
+        def _build_status_bar(self):
+            sbar = tk.Frame(self, bg=BG)
+            sbar.pack(fill="x", side="bottom", padx=2, pady=(0, 2))
+            grip = tk.Canvas(sbar, width=14, height=14, bg=BG, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if W95_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=BG_LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=BG_DARK)
+                grip.create_line(13, i + 2, i + 2, 13, fill=BG_DARK)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._w95_grip_start)
+            grip.bind("<B1-Motion>", self._w95_grip_move)
+            self.count_lbl = tk.Label(sbar, text="0 device(s)", anchor="w",
+                                      bg=BG, fg=TEXT_FG, font=FONT_UI,
+                                      bd=1, relief="sunken", width=14, padx=4)
+            self.count_lbl.pack(side="right", padx=1)
+            self.status_lbl = tk.Label(sbar, text="Ready.", anchor="w",
+                                       bg=BG, fg=TEXT_FG, font=FONT_UI,
+                                       bd=1, relief="sunken", padx=4)
+            self.status_lbl.pack(side="left", fill="x", expand=True, padx=1)
+
+        # ── Dialogs ───────────────────────────────────────────────────────────────
+        def _current_focus(self):
+            try:
+                return self.focus_get()
+            except (KeyError, tk.TclError):
+                return None
+
+        def _restore_focus(self, widget=None):
+            """Give the keyboard back to this window (and to the field it was in) after a dialog."""
+            try:
+                target = widget if widget is not None and widget.winfo_exists() else self
+                target.focus_force()
+            except tk.TclError:
+                pass
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it (a message box, a file dialog, another program). A click in a text field
+            gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        def _show_message(self, title, message):
+            previous = self._current_focus()
+            win = tk.Toplevel(self, bg=BG, bd=2, relief="raised")
+            win.bind("<Destroy>", lambda e: e.widget is win and self._restore_focus(previous))
+            win.overrideredirect(True)
+            win.transient(self)
+            win.attributes("-topmost", True)       # always in front of the main window, never hidden behind it
+            tbar = tk.Frame(win, bg=TITLE_BG, height=20)
+            tbar.pack(fill="x", padx=1, pady=(1, 0))
+            tbar.pack_propagate(False)
+            tk.Label(tbar, text=title, bg=TITLE_BG, fg=TITLE_FG, font=FONT_TITLE, padx=4).pack(side="left")
+            tk.Button(tbar, text=self._glyphs["close"], command=win.destroy,
+                      font=("Marlett", 7) if self._glyphs["close"] == "r" else ("MS Sans Serif", 7, "bold"),
+                      image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0,
+                      bg=BTN_BG, relief="raised", bd=2, highlightthickness=0).pack(side="right", padx=2)
+            body = tk.Frame(win, bg=BG, padx=14, pady=12)
+            body.pack(fill="both", expand=True)
+            icon = tk.Canvas(body, width=32, height=32, bg=BG, highlightthickness=0)
+            icon.create_oval(2, 2, 30, 30, fill=BG_LIGHT, outline="black")
+            icon.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+            icon.pack(side="left", anchor="n", padx=(0, 12))
+            tk.Label(body, text=message, bg=BG, fg=TEXT_FG, font=FONT_UI,
+                     wraplength=320, justify="left").pack(side="left")
+            ok = w95_button(win, "OK", win.destroy, width=9)
+            ok.config(font=FONT_BOLD, highlightthickness=1, highlightbackground="black")
+            ok.pack(pady=(0, 12))
+            win.bind("<Return>", lambda e: win.destroy())
+            win.bind("<Escape>", lambda e: win.destroy())
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry(f"+{self.winfo_rootx() + (self.winfo_width() - w) // 2}"
+                         f"+{self.winfo_rooty() + (self.winfo_height() - h) // 2}")
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                # the grab only once the window is really on screen; if that fails, nothing is blocked
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+
+        def _show_about(self):
+            self._show_message(
+                "About Network Device Scanner",
+                "Network Device Scanner v3.0\n\n"
+                "Step 1: Ping sweep (128 threads, 300ms)\n"
+                "Step 2: Read ARP cache  (arp -a)\n"
+                "Step 3: Resolve hostnames live\n"
+                "        (10 threads, no timeout)\n\n"
+                "Devices appear instantly.\n"
+                "Hostnames fill in as DNS responds.\n\n"
+                "Built by Tudor Marmureanu."
+            )
+
+        # ══ WORKFLOW (original, unchanged) ════════════════════════════════════════════
 
         def _update_clock(self):
             self.clock_lbl.config(text=datetime.now().strftime("%I:%M %p"))
@@ -198205,73 +201830,6 @@ if arpatablevar == 9091:
                 self._start_scan(auto=True)
             else:
                 self._schedule_refresh()
-
-        # ── Info bar ─────────────────────────────────────────────────────────────
-        def _build_info_bar(self):
-            info = w95_frame(self)
-            info.pack(fill="x", padx=4, pady=2)
-            try:
-                hn = socket.gethostname()
-            except Exception:
-                hn = "Unknown"
-            for label, value in [("Local IP:", get_local_ip()), ("Hostname:", hn), ("OS:", platform.system())]:
-                tk.Label(info, text=label, bg=BG, fg=TEXT_FG,
-                         font=FONT_BOLD).pack(side="left", padx=6, pady=2)
-                tk.Label(info, text=value, bg=BG_LIGHT, fg=TEXT_FG,
-                         font=FONT_MONO, relief="sunken", bd=1,
-                         padx=8, pady=1).pack(side="left", padx=2)
-
-        # ── Results table ─────────────────────────────────────────────────────────
-        def _build_table(self):
-            outer = w95_inset(self)
-            outer.pack(fill="both", expand=True, padx=4, pady=2)
-
-            col_widths = {"#": 3, "IP Address": 15, "MAC Address": 19, "Hostname": 32}
-            col_keys   = ["#", "IP Address", "MAC Address", "Hostname"]
-
-            hf = tk.Frame(outer, bg=BG)
-            hf.pack(fill="x")
-            for col in col_keys:
-                tk.Button(hf, text=col, font=FONT_BOLD,
-                          bg=BTN_BG, fg=TEXT_FG, relief="raised", bd=2,
-                          width=col_widths[col], anchor="w", padx=4,
-                          activebackground=BTN_ACTIVE,
-                          command=lambda c=col: self._sort_by(c)).pack(side="left")
-
-            lf = tk.Frame(outer, bg=BG_LIGHT)
-            lf.pack(fill="both", expand=True)
-
-            vsb = tk.Scrollbar(lf, orient="vertical", bg=BG,
-                               troughcolor=BG, activebackground=BG_DARK)
-            vsb.pack(side="right", fill="y")
-            hsb = tk.Scrollbar(lf, orient="horizontal", bg=BG,
-                               troughcolor=BG, activebackground=BG_DARK)
-            hsb.pack(side="bottom", fill="x")
-
-            self.listbox = tk.Listbox(
-                lf, font=FONT_MONO, bg=BG_LIGHT, fg=TEXT_FG,
-                selectbackground=SELECT_BG, selectforeground=SELECT_FG,
-                relief="flat", bd=0, activestyle="none",
-                yscrollcommand=vsb.set, xscrollcommand=hsb.set,
-                highlightthickness=0
-            )
-            self.listbox.pack(fill="both", expand=True)
-            vsb.config(command=self.listbox.yview)
-            hsb.config(command=self.listbox.xview)
-            self.listbox.bind("<<ListboxSelect>>", self._on_select)
-
-        # ── Status bar ────────────────────────────────────────────────────────────
-        def _build_status_bar(self):
-            sbar = tk.Frame(self, bg=BG, bd=1, relief="sunken")
-            sbar.pack(fill="x", side="bottom")
-            self.status_lbl = tk.Label(sbar, text="Ready.", anchor="w",
-                                       bg=BG, fg=TEXT_FG, font=FONT_UI,
-                                       bd=1, relief="sunken", padx=6)
-            self.status_lbl.pack(side="left", fill="x", expand=True, ipady=2)
-            self.count_lbl = tk.Label(sbar, text="0 device(s)", anchor="center",
-                                      bg=BG, fg=TEXT_FG, font=FONT_UI,
-                                      bd=1, relief="sunken", width=16)
-            self.count_lbl.pack(side="right", ipady=2)
 
         # ── Table rendering ───────────────────────────────────────────────────────
         def _row_text(self, i, dev):
@@ -198455,36 +202013,6 @@ if arpatablevar == 9091:
                 self._set_status(f"Exported to: {path}")
             except Exception as e:
                 self._show_message("Export Error", str(e))
-
-        # ── Dialogs ───────────────────────────────────────────────────────────────
-        def _show_message(self, title, message):
-            win = tk.Toplevel(self, bg=BG)
-            win.title(title)
-            win.resizable(False, False)
-            win.grab_set()
-            tbar = tk.Frame(win, bg=TITLE_BG, height=22)
-            tbar.pack(fill="x")
-            tbar.pack_propagate(False)
-            tk.Label(tbar, text=title, bg=TITLE_BG, fg=TITLE_FG,
-                     font=FONT_TITLE, padx=6).pack(side="left")
-            body = tk.Frame(win, bg=BG, padx=16, pady=12)
-            body.pack(fill="both", expand=True)
-            tk.Label(body, text=message, bg=BG, fg=TEXT_FG, font=FONT_UI,
-                     wraplength=300, justify="left").pack(pady=8)
-            w95_button(body, "OK", win.destroy, width=8).pack(pady=4)
-
-        def _show_about(self):
-            self._show_message(
-                "About Network Device Scanner",
-                "Network Device Scanner v3.0\n\n"
-                "Step 1: Ping sweep (128 threads, 300ms)\n"
-                "Step 2: Read ARP cache  (arp -a)\n"
-                "Step 3: Resolve hostnames live\n"
-                "        (128 threads, no timeout)\n\n"
-                "Devices appear instantly.\n"
-                "Hostnames fill in as DNS responds.\n\n"
-                "Built by Tudor Marmureanu."
-            )
 
 
     if __name__ == "__main__":
@@ -203507,7 +207035,7 @@ if rszbvar == 67855:
 
             # Rularea buclei principale
             validation.mainloop()
-            
+
     #!/usr/bin/env python3
     # -*- coding: utf-8 -*-
     """
@@ -203528,7 +207056,7 @@ if rszbvar == 67855:
         import threading
         import tkinter as tk
         import tkinter.font as tkfont
-        from tkinter import filedialog, messagebox
+        from tkinter import filedialog
 
         try:
             from PIL import Image, ImageOps, ImageSequence
@@ -203538,7 +207066,8 @@ if rszbvar == 67855:
             PIL_OK = False
 
         IS_WINDOWS = os.name == "nt"
-        CUSTOM_TITLE_BAR = IS_WINDOWS
+        W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+        CUSTOM_TITLE_BAR = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
         FACE, SHADOW, NAVY, WHITE, BLACK = "#c0c0c0", "#808080", "#000080", "#ffffff", "#000000"
         FONT, FONT_BOLD, FONT_MONO = ("MS Sans Serif", 8), ("MS Sans Serif", 8, "bold"), ("Courier New", 9)
         APP = "Bulk Image Resizer"
@@ -203647,22 +207176,31 @@ if rszbvar == 67855:
             os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
             temp = out + ".part" + os.path.splitext(out)[1]   # never leave half a file behind
             low = out.lower()
-            if animated:
-                frames[0].save(temp, save_all=True, append_images=frames[1:], duration=durations, loop=loop,
-                               disposal=2)
-                new_size = frames[0].size
-            else:
-                if low.endswith((".jpg", ".jpeg")):
-                    flatten_for_jpg(resized).save(temp, "JPEG", quality=opts["quality"], optimize=True)
-                elif low.endswith(".webp"):
-                    resized.save(temp, "WEBP", quality=opts["quality"])
-                elif low.endswith((".bmp",)):
-                    (resized.convert("RGB") if resized.mode not in ("RGB", "L", "P") else resized).save(temp, "BMP")
+            if not animated and resized.mode == "CMYK" and low.endswith((".png", ".webp", ".gif", ".ico")):
+                resized = resized.convert("RGB")             # print-ready CMYK JPGs: PNG / WEBP need RGB
+            try:
+                if animated:
+                    frames[0].save(temp, save_all=True, append_images=frames[1:], duration=durations, loop=loop,
+                                   disposal=2)
+                    new_size = frames[0].size
                 else:
-                    fmt = {".png": "PNG", ".gif": "GIF", ".tif": "TIFF", ".tiff": "TIFF", ".ico": "ICO"}.get(
-                        os.path.splitext(low)[1])
-                    resized.save(temp, fmt)
-                new_size = resized.size
+                    if low.endswith((".jpg", ".jpeg")):
+                        flatten_for_jpg(resized).save(temp, "JPEG", quality=opts["quality"], optimize=True)
+                    elif low.endswith(".webp"):
+                        resized.save(temp, "WEBP", quality=opts["quality"])
+                    elif low.endswith((".bmp",)):
+                        (resized.convert("RGB") if resized.mode not in ("RGB", "L", "P") else resized).save(temp, "BMP")
+                    else:
+                        fmt = {".png": "PNG", ".gif": "GIF", ".tif": "TIFF", ".tiff": "TIFF", ".ico": "ICO"}.get(
+                            os.path.splitext(low)[1])
+                        resized.save(temp, fmt)
+                    new_size = resized.size
+            except Exception:
+                try:
+                    os.remove(temp)                          # a failed save must not leave a .part file
+                except OSError:
+                    pass
+                raise
             os.replace(temp, out)
             return size_before, new_size
 
@@ -203708,15 +207246,119 @@ if rszbvar == 67855:
                 self._toggle_mode_fields()
                 self._toggle_output_fields()
                 self.protocol("WM_DELETE_WINDOW", self.on_close)
+                self.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
                 if CUSTOM_TITLE_BAR:
                     self.after(10, self._enable_custom_frame)
                 if not PIL_OK:
-                    self.after(200, lambda: messagebox.showerror(APP, "The Pillow library is not installed.\n\n"
-                                                                      "Install it with:  pip install Pillow", parent=self))
+                    self.after(200, lambda: self.dialog(APP, "The Pillow library is not installed.\n\n"
+                                                             "Install it with:  pip install Pillow", "error"))
+
+            # ----- Windows 95 message box (replaces tkinter.messagebox) ---------------
+            def _current_focus(self):
+                try:
+                    return self.focus_get()
+                except (KeyError, tk.TclError):
+                    return None
+
+            def _restore_focus(self, widget=None):
+                """Give the keyboard back to this window (and to the field it was in) after a dialog."""
+                try:
+                    target = widget if widget is not None and widget.winfo_exists() else self
+                    target.focus_force()
+                except tk.TclError:
+                    pass
+
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it (a message box, a file dialog, another program). A click in a text field
+                gives it the keyboard again."""
+                widget = event.widget
+                if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                    try:
+                        widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            def dialog(self, title, message, icon="info", buttons=("OK",), default=0):
+                """Modal Windows 95 message box, always in front of this window (a native message box can open
+                behind a window without a Windows title bar and leave it blocked). Returns the pressed button."""
+                result = {"value": None}
+                previous = self._current_focus()
+                win = tk.Toplevel(self)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(self)
+                win.attributes("-topmost", True)
+
+                def close(value=None):
+                    result["value"] = value
+                    win.destroy()
+
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                tk.Label(bar, text=title, font=FONT_BOLD, bg=NAVY, fg=WHITE).pack(side="left", padx=4)
+                tk.Button(bar, text=self.glyphs["close"], command=lambda: close(buttons[-1] if len(buttons) > 1 else None),
+                          font=("Marlett", 7) if self.glyphs["close"] == "r" else ("MS Sans Serif", 7, "bold"),
+                          image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=FACE,
+                          relief="raised", bd=2, highlightthickness=0, takefocus=0).pack(side="right", padx=2)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(14, 8))
+                picture = tk.Canvas(body, width=32, height=32, bg=FACE, highlightthickness=0, bd=0)
+                if icon == "error":
+                    picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                    picture.create_line(10, 10, 22, 22, fill=WHITE, width=3)
+                    picture.create_line(22, 10, 10, 22, fill=WHITE, width=3)
+                elif icon == "warning":
+                    picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=BLACK)
+                    picture.create_text(16, 19, text="!", fill=BLACK, font=("Times New Roman", 15, "bold"))
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=WHITE, outline=BLACK)
+                    picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                        font=("Times New Roman", 16, "bold"))
+                picture.pack(side="left", anchor="n", padx=(0, 14))
+                tk.Label(body, text=message, font=FONT, bg=FACE, justify="left", wraplength=560).pack(side="left")
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                for index, text in enumerate(buttons):
+                    tk.Button(row, text=text, command=lambda t=text: close(t), width=10,
+                              font=FONT_BOLD if index == default else FONT, bg=FACE, activebackground=FACE,
+                              relief="raised", bd=2, highlightthickness=1 if index == default else 0,
+                              highlightbackground=BLACK).pack(side="left", padx=4)
+                win.bind("<Return>", lambda _e: close(buttons[default]))
+                win.bind("<Escape>", lambda _e: close(buttons[-1]))
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                x = self.winfo_rootx() + max(0, (self.winfo_width() - w) // 2)
+                y = self.winfo_rooty() + max(0, (self.winfo_height() - h) // 2)
+                win.geometry(f"+{x}+{y}")
+                win.lift()
+                win.focus_force()
+
+                def take_clicks():
+                    # the grab only once the window is really on screen; if that fails, nothing is blocked
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                self.wait_window(win)
+                self._restore_focus(previous)
+                return result["value"]
 
             # ----- Windows 95 frame ---------------------------------------------------
 
             def _build_titlebar(self):
+                marlett = "Marlett" in tkfont.families(self)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not CUSTOM_TITLE_BAR:
+                    return                                       # the normal Windows title bar is used
                 self.caption = tk.Frame(self, bg=NAVY, height=20)
                 self.caption.pack(side="top", fill="x", padx=1, pady=(1, 0))
                 self.caption.pack_propagate(False)
@@ -203728,11 +207370,7 @@ if rszbvar == 67855:
                 self.caption_icon = icon
                 self.caption_title = tk.Label(self.caption, text=APP, font=FONT_BOLD, bg=NAVY, fg=WHITE, anchor="w")
                 self.caption_title.pack(side="left", fill="x", expand=True)
-                marlett = "Marlett" in tkfont.families(self)
-                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
-                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
                 glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
-                self._pixel = tk.PhotoImage(width=1, height=1)
 
                 def caption_button(key, command):
                     return tk.Button(self.caption, text=self.glyphs[key], command=command, font=glyph_font,
@@ -203753,6 +207391,8 @@ if rszbvar == 67855:
                 self.bind("<Map>", self._on_map)
 
             def _set_caption_active(self, active):
+                if not hasattr(self, "caption"):
+                    return
                 for widget in (self.caption, self.caption_title, self.caption_icon):
                     widget.config(bg=NAVY if active else SHADOW)
                 self.caption_title.config(fg=WHITE if active else FACE)
@@ -203849,8 +207489,8 @@ if rszbvar == 67855:
                 m.add_command(label="Stop", accelerator="Esc", command=self.stop_processing)
                 m = menubutton("Help")
                 m.add_command(label="How to Use", accelerator="F1", command=self.show_help)
-                m.add_command(label="About", command=lambda: messagebox.showinfo(
-                    "About", f"{APP}\n\nResize many pictures at once.", parent=self))
+                m.add_command(label="About", command=lambda: self.dialog(
+                    "About", f"{APP}\n\nResize many pictures at once."))
                 for key, action in (("<Control-o>", self.add_files), ("<Control-f>", self.add_folder),
                                     ("<F5>", self.start_processing), ("<Escape>", self.stop_processing),
                                     ("<F1>", self.show_help)):
@@ -204139,14 +207779,14 @@ if rszbvar == 67855:
                         opts["height"] = positive(self.height_var, "Height")
                 except ValueError as exc:
                     if not quiet:
-                        messagebox.showerror("Invalid value", str(exc) if "must" in str(exc) else
-                                             "The percentage must be a number.", parent=self)
+                        self.dialog("Invalid value", str(exc) if "must" in str(exc) else
+                                    "The percentage must be a number.", "error")
                     return None
                 opts["output_mode"] = self.output_mode.get()
                 if opts["output_mode"] == "folder":
                     folder = self.output_dir.get().strip()
                     if not folder and not quiet:
-                        messagebox.showerror(APP, "Choose an output folder, or select 'Overwrite'.", parent=self)
+                        self.dialog(APP, "Choose an output folder, or select 'Overwrite'.", "error")
                         return None
                     opts.update(output_dir=os.path.abspath(folder) if folder else "", suffix=self.suffix_var.get(),
                                 format=self.format_var.get())
@@ -204156,17 +207796,17 @@ if rszbvar == 67855:
                 if self.working:
                     return
                 if not PIL_OK:
-                    messagebox.showerror(APP, "Install Pillow:  pip install Pillow", parent=self)
+                    self.dialog(APP, "Install Pillow:  pip install Pillow", "error")
                     return
                 if not self.files:
-                    messagebox.showwarning(APP, "Add at least one image.", parent=self)
+                    self.dialog(APP, "Add at least one image.", "warning")
                     return
                 opts = self._gather_opts()
                 if opts is None:
                     return
-                if opts["output_mode"] == "overwrite" and not messagebox.askyesno(
+                if opts["output_mode"] == "overwrite" and self.dialog(
                         "Confirm", f"You are about to OVERWRITE {len(self.files)} original file(s).\nThis cannot be undone. "
-                                   "Continue?", parent=self):
+                                   "Continue?", "warning", ("Yes", "No"), default=1) != "Yes":
                     return
                 plan = plan_outputs(list(self.files), opts)
                 renamed = sum(1 for src, out, _e in plan if out and os.path.splitext(os.path.basename(out))[0] !=
@@ -204242,10 +207882,10 @@ if rszbvar == 67855:
                 self._log(summary, "ok" if not errors else "error")
                 if kind == "done":
                     self._draw_progress(1)
-                messagebox.showinfo(APP, summary.replace("   ", "\n"), parent=self)
+                self.dialog(APP, summary.replace("   ", "\n"), "info")
 
             def show_help(self):
-                messagebox.showinfo(
+                self.dialog(
                     "How to Use",
                     "1. Add pictures (Ctrl+O) or a whole folder (Ctrl+F).\n"
                     "   Click a picture in the list: the status bar shows its new size.\n"
@@ -204255,12 +207895,11 @@ if rszbvar == 67855:
                     "   originals. Pictures with the same name get ' (2)', ' (3)'... instead of\n"
                     "   replacing each other.\n"
                     "4. Start Resizing (F5). Stop (Esc) halts after the current picture.\n\n"
-                    "Phone photos are turned the right way up; animated GIFs keep their animation.",
-                    parent=self)
+                    "Phone photos are turned the right way up; animated GIFs keep their animation.")
 
             def on_close(self):
-                if self.working and not messagebox.askyesno(APP, "Pictures are still being resized. Close anyway?",
-                                                            parent=self):
+                if self.working and self.dialog(APP, "Pictures are still being resized. Close anyway?", "question",
+                                                ("Yes", "No"), default=1) != "Yes":
                     return
                 self.cancel.set()
                 self.destroy()
@@ -204271,650 +207910,6 @@ if rszbvar == 67855:
 
     if __name__ == "__main__":
         ImageResizer95()
-
-    # import os
-    # import threading
-    # import queue
-    # import tkinter as tk
-    # from tkinter import filedialog, messagebox
-
-    # # ---------------------------------------------------------------------------
-    # # Pillow (checked at runtime, not at compile time)
-    # # ---------------------------------------------------------------------------
-    # try:
-        # from PIL import Image
-        # PIL_OK = True
-        # try:
-            # RESAMPLE = Image.Resampling.LANCZOS      # Pillow >= 9.1
-        # except AttributeError:
-            # RESAMPLE = Image.LANCZOS                 # older Pillow
-    # except Exception:
-        # PIL_OK = False
-        # RESAMPLE = None
-
-    # # ---------------------------------------------------------------------------
-    # # Windows 95 palette and fonts
-    # # ---------------------------------------------------------------------------
-    # GRAY      = "#C0C0C0"   # classic silver gray
-    # DARKGRAY  = "#808080"   # shadow
-    # LIGHT     = "#DFDFDF"   # highlight
-    # WHITE     = "#FFFFFF"
-    # BLACK     = "#000000"
-    # NAVY      = "#000080"   # title bar
-    # NAVYTXT   = "#FFFFFF"
-    # DISABLED  = "#808080"
-
-    # FONT       = ("MS Sans Serif", 9)
-    # FONT_BOLD  = ("MS Sans Serif", 9, "bold")
-    # FONT_MONO  = ("Courier New", 9)
-
-    # IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp",
-                # ".tif", ".tiff", ".ico")
-
-
-    # # ---------------------------------------------------------------------------
-    # # Win95-styled widgets
-    # # ---------------------------------------------------------------------------
-    # def w95_button(master, text, command, **kw):
-        # kw.setdefault("font", FONT)
-        # return tk.Button(
-            # master, text=text, command=command,
-            # bg=GRAY, fg=BLACK, activebackground=GRAY, activeforeground=BLACK,
-            # relief=tk.RAISED, bd=2, padx=8, pady=2,
-            # highlightthickness=0, cursor="hand2", **kw)
-
-
-    # def w95_label(master, text, **kw):
-        # kw.setdefault("font", FONT)
-        # return tk.Label(master, text=text, bg=GRAY, fg=BLACK, **kw)
-
-
-    # def w95_entry(master, textvariable, width=8, **kw):
-        # kw.setdefault("font", FONT)
-        # return tk.Entry(
-            # master, textvariable=textvariable, width=width,
-            # bg=WHITE, fg=BLACK, relief=tk.SUNKEN, bd=2,
-            # highlightthickness=0,
-            # disabledbackground=GRAY, disabledforeground=DARKGRAY, **kw)
-
-
-    # def w95_radio(master, text, variable, value, command=None):
-        # return tk.Radiobutton(
-            # master, text=text, variable=variable, value=value, command=command,
-            # bg=GRAY, fg=BLACK, activebackground=GRAY, selectcolor=WHITE,
-            # font=FONT, highlightthickness=0, anchor="w")
-
-
-    # def w95_check(master, text, variable, command=None):
-        # return tk.Checkbutton(
-            # master, text=text, variable=variable, command=command,
-            # bg=GRAY, fg=BLACK, activebackground=GRAY, selectcolor=WHITE,
-            # font=FONT, highlightthickness=0, anchor="w")
-
-
-    # def w95_group(master, title):
-        # """Emulates a Win95 group box: bold label + etched border."""
-        # outer = tk.Frame(master, bg=GRAY)
-        # tk.Label(outer, text=title, bg=GRAY, fg=BLACK, font=FONT_BOLD).pack(anchor="w", padx=2)
-        # inner = tk.Frame(outer, bg=GRAY, relief=tk.GROOVE, bd=2)
-        # inner.pack(fill=tk.BOTH, expand=True)
-        # return outer, inner
-
-
-    # # ---------------------------------------------------------------------------
-    # # Segmented progress bar (Win95 style) drawn on a Canvas
-    # # ---------------------------------------------------------------------------
-    # class Win95Progress(tk.Canvas):
-        # def __init__(self, master, width=360, height=20):
-            # super().__init__(master, width=width, height=height,
-                             # bg=WHITE, relief=tk.SUNKEN, bd=2, highlightthickness=0)
-            # self._pw = width
-            # self._ph = height
-            # self._fraction = 0.0
-
-        # def set(self, fraction):
-            # self._fraction = max(0.0, min(1.0, fraction))
-            # self.delete("all")
-            # block_w = 10
-            # gap = 2
-            # usable = self._pw * self._fraction
-            # x = 2
-            # while x + block_w <= usable:
-                # self.create_rectangle(x, 2, x + block_w, self._ph - 2,
-                                       # fill=NAVY, outline=NAVY)
-                # x += block_w + gap
-            # self.update_idletasks()
-
-
-    # # ---------------------------------------------------------------------------
-    # # Application
-    # # ---------------------------------------------------------------------------
-    # class ResizerApp:
-        # def __init__(self, rootrszb):
-            # self.rootrszb = rootrszb
-            # self.files = []            # list of absolute, unique paths, in order
-            # self.msg_queue = queue.Queue()
-            # self.working = False
-
-            # rootrszb.title("Bulk Image Resizer")
-            # rootrszb.configure(bg=GRAY)
-            # rootrszb.geometry("640x720")
-            # rootrszb.minsize(600, 640)
-
-            # # state variables
-            # self.mode          = tk.StringVar(value="percent")
-            # self.percent_var   = tk.StringVar(value="50")
-            # self.width_var     = tk.StringVar(value="1920")
-            # self.height_var    = tk.StringVar(value="1080")
-            # self.keep_aspect   = tk.BooleanVar(value=True)
-            # self.recursive     = tk.BooleanVar(value=True)
-            # self.output_mode   = tk.StringVar(value="folder")
-            # self.output_dir    = tk.StringVar(value="")
-            # self.suffix_var    = tk.StringVar(value="_resized")
-            # self.format_var    = tk.StringVar(value="keep")
-            # self.quality_var   = tk.IntVar(value=85)
-
-            # self._build_menu()
-            # self._build_titlebar()
-            # self._build_ui()
-            # self._toggle_mode_fields()
-            # self._toggle_output_fields()
-
-            # if not PIL_OK:
-                # messagebox.showerror(
-                    # "Pillow missing",
-                    # "The Pillow library is not installed.\n\n"
-                    # "Install it with:\n    pip install Pillow\n\n"
-                    # "Then reopen the application.")
-
-        # # ------------------------------------------------------------------ menu
-        # def _build_menu(self):
-            # menubar = tk.Menu(self.rootrszb, bg=GRAY, fg=BLACK, font=FONT,
-                              # activebackground=NAVY, activeforeground=WHITE)
-            # filem = tk.Menu(menubar, tearoff=0, bg=GRAY, fg=BLACK, font=FONT,
-                            # activebackground=NAVY, activeforeground=WHITE)
-            # filem.add_command(label="Add images...", command=self.add_files)
-            # filem.add_command(label="Add folder...", command=self.add_folder)
-            # filem.add_separator()
-            # filem.add_command(label="Clear list", command=self.clear_files)
-            # filem.add_separator()
-            # filem.add_command(label="Exit", command=self.rootrszb.destroy)
-            # menubar.add_cascade(label="File", menu=filem)
-
-            # helpm = tk.Menu(menubar, tearoff=0, bg=GRAY, fg=BLACK, font=FONT,
-                            # activebackground=NAVY, activeforeground=WHITE)
-            # helpm.add_command(label="About...", command=self._about)
-            # menubar.add_cascade(label="Help", menu=helpm)
-
-            # self.rootrszb.config(menu=menubar)
-
-        # def _about(self):
-            # messagebox.showinfo(
-                # "About",
-                # "Bulk Image Resizer  v1.0\n\n"
-                # "Resize images in bulk.\n")
-
-        # # -------------------------------------------------------------- titlebar
-        # def _build_titlebar(self):
-            # bar = tk.Frame(self.rootrszb, bg=NAVY, height=24)
-            # bar.pack(fill=tk.X, padx=3, pady=(3, 0))
-            # bar.pack_propagate(False)
-
-            # tk.Label(bar, text="Bulk Image Resizer", bg=NAVY, fg=NAVYTXT,
-                     # font=FONT_BOLD).pack(side=tk.LEFT, padx=2) #\u29c9   
-
-            # btns = tk.Frame(bar, bg=NAVY)
-            # btns.pack(side=tk.RIGHT, padx=2)
-            # for txt, cmd in (("_", self.rootrszb.iconify),
-                             # ("\u25a1", lambda: None),
-                             # ("\u2715", self.rootrszb.destroy)):
-                # tk.Button(btns, text=txt, command=cmd, bg=GRAY, fg=BLACK,
-                          # relief=tk.RAISED, bd=2, font=("MS Sans Serif", 7, "bold"),
-                          # width=2, highlightthickness=0).pack(side=tk.LEFT, padx=1)
-
-        # # -------------------------------------------------------------------- ui
-        # def _build_ui(self):
-            # main = tk.Frame(self.rootrszb, bg=GRAY)
-            # main.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
-
-            # # ---------------- File list ----------------
-            # g_out, g_files = w95_group(main, "Selected images")
-            # g_out.pack(fill=tk.BOTH, expand=True)
-
-            # list_row = tk.Frame(g_files, bg=GRAY)
-            # list_row.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-
-            # scroll = tk.Scrollbar(list_row, bg=GRAY, troughcolor=GRAY)
-            # scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-            # self.listbox = tk.Listbox(
-                # list_row, bg=WHITE, fg=BLACK, relief=tk.SUNKEN, bd=2,
-                # font=FONT_MONO, height=8, selectmode=tk.EXTENDED,
-                # highlightthickness=0, yscrollcommand=scroll.set,
-                # selectbackground=NAVY, selectforeground=WHITE)
-            # self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            # scroll.config(command=self.listbox.yview)
-
-            # btn_row = tk.Frame(g_files, bg=GRAY)
-            # btn_row.pack(fill=tk.X, padx=4, pady=(0, 4))
-            # w95_button(btn_row, "Add images...", self.add_files).pack(side=tk.LEFT, padx=2)
-            # w95_button(btn_row, "Add folder...", self.add_folder).pack(side=tk.LEFT, padx=2)
-            # w95_button(btn_row, "Remove selected", self.remove_selected).pack(side=tk.LEFT, padx=2)
-            # w95_button(btn_row, "Clear all", self.clear_files).pack(side=tk.LEFT, padx=2)
-
-            # w95_check(g_files, "Include subfolders when adding a folder",
-                      # self.recursive).pack(anchor="w", padx=6, pady=(0, 4))
-
-            # self.count_lbl = w95_label(g_files, "0 images in list")
-            # self.count_lbl.pack(anchor="w", padx=6, pady=(0, 4))
-
-            # # ---------------- Dimensions ----------------
-            # g_dim_o, g_dim = w95_group(main, "Resize")
-            # g_dim_o.pack(fill=tk.X, pady=(6, 0))
-
-            # # row 1: percent
-            # r1 = tk.Frame(g_dim, bg=GRAY); r1.pack(fill=tk.X, padx=6, pady=2)
-            # w95_radio(r1, "Percentage:", self.mode, "percent",
-                      # self._toggle_mode_fields).pack(side=tk.LEFT)
-            # self.e_percent = w95_entry(r1, self.percent_var, width=6)
-            # self.e_percent.pack(side=tk.LEFT, padx=4)
-            # w95_label(r1, "%").pack(side=tk.LEFT)
-
-            # # row 2: fit
-            # r2 = tk.Frame(g_dim, bg=GRAY); r2.pack(fill=tk.X, padx=6, pady=2)
-            # w95_radio(r2, "Fit within (max W x H):", self.mode, "fit",
-                      # self._toggle_mode_fields).pack(side=tk.LEFT)
-            # self.e_fit_w = w95_entry(r2, self.width_var, width=6)
-            # self.e_fit_w.pack(side=tk.LEFT, padx=4)
-            # w95_label(r2, "x").pack(side=tk.LEFT)
-            # self.e_fit_h = w95_entry(r2, self.height_var, width=6)
-            # self.e_fit_h.pack(side=tk.LEFT, padx=4)
-            # w95_label(r2, "px").pack(side=tk.LEFT)
-
-            # # row 3: exact
-            # r3 = tk.Frame(g_dim, bg=GRAY); r3.pack(fill=tk.X, padx=6, pady=2)
-            # w95_radio(r3, "Exact (W x H):", self.mode, "exact",
-                      # self._toggle_mode_fields).pack(side=tk.LEFT)
-            # self.e_ex_w = w95_entry(r3, self.width_var, width=6)
-            # self.e_ex_w.pack(side=tk.LEFT, padx=4)
-            # w95_label(r3, "x").pack(side=tk.LEFT)
-            # self.e_ex_h = w95_entry(r3, self.height_var, width=6)
-            # self.e_ex_h.pack(side=tk.LEFT, padx=4)
-            # w95_label(r3, "px").pack(side=tk.LEFT)
-
-            # # row 4: width only / height only
-            # r4 = tk.Frame(g_dim, bg=GRAY); r4.pack(fill=tk.X, padx=6, pady=2)
-            # w95_radio(r4, "Width only:", self.mode, "width",
-                      # self._toggle_mode_fields).pack(side=tk.LEFT)
-            # self.e_only_w = w95_entry(r4, self.width_var, width=6)
-            # self.e_only_w.pack(side=tk.LEFT, padx=4)
-            # w95_label(r4, "px").pack(side=tk.LEFT, padx=(0, 16))
-            # w95_radio(r4, "Height only:", self.mode, "height",
-                      # self._toggle_mode_fields).pack(side=tk.LEFT)
-            # self.e_only_h = w95_entry(r4, self.height_var, width=6)
-            # self.e_only_h.pack(side=tk.LEFT, padx=4)
-            # w95_label(r4, "px").pack(side=tk.LEFT)
-
-            # self.chk_aspect = w95_check(
-                # g_dim, "Keep aspect ratio (applies to 'Exact' mode)",
-                # self.keep_aspect)
-            # self.chk_aspect.pack(anchor="w", padx=6, pady=(2, 4))
-
-            # # ---------------- Output ----------------
-            # g_o_o, g_o = w95_group(main, "Save")
-            # g_o_o.pack(fill=tk.X, pady=(6, 0))
-
-            # w95_radio(g_o, "Overwrite original images", self.output_mode,
-                      # "overwrite", self._toggle_output_fields).pack(anchor="w", padx=6, pady=2)
-            # w95_radio(g_o, "Save to an output folder:", self.output_mode,
-                      # "folder", self._toggle_output_fields).pack(anchor="w", padx=6, pady=2)
-
-            # of = tk.Frame(g_o, bg=GRAY); of.pack(fill=tk.X, padx=24, pady=2)
-            # self.e_outdir = w95_entry(of, self.output_dir, width=40)
-            # self.e_outdir.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            # self.btn_browse = w95_button(of, "Browse...", self.browse_output)
-            # self.btn_browse.pack(side=tk.LEFT, padx=4)
-
-            # sf = tk.Frame(g_o, bg=GRAY); sf.pack(fill=tk.X, padx=24, pady=2)
-            # self.lbl_suffix = w95_label(sf, "Filename suffix:")
-            # self.lbl_suffix.pack(side=tk.LEFT)
-            # self.e_suffix = w95_entry(sf, self.suffix_var, width=14)
-            # self.e_suffix.pack(side=tk.LEFT, padx=4)
-
-            # self.lbl_fmt = w95_label(sf, "Format:")
-            # self.lbl_fmt.pack(side=tk.LEFT, padx=(16, 4))
-            # self.r_keep = w95_radio(sf, "original", self.format_var, "keep",
-                                    # self._toggle_quality)
-            # self.r_keep.pack(side=tk.LEFT)
-            # self.r_jpg = w95_radio(sf, "JPG", self.format_var, "jpg",
-                                   # self._toggle_quality)
-            # self.r_jpg.pack(side=tk.LEFT)
-            # self.r_png = w95_radio(sf, "PNG", self.format_var, "png",
-                                   # self._toggle_quality)
-            # self.r_png.pack(side=tk.LEFT)
-
-            # qf = tk.Frame(g_o, bg=GRAY); qf.pack(fill=tk.X, padx=24, pady=(2, 6))
-            # self.lbl_q = w95_label(qf, "JPG quality:")
-            # self.lbl_q.pack(side=tk.LEFT)
-            # self.scale_q = tk.Scale(
-                # qf, from_=1, to=100, orient=tk.HORIZONTAL, variable=self.quality_var,
-                # bg=GRAY, fg=BLACK, troughcolor=WHITE, relief=tk.RAISED, bd=2,
-                # font=FONT, highlightthickness=0, length=180, sliderrelief=tk.RAISED)
-            # self.scale_q.pack(side=tk.LEFT, padx=4)
-
-            # # ---------------- Action + progress + log ----------------
-            # act = tk.Frame(main, bg=GRAY); act.pack(fill=tk.X, pady=(8, 0))
-            # self.btn_go = w95_button(act, "  START RESIZING  ",
-                                     # self.start_processing, font=FONT_BOLD)
-            # self.btn_go.pack(side=tk.LEFT)
-            # self.progress = Win95Progress(act, width=320, height=20)
-            # self.progress.pack(side=tk.LEFT, padx=10)
-
-            # self.status = w95_label(main, "Ready.")
-            # self.status.pack(anchor="w", pady=(4, 0))
-
-            # log_o, log_i = w95_group(main, "Log")
-            # log_o.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-            # logframe = tk.Frame(log_i, bg=GRAY); logframe.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
-            # logscroll = tk.Scrollbar(logframe, bg=GRAY, troughcolor=GRAY)
-            # logscroll.pack(side=tk.RIGHT, fill=tk.Y)
-            # self.log = tk.Text(logframe, bg=WHITE, fg=BLACK, relief=tk.SUNKEN, bd=2,
-                               # font=FONT_MONO, height=6, highlightthickness=0,
-                               # yscrollcommand=logscroll.set, state=tk.DISABLED, wrap=tk.NONE)
-            # self.log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            # logscroll.config(command=self.log.yview)
-
-            # self._toggle_quality()
-
-        # # ---------------------------------------------------- field toggling
-        # def _set_state(self, widget, enabled):
-            # widget.config(state=tk.NORMAL if enabled else tk.DISABLED)
-
-        # def _toggle_mode_fields(self):
-            # m = self.mode.get()
-            # self._set_state(self.e_percent, m == "percent")
-            # self._set_state(self.e_fit_w,   m == "fit")
-            # self._set_state(self.e_fit_h,   m == "fit")
-            # self._set_state(self.e_ex_w,    m == "exact")
-            # self._set_state(self.e_ex_h,    m == "exact")
-            # self._set_state(self.e_only_w,  m == "width")
-            # self._set_state(self.e_only_h,  m == "height")
-
-        # def _toggle_output_fields(self):
-            # folder = self.output_mode.get() == "folder"
-            # for w in (self.e_outdir, self.btn_browse, self.e_suffix,
-                      # self.r_keep, self.r_jpg, self.r_png):
-                # self._set_state(w, folder)
-            # for lbl in (self.lbl_suffix, self.lbl_fmt):
-                # lbl.config(fg=BLACK if folder else DISABLED)
-            # self._toggle_quality()
-
-        # def _toggle_quality(self):
-            # active = (self.output_mode.get() == "folder"
-                      # and self.format_var.get() == "jpg")
-            # self._set_state(self.scale_q, active)
-            # self.lbl_q.config(fg=BLACK if active else DISABLED)
-
-        # # ---------------------------------------------------------- list handling
-        # def _refresh_list(self):
-            # self.listbox.delete(0, tk.END)
-            # for p in self.files:
-                # self.listbox.insert(tk.END, "  " + p)
-            # self.count_lbl.config(text=f"{len(self.files)} images in list")
-
-        # def _add_paths(self, paths):
-            # added = 0
-            # existing = set(self.files)
-            # for p in paths:
-                # ap = os.path.abspath(p)
-                # if ap not in existing and os.path.isfile(ap):
-                    # self.files.append(ap)
-                    # existing.add(ap)
-                    # added += 1
-            # self._refresh_list()
-            # return added
-
-        # def add_files(self):
-            # paths = filedialog.askopenfilenames(
-                # title="Select images",
-                # filetypes=[("Images", "*.jpg *.jpeg *.png *.gif *.bmp *.webp *.tif *.tiff *.ico"),
-                           # ("All files", "*.*")])
-            # if paths:
-                # n = self._add_paths(paths)
-                # self._log(f"Added {n} images.")
-
-        # def add_folder(self):
-            # folder = filedialog.askdirectory(title="Select a folder")
-            # if not folder:
-                # return
-            # found = []
-            # if self.recursive.get():
-                # for r, _dirs, files in os.walk(folder):
-                    # for f in files:
-                        # if f.lower().endswith(IMG_EXTS):
-                            # found.append(os.path.join(r, f))
-            # else:
-                # for f in os.listdir(folder):
-                    # fp = os.path.join(folder, f)
-                    # if os.path.isfile(fp) and f.lower().endswith(IMG_EXTS):
-                        # found.append(fp)
-            # n = self._add_paths(sorted(found))
-            # self._log(f"Folder added: {folder}  ({n} images found)")
-
-        # def remove_selected(self):
-            # sel = list(self.listbox.curselection())
-            # for idx in reversed(sel):
-                # del self.files[idx]
-            # self._refresh_list()
-
-        # def clear_files(self):
-            # self.files = []
-            # self._refresh_list()
-            # if not self.working:
-                # self.progress.set(0)
-                # self.status.config(text="Ready.")
-
-        # def browse_output(self):
-            # folder = filedialog.askdirectory(title="Choose output folder")
-            # if folder:
-                # self.output_dir.set(folder)
-
-        # # ------------------------------------------------------------------- log
-        # def _log(self, text):
-            # self.log.config(state=tk.NORMAL)
-            # self.log.insert(tk.END, text + "\n")
-            # self.log.see(tk.END)
-            # self.log.config(state=tk.DISABLED)
-
-        # # ------------------------------------------------------------ processing
-        # def _gather_opts(self):
-            # """Validate input and return an options dict, or None on error."""
-            # m = self.mode.get()
-
-            # def as_int(var, name):
-                # v = var.get().strip()
-                # if not v.isdigit() or int(v) <= 0:
-                    # raise ValueError(f"{name} must be a positive integer.")
-                # return int(v)
-
-            # try:
-                # opts = {"mode": m, "keep_aspect": self.keep_aspect.get()}
-                # if m == "percent":
-                    # p = self.percent_var.get().strip().replace(",", ".")
-                    # fp = float(p)
-                    # if fp <= 0:
-                        # raise ValueError("Percentage must be > 0.")
-                    # opts["percent"] = fp
-                # elif m in ("fit", "exact"):
-                    # opts["width"] = as_int(self.width_var, "Width")
-                    # opts["height"] = as_int(self.height_var, "Height")
-                # elif m == "width":
-                    # opts["width"] = as_int(self.width_var, "Width")
-                # elif m == "height":
-                    # opts["height"] = as_int(self.height_var, "Height")
-            # except ValueError as e:
-                # messagebox.showerror("Invalid value", str(e))
-                # return None
-
-            # opts["output_mode"] = self.output_mode.get()
-            # if opts["output_mode"] == "folder":
-                # outd = self.output_dir.get().strip()
-                # if not outd:
-                    # messagebox.showerror("No folder",
-                                         # "Choose an output folder or select 'Overwrite'.")
-                    # return None
-                # opts["output_dir"] = outd
-                # opts["suffix"] = self.suffix_var.get()
-                # opts["format"] = self.format_var.get()
-            # opts["quality"] = self.quality_var.get()
-            # return opts
-
-        # def start_processing(self):
-            # if self.working:
-                # return
-            # if not PIL_OK:
-                # messagebox.showerror("Pillow missing",
-                                     # "Install Pillow:\n    pip install Pillow")
-                # return
-            # if not self.files:
-                # messagebox.showwarning("Empty list", "Add at least one image.")
-                # return
-            # opts = self._gather_opts()
-            # if opts is None:
-                # return
-
-            # if opts["output_mode"] == "overwrite":
-                # if not messagebox.askyesno(
-                        # "Confirm",
-                        # "You are about to OVERWRITE the original files.\n"
-                        # "This cannot be undone. Continue?"):
-                    # return
-
-            # self.working = True
-            # self.btn_go.config(state=tk.DISABLED, text="  ... working ...  ")
-            # self.progress.set(0)
-            # self._log("=" * 40)
-            # self._log(f"Start: {len(self.files)} images.")
-
-            # files_snapshot = list(self.files)
-            # t = threading.Thread(target=self._worker, args=(files_snapshot, opts),
-                                 # daemon=True)
-            # t.start()
-            # self.rootrszb.after(100, self._poll_queue)
-
-        # def _worker(self, files, opts):
-            # total = len(files)
-            # ok = 0
-            # errors = 0
-            # for i, src in enumerate(files, start=1):
-                # try:
-                    # self._process_one(src, opts)
-                    # ok += 1
-                    # self.msg_queue.put(("prog", i, total, os.path.basename(src), None))
-                # except Exception as e:
-                    # errors += 1
-                    # self.msg_queue.put(("prog", i, total, os.path.basename(src), str(e)))
-            # self.msg_queue.put(("done", ok, errors, None, None))
-
-        # def _process_one(self, src, opts):
-            # with Image.open(src) as im:
-                # im.load()
-                # w, h = im.size
-                # nw, nh = self._compute_size(w, h, opts)
-                # resized = im.resize((nw, nh), RESAMPLE)
-
-            # out = self._out_path(src, opts)
-            # out_dir = os.path.dirname(out)
-            # if out_dir and not os.path.isdir(out_dir):
-                # os.makedirs(out_dir, exist_ok=True)
-
-            # low = out.lower()
-            # if low.endswith((".jpg", ".jpeg")):
-                # if resized.mode in ("RGBA", "LA", "P"):
-                    # if resized.mode == "P":
-                        # resized = resized.convert("RGBA")
-                    # bg = Image.new("RGB", resized.size, (255, 255, 255))
-                    # mask = resized.split()[-1] if resized.mode in ("RGBA", "LA") else None
-                    # bg.paste(resized, mask=mask)
-                    # resized = bg
-                # elif resized.mode != "RGB":
-                    # resized = resized.convert("RGB")
-                # resized.save(out, quality=opts.get("quality", 85), optimize=True)
-            # else:
-                # resized.save(out)
-
-        # @staticmethod
-        # def _compute_size(w, h, opts):
-            # m = opts["mode"]
-            # if m == "percent":
-                # p = opts["percent"] / 100.0
-                # return max(1, round(w * p)), max(1, round(h * p))
-            # if m == "fit":
-                # ratio = min(opts["width"] / w, opts["height"] / h)
-                # return max(1, round(w * ratio)), max(1, round(h * ratio))
-            # if m == "width":
-                # nw = opts["width"]
-                # return max(1, nw), max(1, round(h * nw / w))
-            # if m == "height":
-                # nh = opts["height"]
-                # return max(1, round(w * nh / h)), max(1, nh)
-            # if m == "exact":
-                # if opts["keep_aspect"]:
-                    # ratio = min(opts["width"] / w, opts["height"] / h)
-                    # return max(1, round(w * ratio)), max(1, round(h * ratio))
-                # return max(1, opts["width"]), max(1, opts["height"])
-            # return w, h
-
-        # @staticmethod
-        # def _out_path(src, opts):
-            # if opts["output_mode"] == "overwrite":
-                # return src
-            # base, ext = os.path.splitext(os.path.basename(src))
-            # fmt = opts.get("format", "keep")
-            # if fmt == "jpg":
-                # ext = ".jpg"
-            # elif fmt == "png":
-                # ext = ".png"
-            # return os.path.join(opts["output_dir"], base + opts.get("suffix", "") + ext)
-
-        # def _poll_queue(self):
-            # try:
-                # while True:
-                    # kind, a, b, name, err = self.msg_queue.get_nowait()
-                    # if kind == "prog":
-                        # self.progress.set(a / b)
-                        # self.status.config(text=f"[{a}/{b}]  {name}")
-                        # if err:
-                            # self._log(f"  ERROR  {name}: {err}")
-                    # elif kind == "done":
-                        # self.progress.set(1.0)
-                        # self.status.config(text=f"Done. Succeeded: {a}   Errors: {b}")
-                        # self._log(f"Finished. Succeeded: {a}, errors: {b}.")
-                        # self.working = False
-                        # self.btn_go.config(state=tk.NORMAL,
-                                           # text="  START RESIZING  ")
-                        # messagebox.showinfo("Done",
-                                            # f"Processing finished.\n"
-                                            # f"Succeeded: {a}\nErrors: {b}")
-                        # return
-            # except queue.Empty:
-                # pass
-            # if self.working:
-                # self.rootrszb.after(100, self._poll_queue)
-
-
-    # def main():
-        # rootrszb = tk.Tk()
-        # try:
-            # rootrszb.option_add("*Font", FONT)
-        # except Exception:
-            # pass
-        # ResizerApp(rootrszb)
-        # rootrszb.mainloop()
-
-
-    # if __name__ == "__main__":
-        # main()
         
 if batchedvar == 231145:
     import sqlite3, os as _os
@@ -205047,10 +208042,13 @@ if batchedvar == 231145:
 
             # Rularea buclei principale
             validation.mainloop()
+
     import os
     import re
+    import codecs
     import tkinter as tk
-    from tkinter import filedialog, messagebox
+    import tkinter.font as tkfont
+    from tkinter import filedialog
 
     # ----------------------------------------------------------------------------
     # Windows 95 theme constants
@@ -205065,15 +208063,18 @@ if batchedvar == 231145:
     FONT      = ("MS Sans Serif", 9)
     FONT_B    = ("MS Sans Serif", 9, "bold")
     FONT_MONO = ("Courier New", 9)
+    W95_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
 
 
-    def w95_button(parent, text, command=None, width=None):
+    def w95_button(parent, text, command=None, width=None, bold=False):
         """A raised, chunky Win95 style button."""
         return tk.Button(
             parent, text=text, command=command, width=width,
-            font=FONT, bg=BG, activebackground=BG,
+            font=FONT_B if bold else FONT, bg=BG, activebackground=BG,
             relief=tk.RAISED, bd=2, padx=8, pady=1,
-            highlightthickness=0, cursor="arrow",
+            highlightthickness=1 if bold else 0, highlightbackground="black",
+            disabledforeground=DARK, cursor="arrow", takefocus=0,
         )
 
 
@@ -205093,45 +208094,354 @@ if batchedvar == 231145:
         )
 
 
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, font=FONT, bg=BG, fg="black", activebackground=TITLE_BG,
+                       activeforeground=TITLE_FG, disabledforeground=DARK, selectcolor="black")
+
+
+    def w95_glyphs(widget):
+        marlett = "Marlett" in tkfont.families(widget)
+        glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                  else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+        return glyphs, (("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold"))
+
+
+    def w95_caption(window, title, close_command, pixel):
+        """A Windows 95 title bar for a dialog (navy, bold title, X)."""
+        glyphs, glyph_font = w95_glyphs(window)
+        bar = tk.Frame(window, bg=TITLE_BG, height=20)
+        bar.pack(side=tk.TOP, fill=tk.X, padx=1, pady=(1, 0))
+        bar.pack_propagate(False)
+        tk.Label(bar, text=title, font=("MS Sans Serif", 8, "bold"), bg=TITLE_BG, fg=TITLE_FG).pack(side=tk.LEFT, padx=4)
+        tk.Button(bar, text=glyphs["close"], command=close_command, font=glyph_font, image=pixel, compound="center",
+                  width=12, height=10, padx=0, pady=0, bg=BG, relief=tk.RAISED, bd=2, highlightthickness=0,
+                  takefocus=0).pack(side=tk.RIGHT, padx=2)
+        return bar
+
+
+    def w95_show_modal(window, parent):
+        """Centre a dialog over its parent, keep it in front, then take the clicks once it is on screen."""
+        window.update_idletasks()
+        w, h = window.winfo_reqwidth(), window.winfo_reqheight()
+        x = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+        y = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 3)
+        window.geometry(f"+{x}+{y}")
+        window.lift()
+        window.focus_force()
+
+        def take_clicks():
+            try:
+                if window.winfo_exists() and window.winfo_viewable():
+                    window.grab_set()
+            except tk.TclError:
+                pass
+        clicks_job = window.after(100, take_clicks)
+        # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+        window.bind("<Destroy>", lambda e, w=window, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                 add="+")
+
+
+    # ----------------------------------------------------------------------------
+    # Reading and writing text files safely
+    # ----------------------------------------------------------------------------
+    class BinaryFileError(Exception):
+        pass
+
+
+    def read_text(path, enc):
+        """Return (text, encoding used). 'auto' detects UTF-8 (with or without BOM), UTF-16 and ANSI (Windows-1250).
+        Line endings are kept exactly as in the file."""
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        utf16 = raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE))
+        if b"\x00" in raw[:8192] and not utf16:
+            raise BinaryFileError("binary file - skipped")
+        if enc.lower() != "auto":
+            return raw.decode(enc), enc
+        if raw.startswith(codecs.BOM_UTF8):
+            return raw.decode("utf-8-sig"), "utf-8-sig"
+        if utf16:
+            return raw.decode("utf-16"), "utf-16"
+        try:
+            return raw.decode("utf-8"), "utf-8"
+        except UnicodeDecodeError:
+            return raw.decode("cp1250"), "cp1250"
+
+
+    def write_text_safely(path, text, enc):
+        """Write to a temporary file next to the original, then replace it: a failed write never leaves
+        a cut-off file behind."""
+        data = text.encode(enc)
+        temp = path + ".tmp~"
+        try:
+            with open(temp, "wb") as fh:
+                fh.write(data)
+            os.replace(temp, path)
+        except OSError:
+            try:
+                os.remove(temp)
+            except OSError:
+                pass
+            raise
+
+
+    def backup_path(path):
+        """file.txt.bak, or file.txt.bak1, .bak2... when a backup already exists (the first one is the original)."""
+        candidate = path + ".bak"
+        number = 1
+        while os.path.exists(candidate):
+            candidate = f"{path}.bak{number}"
+            number += 1
+        return candidate
+
+
+    def newline_of(text):
+        if "\r\n" in text:
+            return "\r\n"
+        if "\r" in text and "\n" not in text:
+            return "\r"
+        return "\n"
+
+
     class BatchTextEditor(tk.Tk):
         def __init__(self):
             super().__init__()
             self.title("Batch Text Editor")
             self.configure(bg=BG)
-            self.geometry("860x620")
+            x = max(0, (self.winfo_screenwidth() - 860) // 2)
+            y = max(0, (self.winfo_screenheight() - 620) // 2)
+            self.geometry(f"860x620+{x}+{y}")
             self.minsize(760, 540)
 
             self.files = []          # list of absolute paths
             self.current_tab = tk.StringVar(value="replace")
+            self.custom_frame = W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
 
-            self._build_menu()
             self._build_titlebar()
-            self._build_body()
+            self._build_menu()
             self._build_statusbar()
+            self._build_body()
             self.log("Add some files to get started.")
+            self.protocol("WM_DELETE_WINDOW", self.destroy)
+            self.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            if self.custom_frame:
+                self.configure(bd=2, relief="raised")
+                self.after(10, self._enable_custom_frame)
+
+        # ================================================================ frame ==
+        def _build_titlebar(self):
+            self.glyphs, glyph_font = w95_glyphs(self)
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if W95_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(self, bg=TITLE_BG, height=20)
+            bar.pack(side=tk.TOP, fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=TITLE_BG, bd=0, highlightthickness=0)
+            icon.create_rectangle(5, 1, 14, 12, fill="white", outline="black")          # a stack of pages
+            icon.create_rectangle(2, 4, 11, 15, fill="white", outline="black")
+            for yy in (7, 9, 11, 13):
+                icon.create_line(4, yy, 10, yy, fill="#000080")
+            icon.pack(side=tk.LEFT, padx=(2, 3))
+            title = tk.Label(bar, text="Batch Text Editor", bg=TITLE_BG, fg=TITLE_FG,
+                             font=("MS Sans Serif", 8, "bold"), anchor="w")
+            title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.caption, self.caption_title, self.caption_icon = bar, title, icon
+
+            def caption_button(key, command):
+                return tk.Button(bar, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=BG, fg="black",
+                                 activebackground=BG, relief=tk.RAISED, bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", self.destroy).pack(side=tk.RIGHT, padx=(2, 2))
+            self.btn_max = caption_button("max", self.toggle_maximize)
+            self.btn_max.pack(side=tk.RIGHT)
+            caption_button("min", self.minimize).pack(side=tk.RIGHT)
+            for widget in (bar, title, icon):
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+            self.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is self else None)
+            self.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is self else None)
+            self.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption"):
+                return
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=TITLE_BG if active else DARK)
+            self.caption_title.config(fg=TITLE_FG if active else BG)
+
+        def _enable_custom_frame(self):
+            self.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            self.withdraw()
+            self.after(10, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+        def _on_map(self, event):
+            if event.widget is self and self.minimizing and self.state() == "normal":
+                self.minimizing = False
+                self.overrideredirect(True)
+                self.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.overrideredirect(False)
+            self.iconify()
+
+        def toggle_maximize(self):
+            if self.maximized:
+                self.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = self.geometry()
+                x, y, width, height = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                if W95_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                self.geometry(f"{width}x{height}+{x}+{y}")
+            self.maximized = not self.maximized
+            if hasattr(self, "btn_max"):
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.geometry(f"+{event.x_root - self._drag[0]}+{event.y_root - self._drag[1]}")
+
+        def _grip_press(self, event):
+            self._resize = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.geometry(f"{max(760, width + event.x_root - x0)}x{max(540, height + event.y_root - y0)}")
+
+        # ======================================================= message box ==
+        def _current_focus(self):
+            try:
+                return self.focus_get()
+            except (KeyError, tk.TclError):
+                return None
+
+        def _restore_focus(self, widget=None):
+            """Give the keyboard back to this window (and to the field it was in) after a dialog."""
+            try:
+                target = widget if widget is not None and widget.winfo_exists() else self
+                target.focus_force()
+            except tk.TclError:
+                pass
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it (a message box, a file dialog, another program). A click in a text field
+            gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        def dialog(self, title, message, icon="info", buttons=("OK",), default=0):
+            """Modal Windows 95 message box, always in front of the window. Returns the pressed button."""
+            result = {"value": None}
+            previous = self._current_focus()
+            win = tk.Toplevel(self)
+            win.overrideredirect(True)
+            win.configure(bg=BG, bd=2, relief="raised")
+            win.transient(self)
+            win.attributes("-topmost", True)
+
+            def close(value=None):
+                result["value"] = value
+                win.destroy()
+
+            w95_caption(win, title, lambda: close(buttons[-1] if len(buttons) > 1 else None), self._pixel)
+            body = tk.Frame(win, bg=BG)
+            body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(14, 8))
+            picture = tk.Canvas(body, width=32, height=32, bg=BG, highlightthickness=0, bd=0)
+            if icon == "error":
+                picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                picture.create_line(22, 10, 10, 22, fill="white", width=3)
+            elif icon == "warning":
+                picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline="black")
+                picture.create_text(16, 19, text="!", fill="black", font=("Times New Roman", 15, "bold"))
+            else:
+                picture.create_oval(2, 2, 30, 30, fill="white", outline="black")
+                picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                    font=("Times New Roman", 16, "bold"))
+            picture.pack(side=tk.LEFT, anchor="n", padx=(0, 14))
+            tk.Label(body, text=message, font=FONT, bg=BG, justify="left", wraplength=480).pack(side=tk.LEFT)
+            row = tk.Frame(win, bg=BG)
+            row.pack(pady=(4, 12))
+            for index, text in enumerate(buttons):
+                w95_button(row, text, lambda t=text: close(t), width=9, bold=index == default).pack(side=tk.LEFT, padx=4)
+            win.bind("<Return>", lambda _e: close(buttons[default]))
+            win.bind("<Escape>", lambda _e: close(buttons[-1]))
+            w95_show_modal(win, self)
+            self.wait_window(win)
+            self._restore_focus(previous)
+            return result["value"]
 
         # ------------------------------------------------------------------ UI --
         def _build_menu(self):
-            menubar = tk.Menu(self, font=FONT, bg=BG, bd=1, relief=tk.RAISED)
-            filemenu = tk.Menu(menubar, tearoff=0, font=FONT, bg=BG)
-            filemenu.add_command(label="Add Files...", command=self.add_files)
-            filemenu.add_command(label="Add Folder...", command=self.add_folder)
+            bar = tk.Frame(self, bg=BG)
+            bar.pack(side=tk.TOP, fill=tk.X)
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=FONT, bg=BG, fg="black", activebackground=TITLE_BG,
+                                       activeforeground=TITLE_FG, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side=tk.LEFT)
+                menu = w95_menu(button)
+                button.config(menu=menu)
+                return menu
+
+            filemenu = menubutton("File")
+            filemenu.add_command(label="Add Files...", accelerator="Ctrl+O", command=self.add_files)
+            filemenu.add_command(label="Add Folder...", accelerator="Ctrl+F", command=self.add_folder)
+            filemenu.add_separator()
+            filemenu.add_command(label="Remove Selected", accelerator="Del", command=self.remove_selected)
+            filemenu.add_command(label="Clear List", command=self.clear_files)
             filemenu.add_separator()
             filemenu.add_command(label="Exit", command=self.destroy)
-            menubar.add_cascade(label="File", menu=filemenu)
 
-            helpmenu = tk.Menu(menubar, tearoff=0, font=FONT, bg=BG)
+            runmenu = menubutton("Run")
+            runmenu.add_command(label="Preview (Dry Run)", accelerator="F5", command=self.preview)
+            runmenu.add_command(label="Apply to Files", accelerator="F9", command=self.apply)
+            runmenu.add_separator()
+            for key, label in (("replace", "Find & Replace"), ("insert", "Insert Text"), ("lines", "Line Tools")):
+                runmenu.add_radiobutton(label=label, value=key, variable=self.current_tab,
+                                        command=lambda k=key: self.switch_tab(k))
+
+            helpmenu = menubutton("Help")
             helpmenu.add_command(label="About...", command=self.show_about)
-            menubar.add_cascade(label="Help", menu=helpmenu)
-            self.config(menu=menubar)
-
-        def _build_titlebar(self):
-            bar = tk.Frame(self, bg=TITLE_BG, height=26)
-            bar.pack(fill=tk.X, padx=3, pady=(3, 0))
-            tk.Label(
-                bar, text="Batch Text Editor", bg=TITLE_BG, fg=TITLE_FG,
-                font=("MS Sans Serif", 10, "bold"), anchor="w", padx=8, pady=3,
-            ).pack(side=tk.LEFT)
+            for key, action in (("<Control-o>", self.add_files), ("<Control-f>", self.add_folder),
+                                ("<F5>", self.preview), ("<F9>", self.apply)):
+                self.bind(key, lambda e, a=action: (a(), "break")[1])
 
         def _build_body(self):
             body = tk.Frame(self, bg=BG)
@@ -205154,34 +208464,33 @@ if batchedvar == 231145:
                 listwrap, font=FONT, bg=FIELD_BG, bd=0,
                 selectmode=tk.EXTENDED, activestyle="none",
                 selectbackground=TITLE_BG, selectforeground=TITLE_FG,
-                highlightthickness=0,
+                highlightthickness=0, exportselection=False,
             )
             sb = tk.Scrollbar(listwrap, command=self.filelist.yview, bd=2, relief=tk.RAISED, bg=BG)
             self.filelist.config(yscrollcommand=sb.set)
             sb.pack(side=tk.RIGHT, fill=tk.Y)
             self.filelist.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-            self.count_label = tk.Label(left, text="0 file(s)", font=FONT, bg=BG, anchor="w")
-            self.count_label.pack(fill=tk.X, pady=(4, 0))
+            self.filelist.bind("<Delete>", lambda e: self.remove_selected())
+            self.filelist.bind("<Button-3>", self._file_menu)
 
             # ---------------- Right: operations ----------------
             right = tk.Frame(body, bg=BG, width=400)
             right.pack(side=tk.RIGHT, fill=tk.BOTH)
             right.pack_propagate(False)
 
-            # fake Win95 tabs
+            # Win95 property-sheet tabs: the selected tab stands out and joins the page
             tabrow = tk.Frame(right, bg=BG)
             tabrow.pack(fill=tk.X)
             self.tab_buttons = {}
-            for key, label in [("replace", "Find && Replace"),
+            for key, label in [("replace", "Find & Replace"),       # Fix: "&&" was shown literally
                                ("insert", "Insert Text"),
                                ("lines", "Line Tools")]:
-                b = tk.Button(
+                b = tk.Label(
                     tabrow, text=label, font=FONT, bg=BG, bd=2,
-                    relief=tk.RAISED, padx=8, pady=2, highlightthickness=0,
-                    command=lambda k=key: self.switch_tab(k),
+                    relief=tk.RAISED, padx=8, pady=2, cursor="arrow",
                 )
-                b.pack(side=tk.LEFT)
+                b.bind("<Button-1>", lambda e, k=key: self.switch_tab(k))
+                b.pack(side=tk.LEFT, anchor="s")
                 self.tab_buttons[key] = b
 
             self.tabarea = tk.Frame(right, bg=BG, bd=2, relief=tk.RAISED)
@@ -205199,24 +208508,25 @@ if batchedvar == 231145:
             opts.pack(fill=tk.X, pady=(4, 0))
             self.var_backup = tk.BooleanVar(value=True)
             tk.Checkbutton(
-                opts, text="Create .bak backup before writing", variable=self.var_backup,
-                font=FONT, bg=BG, activebackground=BG, highlightthickness=0, anchor="w",
+                opts, text="Create backup before writing (.bak, .bak1, ...)",
+                variable=self.var_backup, font=FONT, bg=BG, activebackground=BG, selectcolor=FIELD_BG,
+                highlightthickness=0, anchor="w",
             ).pack(fill=tk.X)
             encrow = tk.Frame(opts, bg=BG)
             encrow.pack(fill=tk.X, pady=(2, 0))
             tk.Label(encrow, text="Encoding:", font=FONT, bg=BG).pack(side=tk.LEFT)
-            self.var_encoding = tk.StringVar(value="utf-8")
+            self.var_encoding = tk.StringVar(value="auto")
             tk.Entry(
                 encrow, textvariable=self.var_encoding, font=FONT, bg=FIELD_BG,
                 bd=2, relief=tk.SUNKEN, width=12, highlightthickness=0,
             ).pack(side=tk.LEFT, padx=(4, 0))
+            tk.Label(encrow, text="auto = UTF-8 / UTF-16 / ANSI", font=FONT, bg=BG, fg=DARK).pack(side=tk.LEFT, padx=(6, 0))
 
             actions = tk.Frame(right, bg=BG)
             actions.pack(fill=tk.X, pady=(6, 0))
             w95_button(actions, "Preview (Dry Run)", self.preview).pack(
                 side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-            apply_btn = w95_button(actions, "Apply to Files", self.apply)
-            apply_btn.config(font=FONT_B)
+            apply_btn = w95_button(actions, "Apply to Files", self.apply, bold=True)
             apply_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
             # log
@@ -205232,6 +208542,32 @@ if batchedvar == 231145:
             self.logbox.config(yscrollcommand=logsb.set)
             logsb.pack(side=tk.RIGHT, fill=tk.Y)
             self.logbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            self.logbox.tag_config("error", foreground="#aa0000")
+            self.logbox.tag_config("ok", foreground="#006000")
+
+        def _file_menu(self, event):
+            index = self.filelist.nearest(event.y)
+            if 0 <= index < len(self.files) and index not in self.filelist.curselection():
+                self.filelist.selection_clear(0, tk.END)
+                self.filelist.selection_set(index)
+            menu = w95_menu(self)
+            menu.add_command(label="Remove from List", command=self.remove_selected)
+            menu.add_command(label="Copy Path", command=self._copy_paths)
+            menu.add_separator()
+            menu.add_command(label="Add Files...", command=self.add_files)
+            menu.add_command(label="Add Folder...", command=self.add_folder)
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        def _copy_paths(self):
+            paths = [self.files[i] for i in self.filelist.curselection()]
+            if paths:
+                self.clipboard_clear()
+                self.clipboard_append("\n".join(paths))
+                self.set_status(f"Copied {len(paths)} path(s).")
 
         # ---------------- Tabs ----------------
         def _tab_replace(self, parent):
@@ -205254,7 +208590,7 @@ if batchedvar == 231145:
                               ("Whole word only", self.var_word),
                               ("Regular expression", self.var_regex)]:
                 tk.Checkbutton(f, text=text, variable=var, font=FONT, bg=BG,
-                               activebackground=BG, highlightthickness=0,
+                               activebackground=BG, selectcolor=FIELD_BG, highlightthickness=0,
                                anchor="w").pack(fill=tk.X)
             return f
 
@@ -205271,7 +208607,7 @@ if batchedvar == 231145:
             for text, val in [("At the beginning of each file (header)", "top"),
                               ("At the end of each file (footer)", "bottom")]:
                 tk.Radiobutton(f, text=text, value=val, variable=self.var_insert_pos,
-                               font=FONT, bg=BG, activebackground=BG,
+                               font=FONT, bg=BG, activebackground=BG, selectcolor=FIELD_BG,
                                highlightthickness=0, anchor="w").pack(fill=tk.X)
             return f
 
@@ -205289,7 +208625,7 @@ if batchedvar == 231145:
             ]
             for text, val in ops:
                 tk.Radiobutton(f, text=text, value=val, variable=self.var_line_op,
-                               font=FONT, bg=BG, activebackground=BG,
+                               font=FONT, bg=BG, activebackground=BG, selectcolor=FIELD_BG,
                                highlightthickness=0, anchor="w").pack(fill=tk.X)
             tk.Label(f, text="Text (for 'containing' option):", font=FONT, bg=BG,
                      anchor="w").pack(fill=tk.X, pady=(6, 0))
@@ -205301,21 +208637,39 @@ if batchedvar == 231145:
         def switch_tab(self, key):
             self.current_tab.set(key)
             for k, btn in self.tab_buttons.items():
-                btn.config(relief=tk.SUNKEN if k == key else tk.RAISED,
-                           font=FONT_B if k == key else FONT)
+                if k == key:   # the selected tab is taller, bold and sits on the page
+                    btn.config(font=FONT_B, pady=4)
+                    btn.pack_configure(pady=(0, 0))
+                else:
+                    btn.config(font=FONT, pady=2)
+                    btn.pack_configure(pady=(3, 0))
             for k, frame in self.tabs.items():
                 frame.pack_forget()
             self.tabs[key].pack(fill=tk.BOTH, expand=True)
 
         def _build_statusbar(self):
-            self.status = tk.Label(self, text="Ready", font=FONT, bg=BG,
-                                   bd=2, relief=tk.SUNKEN, anchor="w", padx=6)
-            self.status.pack(fill=tk.X, side=tk.BOTTOM, padx=3, pady=(0, 3))
+            bar = tk.Frame(self, bg=BG)
+            bar.pack(fill=tk.X, side=tk.BOTTOM, padx=2, pady=(0, 2))
+            grip = tk.Canvas(bar, width=14, height=14, bg=BG, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if W95_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=DARK)
+                grip.create_line(13, i + 2, i + 2, 13, fill=DARK)
+            grip.pack(side=tk.RIGHT, anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.count_label = tk.Label(bar, text="0 file(s)", font=FONT, bg=BG, bd=1, relief=tk.SUNKEN,
+                                        anchor="w", padx=4, width=14)
+            self.count_label.pack(side=tk.RIGHT, padx=1)
+            self.status = tk.Label(bar, text="Ready", font=FONT, bg=BG,
+                                   bd=1, relief=tk.SUNKEN, anchor="w", padx=4)
+            self.status.pack(fill=tk.X, side=tk.LEFT, expand=True, padx=1)
 
         # ------------------------------------------------------------- helpers --
-        def log(self, msg):
+        def log(self, msg, tag=None):
             self.logbox.config(state=tk.NORMAL)
-            self.logbox.insert(tk.END, msg + "\n")
+            self.logbox.insert(tk.END, msg + "\n", tag or ())
             self.logbox.see(tk.END)
             self.logbox.config(state=tk.DISABLED)
 
@@ -205331,7 +208685,7 @@ if batchedvar == 231145:
         # ---------------------------------------------------------- file mgmt --
         def add_files(self):
             paths = filedialog.askopenfilenames(
-                title="Select files",
+                title="Select files", parent=self,
                 filetypes=[
                     ("All supported", "*.txt *.md *.csv *.log *.ini *.cfg *.py *.js *.ts *.jsx *.tsx "
                                       "*.html *.css *.json *.xml *.yaml *.yml *.c *.cpp *.h *.hpp "
@@ -205359,11 +208713,12 @@ if batchedvar == 231145:
             self.set_status("Ready")
 
         def add_folder(self):
-            folder = filedialog.askdirectory(title="Select folder")
+            folder = filedialog.askdirectory(title="Select folder", parent=self)
             if not folder:
                 return
             dlg = FolderOptionsDialog(self)
             self.wait_window(dlg)
+            self._restore_focus()
             if not dlg.result:
                 return
             exts, recursive = dlg.result
@@ -205374,12 +208729,18 @@ if batchedvar == 231145:
             if recursive:
                 walker = os.walk(folder)
             else:
-                walker = [(folder, [], os.listdir(folder))]
+                try:
+                    walker = [(folder, [], os.listdir(folder))]
+                except OSError as e:          # Fix: a folder without access rights no longer raises an error
+                    self.dialog("Add Folder", f"Cannot read the folder:\n{e}", "error")
+                    return
             for root1, _dirs, names in walker:
                 for name in names:
                     full = os.path.abspath(os.path.join(root1, name))
                     if not os.path.isfile(full):
                         continue
+                    if name.endswith(".tmp~") or re.search(r"\.bak\d*$", name, re.IGNORECASE):
+                        continue              # never pick up our own backups / temporary files
                     if exts and os.path.splitext(name)[1].lower() not in exts:
                         continue
                     if full not in self.files:
@@ -205432,11 +208793,16 @@ if batchedvar == 231145:
                 pos = self.var_insert_pos.get()
 
                 def transform(text):
+                    # Fix: use the file's own line endings (CRLF files stay CRLF) and keep a BOM at the very start
+                    nl = newline_of(text)
+                    piece = snippet.replace("\n", nl)
+                    bom = "\ufeff" if text.startswith("\ufeff") else ""
+                    body = text[len(bom):]
                     if pos == "top":
-                        return snippet + "\n" + text, 1
-                    if not text.endswith("\n"):
-                        text += "\n"
-                    return text + snippet + "\n", 1
+                        return bom + piece + nl + body, 1
+                    if body and not body.endswith(("\n", "\r")):
+                        body += nl
+                    return bom + body + piece + nl, 1
                 return transform
 
             # lines tab
@@ -205473,54 +208839,69 @@ if batchedvar == 231145:
 
         def _run(self, write):
             if not self.files:
-                messagebox.showwarning("No files", "Add at least one file first.")
+                self.dialog("No files", "Add at least one file first.", "warning")
                 return
             try:
                 transform = self.build_transform()
             except ValueError as e:
-                messagebox.showwarning("Missing input", str(e))
+                self.dialog("Missing input", str(e), "warning")
                 return
             except re.error as e:
-                messagebox.showerror("Regex error", f"Invalid regular expression:\n{e}")
+                self.dialog("Regex error", f"Invalid regular expression:\n{e}", "error")
                 return
 
+            enc = self.var_encoding.get().strip() or "auto"
+            if enc.lower() != "auto":
+                try:
+                    codecs.lookup(enc)        # Fix: a mistyped encoding used to stop the run half way
+                except LookupError:
+                    self.dialog("Encoding", f"Unknown encoding: '{enc}'.\n\nUse auto, utf-8, utf-8-sig, cp1250, "
+                                            "latin-1...", "error")
+                    return
+
             if write:
-                ok = messagebox.askyesno(
+                ok = self.dialog(
                     "Confirm", f"Apply changes to {len(self.files)} file(s)?\n"
-                               "This will modify the files on disk.")
+                               "This will modify the files on disk.", "warning", ("Yes", "No"), default=1) == "Yes"
                 if not ok:
                     return
 
-            enc = self.var_encoding.get().strip() or "utf-8"
             mode = "APPLY" if write else "PREVIEW"
-            self.log(f"--- {mode} ({len(self.files)} files) ---")
+            self.log(f"--- {mode} ({len(self.files)} files, encoding: {enc}) ---")
             total_hits, changed, errors = 0, 0, 0
+            self.config(cursor="watch")
 
-            for path in self.files:
+            for number, path in enumerate(self.files, 1):
+                name = os.path.basename(path)
+                if number % 10 == 0:
+                    self.set_status(f"{mode}: {number}/{len(self.files)}  {name}")
+                    self.update_idletasks()
                 try:
-                    with open(path, "r", encoding=enc, newline="") as fh:
-                        original = fh.read()
+                    original, used = read_text(path, enc)
                     new_text, hits = transform(original)
                     if new_text == original:
-                        self.log(f"  [ same ] {os.path.basename(path)}")
+                        self.log(f"  [ same ] {name}")
                         continue
                     total_hits += hits
                     changed += 1
                     if write:
                         if self.var_backup.get():
-                            with open(path + ".bak", "w", encoding=enc, newline="") as bf:
-                                bf.write(original)
-                        with open(path, "w", encoding=enc, newline="") as fh:
-                            fh.write(new_text)
-                        self.log(f"  [saved ] {os.path.basename(path)}  ({hits} change(s))")
+                            bak = backup_path(path)            # Fix: an older backup is never overwritten
+                            write_text_safely(bak, original, used)
+                        write_text_safely(path, new_text, used)  # Fix: a failed write never cuts the file
+                        self.log(f"  [saved ] {name}  ({hits} change(s), {used})", "ok")
                     else:
-                        self.log(f"  [would ] {os.path.basename(path)}  ({hits} change(s))")
-                except UnicodeDecodeError:
+                        self.log(f"  [would ] {name}  ({hits} change(s), {used})")
+                except BinaryFileError as e:
                     errors += 1
-                    self.log(f"  [ERROR ] {os.path.basename(path)}: cannot decode as {enc}")
+                    self.log(f"  [ skip ] {name}: {e}", "error")
+                except UnicodeError:
+                    errors += 1
+                    self.log(f"  [ERROR ] {name}: cannot decode as {enc}", "error")
                 except OSError as e:
                     errors += 1
-                    self.log(f"  [ERROR ] {os.path.basename(path)}: {e}")
+                    self.log(f"  [ERROR ] {name}: {e}", "error")
+            self.config(cursor="")
 
             verb = "modified" if write else "would be modified"
             self.log(f"Done: {changed} file(s) {verb}, {total_hits} change(s), {errors} error(s).")
@@ -205533,12 +208914,14 @@ if batchedvar == 231145:
             self._run(write=True)
 
         def show_about(self):
-            messagebox.showinfo(
+            self.dialog(
                 "About Batch Text Editor",
                 "Batch Text Editor\n\n"
                 "Edit text across many files at once:\n"
                 "find & replace, insert headers/footers,\n"
                 "and clean up lines.\n\n"
+                "Preview first (F5), then Apply (F9). Files are written safely and\n"
+                "every backup is kept (.bak, .bak1, .bak2...)."
             )
 
 
@@ -205548,16 +208931,18 @@ if batchedvar == 231145:
         def __init__(self, parent):
             super().__init__(parent)
             self.title("Add Folder Options")
-            self.configure(bg=BG)
-            self.resizable(False, False)
-            self.result = None
+            self.configure(bg=BG, bd=2, relief="raised")
+            self.overrideredirect(True)
             self.transient(parent)
-            self.grab_set()
+            self.attributes("-topmost", True)      # never hidden behind the main window
+            self.result = None
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            w95_caption(self, "Add Folder Options", self.destroy, self._pixel)
 
             body = tk.Frame(self, bg=BG, padx=12, pady=10)
             body.pack(fill=tk.BOTH, expand=True)
 
-            tk.Label(body, text="File extensions (separated by ; — empty = all files):",
+            tk.Label(body, text="File extensions (separated by ; - empty = all files):",
                      font=FONT, bg=BG, anchor="w").pack(fill=tk.X)
             self.var_exts = tk.StringVar(value=".txt;.md;.py;.js")
             tk.Entry(body, textvariable=self.var_exts, font=FONT, bg=FIELD_BG,
@@ -205566,21 +208951,17 @@ if batchedvar == 231145:
 
             self.var_recursive = tk.BooleanVar(value=True)
             tk.Checkbutton(body, text="Include subfolders", variable=self.var_recursive,
-                           font=FONT, bg=BG, activebackground=BG,
+                           font=FONT, bg=BG, activebackground=BG, selectcolor=FIELD_BG,
                            highlightthickness=0, anchor="w").pack(fill=tk.X)
 
             btns = tk.Frame(body, bg=BG)
             btns.pack(fill=tk.X, pady=(10, 0))
-            w95_button(btns, "OK", self._ok, width=10).pack(side=tk.RIGHT, padx=(6, 0))
-            w95_button(btns, "Cancel", self.destroy, width=10).pack(side=tk.RIGHT)
+            w95_button(btns, "Cancel", self.destroy, width=10).pack(side=tk.RIGHT, padx=(6, 0))
+            w95_button(btns, "OK", self._ok, width=10, bold=True).pack(side=tk.RIGHT)
 
             self.bind("<Return>", lambda e: self._ok())
             self.bind("<Escape>", lambda e: self.destroy())
-
-            # center over parent
-            self.update_idletasks()
-            px, py = parent.winfo_rootx(), parent.winfo_rooty()
-            self.geometry(f"+{px + 200}+{py + 180}")
+            w95_show_modal(self, parent)
 
         def _ok(self):
             self.result = (self.var_exts.get(), self.var_recursive.get())
@@ -205722,24 +209103,35 @@ if pdfbulkvar == 654312:
 
             # Rularea buclei principale
             validation.mainloop()
+
     import csv
     import io
     import os
+    import re
+    import queue
+    import zipfile
     import threading
     import datetime as dt
     import tkinter as tk
+    import tkinter.font as tkfont
     from tkinter import filedialog
+    from xml.sax.saxutils import escape as xml_escape
+    from xml.etree import ElementTree
 
     import chardet
-    from PIL import Image
+    from PIL import Image, ImageOps, ImageSequence
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.pdfmetrics import stringWidth
+    from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.platypus import (SimpleDocTemplate, LongTable, TableStyle,
                                     Paragraph, Spacer, PageBreak)
+    from reportlab.platypus import Image as RLImage
     from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT, TA_JUSTIFY
 
     try:
         import openpyxl
@@ -205748,10 +209140,14 @@ if pdfbulkvar == 654312:
         HAS_XLSX = False
 
     try:
-        import aspose.words as aw
-        HAS_ASPOSE = True
+        from docx import Document as DocxDocument
+        from docx.oxml.ns import qn
+        from docx.table import Table as DocxTable
+        from docx.text.paragraph import Paragraph as DocxParagraph
+        from docx.text.run import Run as DocxRun
+        HAS_DOCX = True
     except ImportError:
-        HAS_ASPOSE = False
+        HAS_DOCX = False
 
     try:
         from pptx import Presentation
@@ -205771,13 +209167,17 @@ if pdfbulkvar == 654312:
     FONT      = ("MS Sans Serif", 8)
     FONT_B    = ("MS Sans Serif", 8, "bold")
     FONT_MONO = ("Courier New", 8)
+    W95_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
 
-    WORD_EXT   = {".doc", ".docx", ".docm", ".dot", ".dotx", ".rtf", ".odt"}
+    DOCX_EXT   = {".docx", ".docm", ".dotx", ".dotm"}     # Word, read with python-docx
+    RTF_EXT    = {".rtf"}
+    ODT_EXT    = {".odt"}
     XLSX_EXT   = {".xlsx", ".xlsm", ".xltx", ".xltm"}
     CSV_EXT    = {".csv", ".tsv"}
     PPTX_EXT   = {".pptx", ".pptm", ".ppsx", ".potx"}
     IMAGE_EXT  = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
-    OLD_OFFICE = {".xls", ".xlsb", ".ppt", ".pps", ".ods", ".odp"}  # need Office/other libs
+    OLD_OFFICE = {".doc", ".dot", ".xls", ".xlsb", ".ppt", ".pps", ".ods", ".odp"}  # old binary formats
 
     # obviously-binary stuff we do not even try
     BINARY_EXT = {".exe", ".dll", ".msi", ".bin", ".dat", ".iso", ".img",
@@ -205788,6 +209188,52 @@ if pdfbulkvar == 654312:
                   ".otf", ".woff", ".woff2", ".ico"}
 
     EMU_PER_PT = 12700  # PowerPoint EMU -> PDF points
+
+
+    # ---------------------------------------------------------------- PDF fonts
+    #
+    # Fix: reportlab's built-in Courier / Helvetica have no Romanian letters (a-breve, s-comma, t-comma...).
+    # The Unicode TrueType fonts of Windows are registered instead; the built-in ones remain the fallback.
+
+    def _register_pdf_fonts():
+        windir = os.environ.get("WINDIR", r"C:\Windows")
+        folders = [os.path.join(windir, "Fonts"), "/usr/share/fonts/truetype/dejavu", "/Library/Fonts"]
+        wanted = {
+            "BP-Mono": (["cour.ttf", "consola.ttf", "DejaVuSansMono.ttf"], "Courier"),
+            "BP-Mono-Bold": (["courbd.ttf", "consolab.ttf", "DejaVuSansMono-Bold.ttf"], "Courier-Bold"),
+            "BP-Sans": (["arial.ttf", "DejaVuSans.ttf"], "Helvetica"),
+            "BP-Sans-Bold": (["arialbd.ttf", "DejaVuSans-Bold.ttf"], "Helvetica-Bold"),
+            "BP-Sans-Italic": (["ariali.ttf", "DejaVuSans-Oblique.ttf"], "Helvetica-Oblique"),
+            "BP-Sans-BoldItalic": (["arialbi.ttf", "DejaVuSans-BoldOblique.ttf"], "Helvetica-BoldOblique"),
+        }
+        names = {}
+        for name, (files, fallback) in wanted.items():
+            names[name] = fallback
+            for folder in folders:
+                for file_name in files:
+                    path = os.path.join(folder, file_name)
+                    if os.path.isfile(path):
+                        try:
+                            pdfmetrics.registerFont(TTFont(name, path))
+                            names[name] = name
+                        except Exception:
+                            continue
+                        break
+                if names[name] == name:
+                    break
+        if names["BP-Sans"] == "BP-Sans":          # <b> and <i> inside Word paragraphs use these
+            pdfmetrics.registerFontFamily(
+                "BP-Sans", normal="BP-Sans",
+                bold=names["BP-Sans-Bold"] if names["BP-Sans-Bold"] == "BP-Sans-Bold" else "BP-Sans",
+                italic=names["BP-Sans-Italic"] if names["BP-Sans-Italic"] == "BP-Sans-Italic" else "BP-Sans",
+                boldItalic=(names["BP-Sans-BoldItalic"] if names["BP-Sans-BoldItalic"] == "BP-Sans-BoldItalic"
+                            else names["BP-Sans-Bold"]))
+        return names
+
+
+    PDF_FONTS = _register_pdf_fonts()
+    MONO, MONO_B = PDF_FONTS["BP-Mono"], PDF_FONTS["BP-Mono-Bold"]
+    SANS, SANS_B = PDF_FONTS["BP-Sans"], PDF_FONTS["BP-Sans-Bold"]
 
 
     # ---------------------------------------------------------------- helpers
@@ -205813,6 +209259,16 @@ if pdfbulkvar == 654312:
             return True
         if b"\x00" in chunk:
             return False
+        try:
+            chunk.decode("utf-8")
+            return True
+        except UnicodeDecodeError:
+            pass
+        # Fix: short ANSI (Windows-1250) texts got a low chardet confidence and were skipped as "binary";
+        # a file without NUL bytes and with almost no control characters is text
+        controls = sum(1 for b in chunk if b < 32 and b not in (9, 10, 12, 13))
+        if controls <= len(chunk) * 0.02:
+            return True
         guess = chardet.detect(chunk)
         return guess.get("confidence", 0) > 0.5 or chunk.isascii()
 
@@ -205822,12 +209278,21 @@ if pdfbulkvar == 654312:
             raw = f.read()
         if not raw:
             return ""
+        # Fix: UTF-8 first (chardet often mistakes short Romanian UTF-8 texts for Latin-1), BOMs respected
+        if raw.startswith(b"\xef\xbb\xbf"):
+            return raw[3:].decode("utf-8", errors="replace")
+        if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+            return raw.decode("utf-16", errors="replace")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
         guess = chardet.detect(raw)
-        enc = guess.get("encoding") or "utf-8"
+        enc = guess.get("encoding") or "cp1250"
         try:
             return raw.decode(enc, errors="replace")
         except (LookupError, UnicodeDecodeError):
-            return raw.decode("utf-8", errors="replace")
+            return raw.decode("cp1250", errors="replace")
 
 
     # ---------------------------------------------------------------- text -> pdf
@@ -205840,17 +209305,18 @@ if pdfbulkvar == 654312:
         font_size = 8
         leading = 10
         usable_w = page_w - 2 * margin
-        max_chars = max(20, int(usable_w / (font_size * 0.6)))
+        char_w = stringWidth("M", MONO, font_size) or font_size * 0.6
+        max_chars = max(20, int(usable_w / char_w))
 
         c = rl_canvas.Canvas(out_path, pagesize=A4)
         header = os.path.basename(src_path)
 
         def new_page(page_no):
-            c.setFont("Courier-Bold", 8)
+            c.setFont(MONO_B, 8)
             c.drawString(margin, page_h - 25, header)
             c.drawRightString(page_w - margin, page_h - 25, "Page %d" % page_no)
             c.line(margin, page_h - 30, page_w - margin, page_h - 30)
-            c.setFont("Courier", font_size)
+            c.setFont(MONO, font_size)
             return page_h - 45
 
         page_no = 1
@@ -205870,20 +209336,631 @@ if pdfbulkvar == 654312:
 
     # ---------------------------------------------------------------- image -> pdf
 
-    def image_to_pdf(src_path, out_path):
-        img = Image.open(src_path)
+    def _flatten(img):
+        """Transparent pictures on white (not black), CMYK / palette to RGB."""
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            rgba = img.convert("RGBA")
+            page = Image.new("RGB", rgba.size, (255, 255, 255))
+            page.paste(rgba, mask=rgba.getchannel("A"))
+            return page
         if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        img.save(out_path, "PDF", resolution=100.0)
-        img.close()
+            return img.convert("RGB")
+        return img
 
 
-    # ---------------------------------------------------------------- word -> pdf
+    def image_to_pdf(src_path, out_path):
+        # Fix: phone photos the right way up (EXIF), transparency on white, every page of a multi-page TIFF
+        with Image.open(src_path) as img:
+            if getattr(img, "n_frames", 1) > 1 and img.format == "TIFF":
+                pages = [_flatten(frame.copy()) for frame in ImageSequence.Iterator(img)]
+            else:
+                pages = [_flatten(ImageOps.exif_transpose(img))]
+        pages[0].save(out_path, "PDF", resolution=100.0, save_all=True, append_images=pages[1:])
 
-    def word_to_pdf(src_path, out_path):
-        """Aspose.Words converts fully locally (no Office needed)."""
-        doc = aw.Document(src_path)
-        doc.save(out_path)
+
+    # ---------------------------------------------------------------- word -> pdf (no Aspose)
+    #
+    # python-docx reads the document and reportlab lays it out, fully on this computer:
+    # headings, bold / italic / underline / strike, colours, sizes, superscript / subscript,
+    # alignment, indents, spacing, bullet and numbered lists, tables, pictures, page breaks,
+    # page size and margins, header / footer text and page numbers.
+    # Not reproduced: text boxes, shapes, charts, SmartArt, footnotes, columns, exact fonts.
+
+    DOCX_MAIN_TYPE = b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
+    DOCX_OTHER_TYPES = (b"application/vnd.ms-word.document.macroEnabled.main+xml",
+                        b"application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+                        b"application/vnd.ms-word.template.macroEnabledTemplate.main+xml")
+    DOCX_PAGE_BREAK = "\x0c"
+    DOCX_BULLETS = ("\u2022", "o", "-")
+
+
+    def _open_docx(path):
+        """python-docx opens only .docx; .docm / .dotx / .dotm are the same format with another content
+        type, which is rewritten in memory (the file on disk is never changed)."""
+        try:
+            return DocxDocument(path)
+        except ValueError:
+            pass
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "[Content_Types].xml":
+                    for other in DOCX_OTHER_TYPES:
+                        data = data.replace(other, DOCX_MAIN_TYPE)
+                zout.writestr(item, data)
+        buffer.seek(0)
+        return DocxDocument(buffer)
+
+
+    def _docx_blocks(parent_element, parent):
+        """Paragraphs and tables of the body in document order (also inside content controls)."""
+        for child in parent_element.iterchildren():
+            if child.tag == qn("w:p"):
+                yield DocxParagraph(child, parent)
+            elif child.tag == qn("w:tbl"):
+                yield DocxTable(child, parent)
+            elif child.tag == qn("w:sdt"):
+                content = child.find(qn("w:sdtContent"))
+                if content is not None:
+                    yield from _docx_blocks(content, parent)
+
+
+    def _docx_list_formats(doc):
+        """(numId, level) -> 'bullet', 'decimal', 'lowerLetter'... from the numbering definitions."""
+        formats = {}
+        try:
+            numbering = doc.part.numbering_part.element
+        except Exception:
+            return formats
+        abstract = {a.get(qn("w:abstractNumId")): a for a in numbering.findall(qn("w:abstractNum"))}
+        for num in numbering.findall(qn("w:num")):
+            ref = num.find(qn("w:abstractNumId"))
+            definition = abstract.get(ref.get(qn("w:val"))) if ref is not None else None
+            if definition is None:
+                continue
+            for level in definition.findall(qn("w:lvl")):
+                fmt = level.find(qn("w:numFmt"))
+                formats[(num.get(qn("w:numId")), level.get(qn("w:ilvl")))] = (
+                    fmt.get(qn("w:val")) if fmt is not None else "bullet")
+        return formats
+
+
+    def _roman(number):
+        values = ((1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+                  (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i"))
+        out = ""
+        for value, letters in values:
+            while number >= value:
+                out += letters
+                number -= value
+        return out
+
+
+    def _docx_numbering(paragraph):
+        """(numId, level) of a list paragraph, from the paragraph or from its style; None otherwise."""
+        for element in (paragraph._p, getattr(paragraph.style, "element", None)):
+            if element is None:
+                continue
+            num_pr = element.find(qn("w:pPr") + "/" + qn("w:numPr"))
+            if num_pr is None:
+                continue
+            num_id = num_pr.find(qn("w:numId"))
+            level = num_pr.find(qn("w:ilvl"))
+            num_value = num_id.get(qn("w:val")) if num_id is not None else None
+            if num_value in (None, "0"):
+                return None
+            return num_value, (level.get(qn("w:val")) if level is not None else "0")
+        return None
+
+
+    class _DocxLists:
+        """Keeps the running numbers of the numbered lists while the document is laid out."""
+
+        def __init__(self, doc):
+            self.formats = _docx_list_formats(doc)
+            self.counters = {}
+
+        def label(self, paragraph):
+            numbering = _docx_numbering(paragraph)
+            style_name = (paragraph.style.name if paragraph.style is not None else "") or ""
+            if numbering is None:
+                if style_name.lower().startswith("list bullet"):
+                    return DOCX_BULLETS[0], 0
+                return None, 0
+            num_id, level = numbering
+            depth = int(level) if level.isdigit() else 0
+            fmt = self.formats.get((num_id, level), "bullet")
+            if fmt in ("bullet", "none"):
+                return (DOCX_BULLETS[depth % len(DOCX_BULLETS)] if fmt == "bullet" else ""), depth
+            key = (num_id, depth)
+            self.counters[key] = self.counters.get(key, 0) + 1
+            for (other_id, other_depth) in list(self.counters):        # a new item restarts the deeper levels
+                if other_id == num_id and other_depth > depth:
+                    del self.counters[(other_id, other_depth)]
+            n = self.counters[key]
+            if fmt == "lowerLetter":
+                return "%s)" % chr(96 + (n - 1) % 26 + 1), depth
+            if fmt == "upperLetter":
+                return "%s." % chr(64 + (n - 1) % 26 + 1), depth
+            if fmt == "lowerRoman":
+                return "%s." % _roman(n), depth
+            if fmt == "upperRoman":
+                return "%s." % _roman(n).upper(), depth
+            return "%d." % n, depth
+
+
+    def _docx_style_value(paragraph, getter):
+        """A paragraph-format value from the paragraph, else from its style chain."""
+        value = getter(paragraph.paragraph_format)
+        style = paragraph.style
+        while value is None and style is not None:
+            value = getter(style.paragraph_format)
+            style = style.base_style
+        return value
+
+
+    def _docx_style_font(paragraph, attribute):
+        style = paragraph.style
+        while style is not None:
+            value = getattr(style.font, attribute, None)
+            if value is not None:
+                return value
+            style = style.base_style
+        return None
+
+
+    def _docx_picture(doc, run_element, max_width):
+        """The pictures of a run as reportlab images, sized like in the document (and fitted to the page)."""
+        pictures = []
+        for blip in run_element.findall(".//" + qn("a:blip")):
+            part = doc.part.related_parts.get(blip.get(qn("r:embed")))
+            if part is None:
+                continue
+            try:
+                with Image.open(io.BytesIO(part.blob)) as img:
+                    img = _flatten(ImageOps.exif_transpose(img))
+                    png = io.BytesIO()
+                    img.save(png, "PNG")
+                    width_px, height_px = img.size
+            except Exception:
+                continue                                   # EMF / WMF and other vector pictures are left out
+            extent = run_element.find(".//" + qn("wp:extent"))
+            if extent is not None:
+                width = int(extent.get("cx", 0)) / EMU_PER_PT
+                height = int(extent.get("cy", 0)) / EMU_PER_PT
+            else:
+                width, height = width_px * 0.75, height_px * 0.75
+            if width <= 0 or height <= 0:
+                continue
+            if width > max_width:
+                height *= max_width / width
+                width = max_width
+            png.seek(0)
+            pictures.append(RLImage(png, width=width, height=height))
+        return pictures
+
+
+    def _docx_run_markup(run, paragraph, base_size):
+        """One run as reportlab paragraph markup; page breaks come back as DOCX_PAGE_BREAK."""
+        parts = []
+        for child in run._r.iterchildren():
+            tag = child.tag
+            if tag == qn("w:t"):
+                parts.append(xml_escape(child.text or ""))
+            elif tag == qn("w:tab"):
+                parts.append("&nbsp;&nbsp;&nbsp;&nbsp;")
+            elif tag in (qn("w:br"), qn("w:cr")):
+                parts.append(DOCX_PAGE_BREAK if child.get(qn("w:type")) == "page" else "<br/>")
+            elif tag == qn("w:noBreakHyphen"):
+                parts.append("-")
+            elif tag == qn("w:sym"):
+                parts.append("\u2022")
+        text = "".join(parts)
+        if not text.strip(DOCX_PAGE_BREAK):
+            return text
+        font = run.font
+
+        def effective(value, attribute):
+            if value is not None:
+                return value
+            if run.style is not None and getattr(run.style.font, attribute, None) is not None:
+                return getattr(run.style.font, attribute)
+            return _docx_style_font(paragraph, attribute)
+
+        attributes = []
+        if font.size is not None and abs(font.size.pt - base_size) > 0.1:
+            attributes.append('size="%.1f"' % font.size.pt)
+        try:
+            if font.color is not None and font.color.type is not None and font.color.rgb is not None:
+                rgb = str(font.color.rgb)
+                if rgb.upper() != "000000":
+                    attributes.append('color="#%s"' % rgb)
+        except Exception:
+            pass
+        segments = text.split(DOCX_PAGE_BREAK)
+        out = []
+        for piece in segments:
+            if piece:
+                if attributes:
+                    piece = "<font %s>%s</font>" % (" ".join(attributes), piece)
+                if effective(font.bold, "bold"):
+                    piece = "<b>%s</b>" % piece
+                if effective(font.italic, "italic"):
+                    piece = "<i>%s</i>" % piece
+                if effective(font.underline, "underline"):
+                    piece = "<u>%s</u>" % piece
+                if effective(font.strike, "strike"):
+                    piece = "<strike>%s</strike>" % piece
+                if font.superscript:
+                    piece = "<super>%s</super>" % piece
+                elif font.subscript:
+                    piece = "<sub>%s</sub>" % piece
+            out.append(piece)
+        return DOCX_PAGE_BREAK.join(out)
+
+
+    DOCX_HEADING_SIZES = {0: 22, 1: 16, 2: 13, 3: 12, 4: 11, 5: 11, 6: 11}
+
+
+    def _docx_paragraph(doc, paragraph, lists, avail_w, default_size, cell=False):
+        """A document paragraph as a list of flowables (text, pictures, page breaks)."""
+        style_name = (paragraph.style.name if paragraph.style is not None else "") or ""
+        lowered = style_name.lower()
+        heading = None
+        if lowered == "title":
+            heading = 0
+        elif lowered.startswith("heading ") and lowered[8:].strip().isdigit():
+            heading = int(lowered[8:].strip())
+
+        style_size = _docx_style_font(paragraph, "size")
+        size = style_size.pt if style_size is not None else (DOCX_HEADING_SIZES.get(heading, default_size)
+                                                             if heading is not None else default_size)
+        if cell:
+            size = min(size, 9)
+        run_sizes = [r.font.size.pt for r in paragraph.runs if r.font.size is not None]
+        leading = max([size] + run_sizes) * 1.22
+
+        alignment = _docx_style_value(paragraph, lambda f: f.alignment)
+        align = {1: TA_CENTER, 2: TA_RIGHT, 3: TA_JUSTIFY}.get(int(alignment) if alignment is not None else 0, TA_LEFT)
+        left = _docx_style_value(paragraph, lambda f: f.left_indent)
+        first = _docx_style_value(paragraph, lambda f: f.first_line_indent)
+        before = _docx_style_value(paragraph, lambda f: f.space_before)
+        after = _docx_style_value(paragraph, lambda f: f.space_after)
+        label, depth = lists.label(paragraph)
+
+        left_pt = max(0.0, left.pt) if left is not None else 0.0
+        if label is not None and left is None:
+            left_pt = 18 * (depth + 1)
+        style = ParagraphStyle(
+            "docx", fontName=SANS, fontSize=size, leading=leading, alignment=align,
+            leftIndent=left_pt, firstLineIndent=(first.pt if first is not None and label is None else 0),
+            spaceBefore=(before.pt if before is not None else (10 if heading is not None else 0)),
+            spaceAfter=(after.pt if after is not None else (4 if heading is not None else 6)),
+            bulletFontName=SANS, bulletFontSize=size, bulletIndent=max(0, left_pt - 14))
+        if cell:
+            style.spaceBefore, style.spaceAfter = 0, 2
+
+        flowables = []
+        if _docx_style_value(paragraph, lambda f: f.page_break_before) and not cell:
+            flowables.append(PageBreak())
+        markup = ""
+
+        def flush():
+            nonlocal markup, label
+            if markup.strip():
+                text = "<b>%s</b>" % markup if heading is not None else markup
+                flowables.append(Paragraph(text, style, bulletText=label or None))
+                label = None
+            markup = ""
+
+        for child in paragraph._p.iterchildren():
+            runs = []
+            if child.tag == qn("w:r"):
+                runs = [child]
+            elif child.tag in (qn("w:hyperlink"), qn("w:smartTag"), qn("w:ins"), qn("w:fldSimple")):
+                runs = child.findall(".//" + qn("w:r"))
+            for r_element in runs:
+                run = DocxRun(r_element, paragraph)
+                pictures = [] if cell else _docx_picture(doc, r_element, avail_w)
+                piece = _docx_run_markup(run, paragraph, size)
+                for index, chunk in enumerate(piece.split(DOCX_PAGE_BREAK)):
+                    if index:
+                        flush()
+                        flowables.append(PageBreak())
+                    markup += chunk
+                if pictures:
+                    flush()
+                    flowables.extend(pictures)
+        flush()
+        if not flowables:
+            flowables.append(Spacer(1, leading * 0.6))
+        return flowables
+
+
+    def _docx_table(doc, table, lists, avail_w, default_size):
+        grid = [list(row.cells) for row in table.rows]
+        # a merged cell appears at every grid position it covers: show it once, spanning all of them
+        places = {}
+        for r, row in enumerate(grid):
+            for c, cell in enumerate(row):
+                places.setdefault(id(cell._tc), []).append((r, c))
+        spans = []
+        for positions in places.values():
+            if len(positions) > 1:
+                rows_used = [r for r, _c in positions]
+                cols_used = [c for _r, c in positions]
+                spans.append(("SPAN", (min(cols_used), min(rows_used)), (max(cols_used), max(rows_used))))
+        rows = []
+        for r, row in enumerate(grid):
+            cells = []
+            for c, cell in enumerate(row):
+                if places[id(cell._tc)][0] != (r, c):
+                    cells.append("")
+                    continue
+                content = []
+                for block in _docx_blocks(cell._tc, cell):
+                    if isinstance(block, DocxParagraph):
+                        content.extend(f for f in _docx_paragraph(doc, block, lists, avail_w, default_size, cell=True)
+                                       if isinstance(f, Paragraph))
+                    else:                                               # a table inside a cell: its text
+                        text = " | ".join(c.text for r in block.rows for c in r.cells)
+                        content.append(Paragraph(xml_escape(text), ParagraphStyle("c", fontName=SANS, fontSize=8)))
+                cells.append(content or "")
+            rows.append(cells)
+        if not rows:
+            return []
+        columns = max(len(r) for r in rows)
+        for r in rows:
+            r.extend([""] * (columns - len(r)))
+        widths = []
+        try:
+            widths = [c.width.pt if c.width is not None else None for c in table.columns]
+        except Exception:
+            widths = []
+        if len(widths) != columns or any(w is None or w <= 0 for w in widths):
+            widths = [avail_w / columns] * columns
+        total = sum(widths)
+        if total > avail_w:
+            widths = [w * avail_w / total for w in widths]
+        t = LongTable(rows, colWidths=widths)
+        t.setStyle(TableStyle(spans + [
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#808080")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return [t, Spacer(1, 6)]
+
+
+    def _header_footer_text(part):
+        try:
+            return "   ".join(p.text.strip() for p in part.paragraphs if p.text.strip())
+        except Exception:
+            return ""
+
+
+    def docx_to_pdf(src_path, out_path):
+        doc = _open_docx(src_path)
+        section = doc.sections[0] if doc.sections else None
+
+        def points(value, default):
+            return value.pt if value is not None else default
+
+        page_w = points(section.page_width if section else None, A4[0])
+        page_h = points(section.page_height if section else None, A4[1])
+        left = points(section.left_margin if section else None, 72)
+        right = points(section.right_margin if section else None, 72)
+        top = points(section.top_margin if section else None, 72)
+        bottom = points(section.bottom_margin if section else None, 72)
+        header_text = _header_footer_text(section.header) if section else ""
+        footer_text = _header_footer_text(section.footer) if section else ""
+        try:
+            normal = doc.styles["Normal"].font.size
+        except KeyError:
+            normal = None
+        default_size = normal.pt if normal is not None else 11
+        avail_w = page_w - left - right
+
+        lists = _DocxLists(doc)
+        story = []
+        for block in _docx_blocks(doc.element.body, doc):
+            if isinstance(block, DocxParagraph):
+                story.extend(_docx_paragraph(doc, block, lists, avail_w, default_size))
+            else:
+                story.extend(_docx_table(doc, block, lists, avail_w, default_size))
+        if not story:
+            story.append(Paragraph("(empty document)", ParagraphStyle("e", fontName=SANS, fontSize=10)))
+
+        def page_decoration(canvas, document):
+            canvas.saveState()
+            canvas.setFont(SANS, 8)
+            canvas.setFillColor(colors.HexColor("#606060"))
+            if header_text:
+                canvas.drawCentredString(page_w / 2, page_h - top / 2, header_text[:150])
+            if footer_text:
+                canvas.drawCentredString(page_w / 2, bottom / 2, footer_text[:150])
+            canvas.drawRightString(page_w - right, bottom / 2 - (10 if footer_text else 0), "Page %d" % document.page)
+            canvas.restoreState()
+
+        title = ""
+        try:
+            title = doc.core_properties.title or ""
+        except Exception:
+            pass
+        pdf = SimpleDocTemplate(out_path, pagesize=(page_w, page_h), leftMargin=left, rightMargin=right,
+                                topMargin=top, bottomMargin=bottom, title=title or os.path.basename(src_path))
+        pdf.build(story, onFirstPage=page_decoration, onLaterPages=page_decoration)
+
+
+    # ---------------------------------------------------------------- rtf / odt -> pdf (text and headings)
+
+    RTF_SKIPPED_GROUPS = {"fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "header", "footer",
+                          "headerl", "headerr", "headerf", "footerl", "footerr", "footerf", "listtable",
+                          "listoverridetable", "rsidtbl", "themedata", "colorschememapping", "latentstyles",
+                          "datastore", "xmlnstbl", "fldinst", "filetbl", "revtbl", "generator", "mmathPr",
+                          "pgdsctbl", "bkmkstart", "bkmkend", "xe", "tc", "nonshppict", "shppict"}
+    RTF_CHARACTERS = {"par": "\n", "line": "\n", "sect": "\n\n", "page": "\n\n", "tab": "\t", "cell": " | ",
+                      "row": "\n", "emdash": "\u2014", "endash": "\u2013", "bullet": "\u2022", "lquote": "\u2018",
+                      "rquote": "\u2019", "ldblquote": "\u201c", "rdblquote": "\u201d", "emspace": " ", "enspace": " "}
+    RTF_TOKEN = re.compile(r"\\([a-zA-Z]+)(-?\d+)? ?|\\'([0-9a-fA-F]{2})|\\([^a-zA-Z])|([{}])|([^\\{}\r\n]+)|[\r\n]+")
+
+
+    def rtf_text(raw):
+        """Plain text of an RTF document (paragraphs kept, formatting dropped)."""
+        data = raw.decode("latin-1")
+        out = []
+        stack = []
+        skip = False
+        unicode_skip = 1
+        pending = 0                         # characters still to drop after a \uN
+        codepage = "cp1252"
+        ignorable_next = False
+        for match in RTF_TOKEN.finditer(data):
+            word, number, hex_byte, symbol, brace, text = match.groups()
+            if brace == "{":
+                stack.append((skip, unicode_skip))
+                continue
+            if brace == "}":
+                if stack:
+                    skip, unicode_skip = stack.pop()
+                continue
+            if symbol is not None:
+                if symbol == "*":
+                    ignorable_next = True
+                elif not skip:
+                    if pending:
+                        pending -= 1
+                    elif symbol in "\\{}":
+                        out.append(symbol)
+                    elif symbol == "~":
+                        out.append("\u00a0")
+                    elif symbol == "_":
+                        out.append("-")
+                continue
+            if word is not None:
+                if ignorable_next:
+                    ignorable_next = False
+                    if word not in ("fldrslt",):
+                        skip = True
+                        continue
+                if word in RTF_SKIPPED_GROUPS:
+                    skip = True
+                elif word == "ansicpg" and number:
+                    codepage = "cp" + number
+                elif word == "uc" and number:
+                    unicode_skip = int(number)
+                elif word == "u" and number and not skip:
+                    value = int(number)
+                    out.append(chr(value + 65536 if value < 0 else value))
+                    pending = unicode_skip
+                elif not skip and word in RTF_CHARACTERS:
+                    out.append(RTF_CHARACTERS[word])
+                continue
+            if hex_byte is not None:
+                if skip:
+                    continue
+                if pending:
+                    pending -= 1
+                    continue
+                try:
+                    out.append(bytes([int(hex_byte, 16)]).decode(codepage))
+                except (LookupError, UnicodeDecodeError):
+                    out.append(bytes([int(hex_byte, 16)]).decode("cp1252", errors="replace"))
+                continue
+            if text is not None and not skip:
+                if pending:
+                    drop = min(pending, len(text))
+                    text = text[drop:]
+                    pending -= drop
+                out.append(text)
+        return "".join(out)
+
+
+    def _paragraphs_to_pdf(src_path, out_path, paragraphs):
+        """paragraphs: (kind, text) with kind 'h1'..'h3', 'li' or 'p'."""
+        styles = {
+            "h1": ParagraphStyle("h1", fontName=SANS_B, fontSize=16, leading=20, spaceBefore=10, spaceAfter=6),
+            "h2": ParagraphStyle("h2", fontName=SANS_B, fontSize=13, leading=17, spaceBefore=8, spaceAfter=4),
+            "h3": ParagraphStyle("h3", fontName=SANS_B, fontSize=11, leading=15, spaceBefore=6, spaceAfter=4),
+            "li": ParagraphStyle("li", fontName=SANS, fontSize=10.5, leading=14, leftIndent=18, bulletIndent=6,
+                                 spaceAfter=3, bulletFontName=SANS),
+            "p": ParagraphStyle("p", fontName=SANS, fontSize=10.5, leading=14, spaceAfter=6),
+        }
+        story = []
+        for kind, text in paragraphs:
+            if not text.strip():
+                story.append(Spacer(1, 6))
+                continue
+            markup = xml_escape(text).replace("\t", "&nbsp;&nbsp;&nbsp;&nbsp;").replace("\n", "<br/>")
+            story.append(Paragraph(markup, styles.get(kind, styles["p"]), bulletText="\u2022" if kind == "li" else None))
+        if not story:
+            story.append(Paragraph("(empty document)", styles["p"]))
+        pdf = SimpleDocTemplate(out_path, pagesize=A4, leftMargin=60, rightMargin=60, topMargin=60, bottomMargin=60,
+                                title=os.path.basename(src_path))
+        pdf.build(story)
+
+
+    def rtf_to_pdf(src_path, out_path):
+        with open(src_path, "rb") as f:
+            raw = f.read()
+        if not raw.lstrip().startswith(b"{\\rtf"):
+            text_to_pdf(src_path, out_path)                 # a .rtf that is really plain text
+            return
+        text = rtf_text(raw)
+        _paragraphs_to_pdf(src_path, out_path, [("p", line) for line in text.split("\n")])
+
+
+    ODF_TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    ODF_TABLE = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+    ODF_OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+
+
+    def _odf_inline_text(element):
+        parts = [element.text or ""]
+        for child in element:
+            tag = child.tag
+            if tag == "{%s}s" % ODF_TEXT:
+                parts.append(" " * int(child.get("{%s}c" % ODF_TEXT, "1")))
+            elif tag == "{%s}tab" % ODF_TEXT:
+                parts.append("\t")
+            elif tag == "{%s}line-break" % ODF_TEXT:
+                parts.append("\n")
+            elif tag != "{%s}note" % ODF_TEXT:
+                parts.append(_odf_inline_text(child))
+            parts.append(child.tail or "")
+        return "".join(parts)
+
+
+    def _odf_blocks(element, out, in_list=False):
+        for child in element:
+            tag = child.tag
+            if tag == "{%s}h" % ODF_TEXT:
+                level = min(3, int(child.get("{%s}outline-level" % ODF_TEXT, "1") or 1))
+                out.append(("h%d" % level, _odf_inline_text(child)))
+            elif tag == "{%s}p" % ODF_TEXT:
+                out.append(("li" if in_list else "p", _odf_inline_text(child)))
+            elif tag in ("{%s}list" % ODF_TEXT, "{%s}list-item" % ODF_TEXT):
+                _odf_blocks(child, out, in_list=True)
+            elif tag == "{%s}table" % ODF_TABLE:
+                for row in child.iter("{%s}table-row" % ODF_TABLE):
+                    cells = [" ".join(_odf_inline_text(p) for p in cell.iter("{%s}p" % ODF_TEXT))
+                             for cell in row.findall("{%s}table-cell" % ODF_TABLE)]
+                    out.append(("p", " | ".join(cells)))
+            elif tag in ("{%s}section" % ODF_TEXT, "{%s}text" % ODF_OFFICE):
+                _odf_blocks(child, out, in_list)
+
+
+    def odt_to_pdf(src_path, out_path):
+        with zipfile.ZipFile(src_path) as z:
+            root = ElementTree.fromstring(z.read("content.xml"))
+        body = root.find("{%s}body/{%s}text" % (ODF_OFFICE, ODF_OFFICE))
+        paragraphs = []
+        if body is not None:
+            _odf_blocks(body, paragraphs)
+        _paragraphs_to_pdf(src_path, out_path, paragraphs)
 
 
     # ---------------------------------------------------------------- excel -> pdf
@@ -205893,7 +209970,8 @@ if pdfbulkvar == 654312:
     # so you never get one column per page. Rows paginate automatically
     # (LongTable) with the header repeated. Every sheet is included.
 
-    XL_FONT      = "Helvetica"
+    XL_FONT      = SANS
+    XL_FONT_B    = SANS_B
     XL_FONT_SIZE = 7
     XL_MAX_COL_W = 55 * mm       # cap so one huge cell can't hog the page
     XL_MIN_COL_W = 9 * mm
@@ -205987,6 +210065,23 @@ if pdfbulkvar == 654312:
         return "\n".join(out)
 
 
+    def _table_style():
+        return TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), XL_FONT),
+            ("FONTSIZE", (0, 0), (-1, -1), XL_FONT_SIZE),
+            ("FONTNAME", (0, 0), (-1, 0), XL_FONT_B),
+            ("FONTNAME", (0, 0), (0, -1), XL_FONT_B),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d0d0d0")),
+            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#d0d0d0")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#999999")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ])
+
+
     def excel_to_pdf(src_path, out_path):
         wb = openpyxl.load_workbook(src_path, data_only=True, read_only=True)
         page = landscape(A4)
@@ -205997,59 +210092,48 @@ if pdfbulkvar == 654312:
                                 leftMargin=margin, rightMargin=margin,
                                 topMargin=margin, bottomMargin=margin,
                                 title=os.path.basename(src_path))
-        h_style = ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=11,
+        h_style = ParagraphStyle("h", fontName=SANS_B, fontSize=11,
                                  spaceAfter=4)
-        sub_style = ParagraphStyle("s", fontName="Helvetica", fontSize=8,
+        sub_style = ParagraphStyle("s", fontName=SANS, fontSize=8,
                                    textColor=colors.grey, spaceAfter=6)
         story = []
         first = True
 
-        for ws in wb.worksheets:
-            rows = _sheet_matrix(ws)
-            if not first:
-                story.append(PageBreak())
-            first = False
-            story.append(Paragraph("Sheet: %s" % ws.title, h_style))
-            if not rows:
-                story.append(Paragraph("(empty sheet)", sub_style))
-                continue
+        try:
+            for ws in wb.worksheets:
+                rows = _sheet_matrix(ws)
+                if not first:
+                    story.append(PageBreak())
+                first = False
+                # Fix: a sheet name such as "P&L" or "<2024>" broke the conversion
+                story.append(Paragraph("Sheet: %s" % xml_escape(ws.title), h_style))
+                if not rows:
+                    story.append(Paragraph("(empty sheet)", sub_style))
+                    continue
 
-            widths = _column_widths(rows)
-            groups = _column_groups(widths, avail_w)
-            rownum_w = max(12 * mm,
-                           stringWidth(str(len(rows)), XL_FONT, XL_FONT_SIZE) + 8)
+                widths = _column_widths(rows)
+                groups = _column_groups(widths, avail_w)
+                rownum_w = max(12 * mm,
+                               stringWidth(str(len(rows)), XL_FONT, XL_FONT_SIZE) + 8)
 
-            for gi, group in enumerate(groups):
-                if len(groups) > 1:
-                    story.append(Paragraph(
-                        "Columns %s - %s (part %d of %d)"
-                        % (_col_letter(group[0] + 1), _col_letter(group[-1] + 1),
-                           gi + 1, len(groups)), sub_style))
-                header = [""] + [_col_letter(i + 1) for i in group]
-                data = [header]
-                for ri, r in enumerate(rows, start=1):
-                    data.append([str(ri)] +
-                                [_wrap_long(r[i], widths[i]) for i in group])
-                col_w = [rownum_w] + [widths[i] for i in group]
-                t = LongTable(data, colWidths=col_w, repeatRows=1)
-                t.setStyle(TableStyle([
-                    ("FONTNAME", (0, 0), (-1, -1), XL_FONT),
-                    ("FONTSIZE", (0, 0), (-1, -1), XL_FONT_SIZE),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d0d0d0")),
-                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#d0d0d0")),
-                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#999999")),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-                ]))
-                story.append(t)
-                story.append(Spacer(1, 6))
-
-        wb.close()
+                for gi, group in enumerate(groups):
+                    if len(groups) > 1:
+                        story.append(Paragraph(
+                            "Columns %s - %s (part %d of %d)"
+                            % (_col_letter(group[0] + 1), _col_letter(group[-1] + 1),
+                               gi + 1, len(groups)), sub_style))
+                    header = [""] + [_col_letter(i + 1) for i in group]
+                    data = [header]
+                    for ri, r in enumerate(rows, start=1):
+                        data.append([str(ri)] +
+                                    [_wrap_long(r[i], widths[i]) for i in group])
+                    col_w = [rownum_w] + [widths[i] for i in group]
+                    t = LongTable(data, colWidths=col_w, repeatRows=1)
+                    t.setStyle(_table_style())
+                    story.append(t)
+                    story.append(Spacer(1, 6))
+        finally:
+            wb.close()
         doc.build(story)
 
 
@@ -206064,7 +210148,6 @@ if pdfbulkvar == 654312:
             pass
         rows = [[(c or "")[:XL_CELL_CAP] for c in row]
                 for row in csv.reader(io.StringIO(text), delimiter=delim)]
-        rows = [r for r in rows]
         while rows and all(c == "" for c in rows[-1]):
             rows.pop()
         if not rows:
@@ -206081,11 +210164,11 @@ if pdfbulkvar == 654312:
                                 leftMargin=margin, rightMargin=margin,
                                 topMargin=margin, bottomMargin=margin,
                                 title=os.path.basename(src_path))
-        h_style = ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=11,
+        h_style = ParagraphStyle("h", fontName=SANS_B, fontSize=11,
                                  spaceAfter=6)
-        sub_style = ParagraphStyle("s", fontName="Helvetica", fontSize=8,
+        sub_style = ParagraphStyle("s", fontName=SANS, fontSize=8,
                                    textColor=colors.grey, spaceAfter=6)
-        story = [Paragraph(os.path.basename(src_path), h_style)]
+        story = [Paragraph(xml_escape(os.path.basename(src_path)), h_style)]   # Fix: "&" in a file name
 
         widths = _column_widths(rows)
         groups = _column_groups(widths, avail_w)
@@ -206101,20 +210184,7 @@ if pdfbulkvar == 654312:
                 data.append([str(ri)] + [_wrap_long(r[i], widths[i]) for i in group])
             col_w = [rownum_w] + [widths[i] for i in group]
             t = LongTable(data, colWidths=col_w, repeatRows=1)
-            t.setStyle(TableStyle([
-                ("FONTNAME", (0, 0), (-1, -1), XL_FONT),
-                ("FONTSIZE", (0, 0), (-1, -1), XL_FONT_SIZE),
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#d0d0d0")),
-                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#d0d0d0")),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#999999")),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-                ("LEFTPADDING", (0, 0), (-1, -1), 3),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-            ]))
+            t.setStyle(_table_style())
             story.append(t)
             story.append(Spacer(1, 6))
         doc.build(story)
@@ -206141,7 +210211,7 @@ if pdfbulkvar == 654312:
                     size = r.font.size.pt
                     bold = bool(r.font.bold)
                     break
-            font = "Helvetica-Bold" if bold else "Helvetica"
+            font = SANS_B if bold else SANS
             text = para.text
             indent = 12 * (para.level or 0)
             avail = max(20, width - indent - 4)
@@ -206180,12 +210250,12 @@ if pdfbulkvar == 654312:
         for j in range(ncols + 1):
             xx = left + j * cw
             c.line(xx, page_h - top, xx, page_h - top - height)
-        c.setFont("Helvetica", 8)
+        c.setFont(SANS, 8)
         c.setFillColor(colors.black)
         for i, row in enumerate(tbl.rows):
             for j, cell in enumerate(row.cells):
                 txt = cell.text.replace("\n", " ")
-                while txt and stringWidth(txt, "Helvetica", 8) > cw - 4:
+                while txt and stringWidth(txt, SANS, 8) > cw - 4:
                     txt = txt[:-1]
                 c.drawString(left + j * cw + 2,
                              page_h - top - i * rh - 10, txt)
@@ -206244,8 +210314,22 @@ if pdfbulkvar == 654312:
             kw.setdefault("padx", 10)
             kw.setdefault("pady", 2)
             kw.setdefault("activebackground", BG)
+            kw.setdefault("disabledforeground", DARK)
             kw.setdefault("highlightthickness", 0)
+            kw.setdefault("takefocus", 0)
             super().__init__(master, **kw)
+
+
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, font=FONT, bg=BG, fg="black", activebackground=TITLE_BG,
+                       activeforeground=TITLE_FG, disabledforeground=DARK, selectcolor="black")
+
+
+    def w95_glyphs(widget):
+        marlett = "Marlett" in tkfont.families(widget)
+        glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                  else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+        return glyphs, (("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold"))
 
 
     class App:
@@ -206253,31 +210337,285 @@ if pdfbulkvar == 654312:
             self.rootbulkpdfcnv = rootbulkpdfcnv
             rootbulkpdfcnv.title("Bulk PDF Converter")
             rootbulkpdfcnv.configure(bg=BG)
-            rootbulkpdfcnv.geometry("720x560")
-            rootbulkpdfcnv.minsize(640, 500)
+            x = max(0, (rootbulkpdfcnv.winfo_screenwidth() - 720) // 2)
+            y = max(0, (rootbulkpdfcnv.winfo_screenheight() - 580) // 2)
+            rootbulkpdfcnv.geometry("720x580+%d+%d" % (x, y))
+            rootbulkpdfcnv.minsize(640, 520)
 
             self.files = []
             self.out_dir = tk.StringVar(value="")
             self.recursive = tk.IntVar(value=1)
             self.same_folder = tk.IntVar(value=1)
             self.converting = False
+            self.cancel = threading.Event()
+            self.events = queue.Queue()          # the worker thread never touches tkinter: it posts here
+            self.custom_frame = W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
 
             self._build_ui()
+            rootbulkpdfcnv.protocol("WM_DELETE_WINDOW", self.close)
+            rootbulkpdfcnv.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            rootbulkpdfcnv.after(60, self._drain_events)
+            if self.custom_frame:
+                rootbulkpdfcnv.configure(bd=2, relief="raised")
+                rootbulkpdfcnv.after(10, self._enable_custom_frame)
+
+        # ============================================================ frame
+        def _build_titlebar(self):
+            root = self.rootbulkpdfcnv
+            self.glyphs, glyph_font = w95_glyphs(root)
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if W95_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=TITLE_BG, height=20)
+            bar.pack(side=tk.TOP, fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=TITLE_BG, bd=0, highlightthickness=0)
+            icon.create_rectangle(3, 1, 13, 15, fill="white", outline="black")           # a PDF page
+            icon.create_rectangle(3, 9, 13, 14, fill="#c00000", outline="black")
+            icon.create_text(8, 11, text="PDF", fill="white", font=("MS Sans Serif", 4, "bold"))
+            icon.pack(side=tk.LEFT, padx=(2, 3))
+            title = tk.Label(bar, text="Bulk PDF Converter", bg=TITLE_BG, fg=TITLE_FG, font=FONT_B, anchor="w")
+            title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.caption, self.caption_title, self.caption_icon = bar, title, icon
+
+            def caption_button(key, command):
+                return tk.Button(bar, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=BG, fg="black",
+                                 activebackground=BG, relief=tk.RAISED, bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", self.close).pack(side=tk.RIGHT, padx=(2, 2))
+            self.btn_max = caption_button("max", self.toggle_maximize)
+            self.btn_max.pack(side=tk.RIGHT)
+            caption_button("min", self.minimize).pack(side=tk.RIGHT)
+            for widget in (bar, title, icon):
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption"):
+                return
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=TITLE_BG if active else DARK)
+            self.caption_title.config(fg=TITLE_FG if active else BG)
+
+        def _enable_custom_frame(self):
+            self.rootbulkpdfcnv.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootbulkpdfcnv
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootbulkpdfcnv
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootbulkpdfcnv.overrideredirect(False)
+            self.rootbulkpdfcnv.iconify()
+
+        def toggle_maximize(self):
+            root = self.rootbulkpdfcnv
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if W95_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            if hasattr(self, "btn_max"):
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            root = self.rootbulkpdfcnv
+            self._drag = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.rootbulkpdfcnv.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _grip_press(self, event):
+            root = self.rootbulkpdfcnv
+            self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.rootbulkpdfcnv.geometry("%dx%d" % (max(640, width + event.x_root - x0),
+                                                        max(520, height + event.y_root - y0)))
+
+        # ============================================================ keyboard focus
+        def _current_focus(self):
+            try:
+                return self.rootbulkpdfcnv.focus_get()
+            except (KeyError, tk.TclError):
+                return None
+
+        def _restore_focus(self, widget=None):
+            """Give the keyboard back to this window (and to the field it was in) after a dialog."""
+            try:
+                target = widget if widget is not None and widget.winfo_exists() else self.rootbulkpdfcnv
+                target.focus_force()
+            except tk.TclError:
+                pass
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it (a message box, a file dialog, another program). A click in a text field
+            gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        # ============================================================ message box
+        def dialog(self, title, message, icon="info", buttons=("OK",), default=0):
+            """Modal Windows 95 message box, always in front of the window. Returns the pressed button."""
+            root = self.rootbulkpdfcnv
+            result = {"value": None}
+            previous = self._current_focus()
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=BG, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+
+            def close(value=None):
+                result["value"] = value
+                win.destroy()
+
+            bar = tk.Frame(win, bg=TITLE_BG, height=20)
+            bar.pack(fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, font=FONT_B, bg=TITLE_BG, fg=TITLE_FG).pack(side=tk.LEFT, padx=4)
+            tk.Button(bar, text=self.glyphs["close"], command=lambda: close(buttons[-1] if len(buttons) > 1 else None),
+                      font=("Marlett", 7) if self.glyphs["close"] == "r" else ("MS Sans Serif", 7, "bold"),
+                      image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=BG,
+                      relief=tk.RAISED, bd=2, highlightthickness=0, takefocus=0).pack(side=tk.RIGHT, padx=2)
+            body = tk.Frame(win, bg=BG)
+            body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(14, 8))
+            picture = tk.Canvas(body, width=32, height=32, bg=BG, highlightthickness=0, bd=0)
+            if icon == "error":
+                picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                picture.create_line(22, 10, 10, 22, fill="white", width=3)
+            elif icon == "warning":
+                picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline="black")
+                picture.create_text(16, 19, text="!", fill="black", font=("Times New Roman", 15, "bold"))
+            else:
+                picture.create_oval(2, 2, 30, 30, fill="white", outline="black")
+                picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                    font=("Times New Roman", 16, "bold"))
+            picture.pack(side=tk.LEFT, anchor="n", padx=(0, 14))
+            tk.Label(body, text=message, font=FONT, bg=BG, justify="left", wraplength=480).pack(side=tk.LEFT)
+            row = tk.Frame(win, bg=BG)
+            row.pack(pady=(4, 12))
+            for index, text in enumerate(buttons):
+                Win95Button(row, text=text, command=lambda t=text: close(t), width=9,
+                            font=FONT_B if index == default else FONT,
+                            highlightthickness=1 if index == default else 0,
+                            highlightbackground="black").pack(side=tk.LEFT, padx=4)
+            win.bind("<Return>", lambda _e: close(buttons[default]))
+            win.bind("<Escape>", lambda _e: close(buttons[-1]))
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            x = root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2)
+            y = root.winfo_rooty() + max(0, (root.winfo_height() - h) // 2)
+            win.geometry("+%d+%d" % (x, y))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                # the grab only once the window is really on screen; if that fails, nothing is blocked
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+            root.wait_window(win)
+            self._restore_focus(previous)
+            return result["value"]
 
         # ------------------------------------------------------------ layout
 
         def _build_ui(self):
-            strip = tk.Frame(self.rootbulkpdfcnv, bg=TITLE_BG)
-            strip.pack(fill=tk.X, padx=4, pady=(4, 0))
-            tk.Label(strip, text="Bulk PDF Converter", bg=TITLE_BG, fg=TITLE_FG,
-                     font=FONT_B, anchor="w", padx=6, pady=2).pack(fill=tk.X)
+            root = self.rootbulkpdfcnv
+            self._build_titlebar()
+            self._build_menu()
 
-            body = tk.Frame(self.rootbulkpdfcnv, bg=BG, bd=2, relief=tk.RAISED)
+            sbar = tk.Frame(root, bg=BG)
+            sbar.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=(0, 2))
+            grip = tk.Canvas(sbar, width=14, height=14, bg=BG, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if W95_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=DARK)
+                grip.create_line(13, i + 2, i + 2, 13, fill=DARK)
+            grip.pack(side=tk.RIGHT, anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.count_label = tk.Label(sbar, text="0 file(s)", bg=BG, font=FONT, relief=tk.SUNKEN, bd=1,
+                                        anchor="w", padx=4, width=14)
+            self.count_label.pack(side=tk.RIGHT, padx=1)
+            self.status = tk.Label(sbar, text="Ready.", bg=BG, font=FONT,
+                                   relief=tk.SUNKEN, bd=1, anchor="w", padx=4)
+            self.status.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+
+            body = tk.Frame(root, bg=BG)
             body.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+            bottom = tk.Frame(body, bg=BG)
+            bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=4, pady=(4, 4))
+            self.convert_btn = Win95Button(bottom, text="Convert to PDF", font=FONT_B, width=16,
+                                           highlightthickness=1, highlightbackground="black",
+                                           command=self.start_convert)
+            self.convert_btn.pack(side=tk.RIGHT)
+            self.stop_btn = Win95Button(bottom, text="Stop", width=8, state=tk.DISABLED, command=self.stop_convert)
+            self.stop_btn.pack(side=tk.RIGHT, padx=(0, 6))
+            self.progress = tk.Canvas(bottom, height=18, bg=LIGHT,
+                                      relief=tk.SUNKEN, bd=2,
+                                      highlightthickness=0)
+            self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
             src = tk.LabelFrame(body, text=" Source files ", bg=BG, font=FONT,
                                 bd=2, relief=tk.GROOVE)
-            src.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
+            src.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 4))
 
             btnrow = tk.Frame(src, bg=BG)
             btnrow.pack(fill=tk.X, padx=6, pady=4)
@@ -206290,16 +210628,18 @@ if pdfbulkvar == 654312:
             Win95Button(btnrow, text="Clear All",
                         command=self.clear_all).pack(side=tk.LEFT)
             tk.Checkbutton(btnrow, text="Include subfolders", variable=self.recursive,
-                           bg=BG, font=FONT, activebackground=BG,
+                           bg=BG, font=FONT, activebackground=BG, selectcolor=LIGHT,
                            highlightthickness=0).pack(side=tk.RIGHT)
 
-            listwrap = tk.Frame(src, bg=BG)
+            listwrap = tk.Frame(src, bg=LIGHT, relief=tk.SUNKEN, bd=2)
             listwrap.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 6))
             sb = tk.Scrollbar(listwrap, orient=tk.VERTICAL)
             sbx = tk.Scrollbar(listwrap, orient=tk.HORIZONTAL)
             self.listbox = tk.Listbox(listwrap, bg=LIGHT, font=FONT_MONO,
-                                      relief=tk.SUNKEN, bd=2,
-                                      selectmode=tk.EXTENDED,
+                                      relief=tk.FLAT, bd=0, highlightthickness=0,
+                                      selectmode=tk.EXTENDED, activestyle="none",
+                                      selectbackground=TITLE_BG, selectforeground=TITLE_FG,
+                                      exportselection=False,
                                       yscrollcommand=sb.set,
                                       xscrollcommand=sbx.set)
             sb.config(command=self.listbox.yview)
@@ -206307,18 +210647,20 @@ if pdfbulkvar == 654312:
             sb.pack(side=tk.RIGHT, fill=tk.Y)
             sbx.pack(side=tk.BOTTOM, fill=tk.X)
             self.listbox.pack(fill=tk.BOTH, expand=True)
+            self.listbox.bind("<Delete>", lambda e: self.remove_selected())
+            self.listbox.bind("<Button-3>", self._list_menu)
 
             out = tk.LabelFrame(body, text=" Output ", bg=BG, font=FONT,
                                 bd=2, relief=tk.GROOVE)
-            out.pack(fill=tk.X, padx=8, pady=4)
+            out.pack(fill=tk.X, padx=4, pady=4)
             tk.Checkbutton(out, text="Save PDF next to each source file",
                            variable=self.same_folder, command=self._toggle_out,
-                           bg=BG, font=FONT, activebackground=BG,
+                           bg=BG, font=FONT, activebackground=BG, selectcolor=LIGHT,
                            highlightthickness=0).pack(anchor="w", padx=6, pady=(4, 0))
             outrow = tk.Frame(out, bg=BG)
             outrow.pack(fill=tk.X, padx=6, pady=(2, 6))
             self.out_entry = tk.Entry(outrow, textvariable=self.out_dir,
-                                      font=FONT, relief=tk.SUNKEN, bd=2,
+                                      font=FONT, relief=tk.SUNKEN, bd=2, highlightthickness=0,
                                       bg=LIGHT, state=tk.DISABLED,
                                       disabledbackground=BG)
             self.out_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
@@ -206327,33 +210669,99 @@ if pdfbulkvar == 654312:
                                        state=tk.DISABLED)
             self.out_btn.pack(side=tk.LEFT)
 
-            prog = tk.Frame(body, bg=BG)
-            prog.pack(fill=tk.X, padx=8, pady=(4, 0))
-            self.progress = tk.Canvas(prog, height=18, bg=LIGHT,
-                                      relief=tk.SUNKEN, bd=2,
-                                      highlightthickness=0)
-            self.progress.pack(fill=tk.X)
-
             logf = tk.LabelFrame(body, text=" Log ", bg=BG, font=FONT,
                                  bd=2, relief=tk.GROOVE)
-            logf.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
-            lsb = tk.Scrollbar(logf, orient=tk.VERTICAL)
-            self.log = tk.Text(logf, height=7, bg=LIGHT, font=FONT_MONO,
-                               relief=tk.SUNKEN, bd=2, state=tk.DISABLED,
+            logf.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+            logwrap = tk.Frame(logf, bg=LIGHT, relief=tk.SUNKEN, bd=2)
+            logwrap.pack(fill=tk.BOTH, expand=True, padx=6, pady=(2, 6))
+            lsb = tk.Scrollbar(logwrap, orient=tk.VERTICAL)
+            self.log = tk.Text(logwrap, height=7, bg=LIGHT, font=FONT_MONO,
+                               relief=tk.FLAT, bd=0, highlightthickness=0, state=tk.DISABLED,
                                yscrollcommand=lsb.set, wrap=tk.NONE)
             lsb.config(command=self.log.yview)
-            lsb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 4), pady=4)
-            self.log.pack(fill=tk.BOTH, expand=True, padx=(6, 0), pady=4)
+            lsb.pack(side=tk.RIGHT, fill=tk.Y)
+            self.log.pack(fill=tk.BOTH, expand=True)
+            self.log.tag_config("ok", foreground="#006000")
+            self.log.tag_config("skip", foreground="#806000")
+            self.log.tag_config("fail", foreground="#aa0000")
 
-            bottom = tk.Frame(body, bg=BG)
-            bottom.pack(fill=tk.X, padx=8, pady=(0, 8))
-            self.convert_btn = Win95Button(bottom, text="Convert to PDF",
-                                           font=FONT_B, command=self.start_convert)
-            self.convert_btn.pack(side=tk.RIGHT)
-            self.status = tk.Label(bottom, text="Ready.", bg=BG, font=FONT,
-                                   relief=tk.SUNKEN, bd=1, anchor="w", padx=4)
-            self.status.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8),
-                             ipady=2)
+        def _build_menu(self):
+            bar = tk.Frame(self.rootbulkpdfcnv, bg=BG)
+            bar.pack(side=tk.TOP, fill=tk.X)
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=FONT, bg=BG, fg="black", activebackground=TITLE_BG,
+                                       activeforeground=TITLE_FG, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side=tk.LEFT)
+                menu = w95_menu(button)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Add Files...", accelerator="Ctrl+O", command=self.add_files)
+            m.add_command(label="Add Folder...", accelerator="Ctrl+F", command=self.add_folder)
+            m.add_separator()
+            m.add_command(label="Remove Selected", accelerator="Del", command=self.remove_selected)
+            m.add_command(label="Clear All", command=self.clear_all)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.close)
+            m = menubutton("Convert")
+            m.add_command(label="Convert to PDF", accelerator="F5", command=self.start_convert)
+            m.add_command(label="Stop", accelerator="Esc", command=self.stop_convert)
+            m.add_separator()
+            m.add_checkbutton(label="Save PDF Next to Each Source File", variable=self.same_folder,
+                              command=self._toggle_out)
+            m.add_command(label="Choose Output Folder...", command=self._choose_output_from_menu)
+            m = menubutton("Help")
+            m.add_command(label="Supported Formats", command=self.show_formats)
+            m.add_command(label="About Bulk PDF Converter", command=lambda: self.dialog(
+                "About Bulk PDF Converter",
+                "Bulk PDF Converter\n\nConvert many files to PDF at once: text and source code, pictures, "
+                "Word, Excel, CSV and PowerPoint.\n\nNothing is uploaded: every file is converted "
+                "on this computer."))
+            root = self.rootbulkpdfcnv
+            for key, action in (("<Control-o>", self.add_files), ("<Control-f>", self.add_folder),
+                                ("<F5>", self.start_convert), ("<Escape>", self.stop_convert)):
+                root.bind(key, lambda e, a=action: (a(), "break")[1])
+
+        def _list_menu(self, event):
+            index = self.listbox.nearest(event.y)
+            if 0 <= index < len(self.files) and index not in self.listbox.curselection():
+                self.listbox.selection_clear(0, tk.END)
+                self.listbox.selection_set(index)
+            menu = w95_menu(self.rootbulkpdfcnv)
+            menu.add_command(label="Remove from List", command=self.remove_selected)
+            menu.add_command(label="Copy Path", command=self._copy_paths)
+            menu.add_separator()
+            menu.add_command(label="Add Files...", command=self.add_files)
+            menu.add_command(label="Add Folder...", command=self.add_folder)
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        def _copy_paths(self):
+            paths = [self.files[i] for i in self.listbox.curselection()]
+            if paths:
+                self.rootbulkpdfcnv.clipboard_clear()
+                self.rootbulkpdfcnv.clipboard_append("\n".join(paths))
+                self.set_status("Copied %d path(s)." % len(paths))
+
+        def show_formats(self):
+            def mark(flag):
+                return "" if flag else "   (library not installed)"
+            self.dialog(
+                "Supported Formats",
+                "Text and source code: any file that contains text (.txt, .py, .sql, .log, .xml...)\n"
+                "Pictures: PNG, JPG, BMP, GIF, TIFF (all pages), WEBP\n"
+                "Word: DOCX, DOCM, DOTX%s; RTF and ODT (text only)\n"
+                "Excel: XLSX, XLSM%s\n"
+                "CSV / TSV\n"
+                "PowerPoint: PPTX%s\n\n"
+                "Skipped: PDFs, programs, archives, media, and old formats (DOC, XLS, PPT) - save those as "
+                "XLSX / PPTX first, old Word .DOC as .DOCX." % (mark(HAS_DOCX), mark(HAS_XLSX), mark(HAS_PPTX)))
 
         # ------------------------------------------------------------ UI actions
 
@@ -206365,17 +210773,26 @@ if pdfbulkvar == 654312:
                 self.out_entry.config(state=tk.NORMAL)
                 self.out_btn.config(state=tk.NORMAL)
 
+        def _choose_output_from_menu(self):
+            self.same_folder.set(0)
+            self._toggle_out()
+            self.pick_out_dir()
+
         def pick_out_dir(self):
-            d = filedialog.askdirectory(title="Select output folder")
+            d = filedialog.askdirectory(title="Select output folder", parent=self.rootbulkpdfcnv)
             if d:
                 self.out_dir.set(os.path.normpath(d))
 
         def add_files(self):
-            paths = filedialog.askopenfilenames(title="Select files to convert")
+            if self.converting:
+                return
+            paths = filedialog.askopenfilenames(title="Select files to convert", parent=self.rootbulkpdfcnv)
             self._add_paths([os.path.normpath(p) for p in paths])
 
         def add_folder(self):
-            d = filedialog.askdirectory(title="Select folder")
+            if self.converting:
+                return
+            d = filedialog.askdirectory(title="Select folder", parent=self.rootbulkpdfcnv)
             if not d:
                 return
             collected = []
@@ -206384,7 +210801,12 @@ if pdfbulkvar == 654312:
                     for n in names:
                         collected.append(os.path.normpath(os.path.join(base, n)))
             else:
-                for n in os.listdir(d):
+                try:
+                    names = os.listdir(d)
+                except OSError as e:          # Fix: a folder without access rights no longer raises an error
+                    self.dialog("Add Folder", "Cannot read the folder:\n%s" % e, "error")
+                    return
+                for n in names:
                     p = os.path.normpath(os.path.join(d, n))
                     if os.path.isfile(p):
                         collected.append(p)
@@ -206412,19 +210834,29 @@ if pdfbulkvar == 654312:
             if dupes:
                 msg += " Ignored %d duplicate(s)." % dupes
             self.set_status(msg)
+            self._update_count()
 
         def remove_selected(self):
+            if self.converting:
+                return
             sel = list(self.listbox.curselection())
             for i in reversed(sel):
                 self.listbox.delete(i)
                 del self.files[i]
             self.set_status("Removed %d file(s)." % len(sel))
+            self._update_count()
 
         def clear_all(self):
+            if self.converting:
+                return
             self.listbox.delete(0, tk.END)
             self.files.clear()
             self.reset_progress()
             self.set_status("Queue cleared.")
+            self._update_count()
+
+        def _update_count(self):
+            self.count_label.config(text="%d file(s)" % len(self.files))
 
         def reset_progress(self):
             self.progress.delete("all")
@@ -206434,9 +210866,9 @@ if pdfbulkvar == 654312:
         def set_status(self, text):
             self.status.config(text=text)
 
-        def log_line(self, text):
+        def log_line(self, text, tag=None):
             self.log.config(state=tk.NORMAL)
-            self.log.insert(tk.END, text + "\n")
+            self.log.insert(tk.END, text + "\n", tag or ())
             self.log.see(tk.END)
             self.log.config(state=tk.DISABLED)
 
@@ -206462,21 +210894,42 @@ if pdfbulkvar == 654312:
             if self.converting:
                 return
             if not self.files:
-                self.set_status("Nothing to convert. Add files first.")
+                self.dialog("Bulk PDF Converter", "Nothing to convert. Add files first.", "warning")
                 return
-            if not self.same_folder.get():
-                d = self.out_dir.get().strip()
-                if not d or not os.path.isdir(d):
-                    self.set_status("Please choose a valid output folder.")
-                    return
+            same_folder = bool(self.same_folder.get())
+            out_dir = self.out_dir.get().strip()
+            if not same_folder and (not out_dir or not os.path.isdir(out_dir)):
+                self.dialog("Bulk PDF Converter", "Please choose a valid output folder.", "warning")
+                return
             self.converting = True
+            self.cancel.clear()
             self.convert_btn.config(state=tk.DISABLED)
+            self.stop_btn.config(state=tk.NORMAL)
             self.reset_progress()
             self.log.config(state=tk.NORMAL)
             self.log.delete("1.0", tk.END)
             self.log.config(state=tk.DISABLED)
-            t = threading.Thread(target=self._worker, daemon=True)
+            # Fix: the settings are read HERE, in the window's thread; the worker never touches tkinter
+            t = threading.Thread(target=self._worker, args=(list(self.files), same_folder, out_dir), daemon=True)
             t.start()
+
+        def stop_convert(self):
+            if self.converting:
+                self.cancel.set()
+                self.set_status("Stopping after the current file...")
+
+        def _produce(self, convert, path, out):
+            """Run one conversion; a failure never leaves a broken, half-written PDF behind."""
+            try:
+                convert(path, out)
+            except BaseException:
+                try:
+                    if os.path.exists(out):
+                        os.remove(out)
+                except OSError:
+                    pass
+                raise
+            return "ok", os.path.basename(out)
 
         def _convert_one(self, path, out_dir):
             """Returns ('ok'|'skip', message)."""
@@ -206489,71 +210942,67 @@ if pdfbulkvar == 654312:
             if ext in BINARY_EXT:
                 return "skip", "binary file"
             if ext in OLD_OFFICE:
-                return "skip", "old/unsupported Office format (save it as .xlsx/.pptx first)"
+                return "skip", "old Office format - save it as .docx / .xlsx / .pptx first"
 
             if ext in IMAGE_EXT:
-                out = unique_output_path(out_dir, base)
-                image_to_pdf(path, out)
-                return "ok", os.path.basename(out)
+                return self._produce(image_to_pdf, path, unique_output_path(out_dir, base))
 
-            if ext in WORD_EXT:
-                if not HAS_ASPOSE:
-                    return "skip", "aspose-words not available"
-                out = unique_output_path(out_dir, base)
-                word_to_pdf(path, out)
-                return "ok", os.path.basename(out)
+            if ext in DOCX_EXT:
+                if not HAS_DOCX:
+                    return "skip", "python-docx not available"
+                return self._produce(docx_to_pdf, path, unique_output_path(out_dir, base))
+
+            if ext in RTF_EXT:
+                return self._produce(rtf_to_pdf, path, unique_output_path(out_dir, base))
+
+            if ext in ODT_EXT:
+                return self._produce(odt_to_pdf, path, unique_output_path(out_dir, base))
 
             if ext in XLSX_EXT:
                 if not HAS_XLSX:
                     return "skip", "openpyxl not available"
-                out = unique_output_path(out_dir, base)
-                excel_to_pdf(path, out)
-                return "ok", os.path.basename(out)
+                return self._produce(excel_to_pdf, path, unique_output_path(out_dir, base))
 
             if ext in CSV_EXT:
-                out = unique_output_path(out_dir, base)
-                csv_to_pdf(path, out)
-                return "ok", os.path.basename(out)
+                return self._produce(csv_to_pdf, path, unique_output_path(out_dir, base))
 
             if ext in PPTX_EXT:
                 if not HAS_PPTX:
                     return "skip", "python-pptx not available"
-                out = unique_output_path(out_dir, base)
-                pptx_to_pdf(path, out)
-                return "ok", os.path.basename(out)
+                return self._produce(pptx_to_pdf, path, unique_output_path(out_dir, base))
 
             # any other extension: convert only if it is real text
             if looks_like_text(path):
-                out = unique_output_path(out_dir, base)
-                text_to_pdf(path, out)
-                return "ok", os.path.basename(out)
+                return self._produce(text_to_pdf, path, unique_output_path(out_dir, base))
             return "skip", "binary content, cannot convert"
 
-        def _worker(self):
-            files = list(self.files)
+        def _worker(self, files, same_folder, chosen_dir):
             total = len(files)
             ok = skipped = failed = 0
+            stopped = False
 
             for idx, path in enumerate(files, start=1):
+                if self.cancel.is_set():
+                    stopped = True
+                    break
                 name = os.path.basename(path)
-                out_dir = (os.path.dirname(path) if self.same_folder.get()
-                           else self.out_dir.get().strip())
+                out_dir = os.path.dirname(path) if same_folder else chosen_dir
                 self.ui(self.set_status, "Converting %d/%d: %s" % (idx, total, name))
                 try:
                     result, info = self._convert_one(path, out_dir)
                     if result == "ok":
                         ok += 1
-                        self.ui(self.log_line, "[OK]   %s -> %s" % (name, info))
+                        self.ui(self.log_line, "[OK]   %s -> %s" % (name, info), "ok")
                     else:
                         skipped += 1
-                        self.ui(self.log_line, "[SKIP] %s - %s" % (name, info))
+                        self.ui(self.log_line, "[SKIP] %s - %s" % (name, info), "skip")
                 except Exception as e:
                     failed += 1
                     err = str(e).strip() or e.__class__.__name__
-                    self.ui(self.log_line, "[FAIL] %s - %s" % (name, err.splitlines()[0]))
+                    self.ui(self.log_line, "[FAIL] %s - %s" % (name, err.splitlines()[0]), "fail")
                 self.ui(self.set_progress, idx, total)
 
-            summary = "Done. Converted: %d, Skipped: %d, Failed: %d" % (ok, skipped, failed)
+            summary = "%s. Converted: %d, Skipped: %d, Failed: %d" % ("Stopped" if stopped else "Done", ok, skipped, failed)
             self.ui(self.log_line, "-" * 50)
             self.ui(self.log_line, summary)
             self.ui(self.set_status, summary)
@@ -206562,10 +211011,34 @@ if pdfbulkvar == 654312:
         def _finish(self):
             self.converting = False
             self.convert_btn.config(state=tk.NORMAL)
+            self.stop_btn.config(state=tk.DISABLED)
 
         def ui(self, fn, *args):
-            """Schedule a UI update from the worker thread."""
-            self.rootbulkpdfcnv.after(0, lambda: fn(*args))
+            """Called from the worker thread: the update runs later in the window's own thread."""
+            self.events.put((fn, args))
+
+        def _drain_events(self):
+            try:
+                for _ in range(300):
+                    fn, args = self.events.get_nowait()
+                    try:
+                        fn(*args)
+                    except tk.TclError:
+                        pass
+            except queue.Empty:
+                pass
+            try:
+                self.rootbulkpdfcnv.after(60, self._drain_events)
+            except tk.TclError:
+                pass                                          # the window was closed
+
+        def close(self):
+            if self.converting and self.dialog(
+                    "Bulk PDF Converter", "Files are still being converted. Stop and close?", "question",
+                    ("Yes", "No"), default=1) != "Yes":
+                return
+            self.cancel.set()
+            self.rootbulkpdfcnv.destroy()
 
 
     def main():
@@ -206708,17 +211181,20 @@ if fldrcpvar == 223198:
 
             # Rularea buclei principale
             validation.mainloop()
+
     import os
     import sys
     import json
     import sqlite3
     import tkinter as tk
-    from tkinter import filedialog, messagebox
+    import tkinter.font as tkfont
+    from tkinter import filedialog
 
     # ---------------------------------------------------------------
     # Windows 95 palette / style constants
     # ---------------------------------------------------------------
     W95_BG = "#c0c0c0"
+    W95_SHADOW = "#808080"
     W95_TITLE = "#000080"
     W95_TITLE_TEXT = "#ffffff"
     W95_TEXT_BG = "#ffffff"
@@ -206726,6 +211202,8 @@ if fldrcpvar == 223198:
     W95_FONT = ("MS Sans Serif", 8)
     W95_FONT_BOLD = ("MS Sans Serif", 8, "bold")
     W95_FONT_MONO = ("Courier New", 9)
+    W95_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
 
     INDENT = "    "  # 4 spaces per level in the saved file format
 
@@ -206737,6 +211215,8 @@ if fldrcpvar == 223198:
     )
 
     INVALID_CHARS = set('<>:"/\\|?*')
+    # Names Windows does not allow for a folder (also with any extension, e.g. "CON.txt")
+    RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL"} | {"COM%d" % i for i in range(1, 10)} | {"LPT%d" % i for i in range(1, 10)}
 
     DEFAULT_NODES = [
         [0, "My Project"],
@@ -206764,9 +211244,12 @@ if fldrcpvar == 223198:
             relief="raised",
             bd=2,
             activebackground=W95_BG,
-            highlightthickness=0,
+            disabledforeground=W95_SHADOW,
+            highlightthickness=1 if bold else 0,
+            highlightbackground="black",
             padx=8,
             pady=2,
+            takefocus=0,
         )
         if width:
             btn.config(width=width)
@@ -206779,7 +211262,7 @@ if fldrcpvar == 223198:
             text=" " + title + " ",
             bg=W95_BG,
             fg="black",
-            font=W95_FONT_BOLD,
+            font=W95_FONT,
             relief="groove",
             bd=2,
             labelanchor="nw",
@@ -206793,16 +211276,86 @@ if fldrcpvar == 223198:
         )
 
 
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, font=W95_FONT, bg=W95_BG, fg="black", activebackground=W95_TITLE,
+                       activeforeground=W95_TITLE_TEXT, disabledforeground=W95_SHADOW, selectcolor="black")
+
+
+    def w95_glyphs(widget):
+        marlett = "Marlett" in tkfont.families(widget)
+        glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                  else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+        return glyphs, (("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold"))
+
+
+    def w95_caption(window, title, close_command, pixel):
+        """A Windows 95 title bar for a dialog (navy, bold title, X)."""
+        glyphs, glyph_font = w95_glyphs(window)
+        bar = tk.Frame(window, bg=W95_TITLE, height=20)
+        bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+        bar.pack_propagate(False)
+        tk.Label(bar, text=title, font=W95_FONT_BOLD, bg=W95_TITLE, fg=W95_TITLE_TEXT).pack(side="left", padx=4)
+        tk.Button(bar, text=glyphs["close"], command=close_command, font=glyph_font, image=pixel, compound="center",
+                  width=12, height=10, padx=0, pady=0, bg=W95_BG, relief="raised", bd=2, highlightthickness=0,
+                  takefocus=0).pack(side="right", padx=2)
+        return bar
+
+
+    def w95_show_modal(window, parent):
+        """Centre a dialog over its parent, keep it in front, then take the clicks once it is on screen."""
+        window.update_idletasks()
+        w, h = window.winfo_reqwidth(), window.winfo_reqheight()
+        x = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+        y = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 3)
+        window.geometry("+%d+%d" % (x, y))
+        window.lift()
+        window.focus_force()
+
+        def take_clicks():
+            try:
+                if window.winfo_exists() and window.winfo_viewable():
+                    window.grab_set()
+            except tk.TclError:
+                pass
+        clicks_job = window.after(100, take_clicks)
+        # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+        window.bind("<Destroy>", lambda e, w=window, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                 add="+")
+
+
+    def folder_name_problem(name):
+        """Why a folder name cannot be used on Windows, or None when it is fine."""
+        if not name:
+            return "The name cannot be empty."
+        if name in (".", ".."):
+            return "'%s' is not a valid folder name." % name
+        bad = INVALID_CHARS.intersection(name)
+        if bad:
+            return "Not allowed in folder names: %s" % " ".join(sorted(bad))
+        if name.endswith((".", " ")):
+            return "A folder name cannot end with a dot or a space."
+        if name.split(".")[0].strip().upper() in RESERVED_NAMES:
+            return "'%s' is a name reserved by Windows." % name
+        if any(ord(ch) < 32 for ch in name):
+            return "The name contains invisible control characters."
+        return None
+
+
     # ---------------------------------------------------------------
     # Win95 styled name dialog (used by Add / Rename)
     # ---------------------------------------------------------------
     class NameDialog(tk.Toplevel):
-        def __init__(self, parent, title, prompt, initial=""):
+        def __init__(self, parent, title, prompt, initial="", taken=()):
             tk.Toplevel.__init__(self, parent)
             self.title(title)
-            self.configure(bg=W95_BG)
-            self.resizable(False, False)
+            self.configure(bg=W95_BG, bd=2, relief="raised")
+            self.overrideredirect(True)
+            self.transient(parent)
+            self.attributes("-topmost", True)      # never hidden behind the main window
             self.result = None
+            self.taken = {n.lower() for n in taken}
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            w95_caption(self, title, self._cancel, self._pixel)
 
             tk.Label(self, text=prompt, bg=W95_BG, font=W95_FONT, anchor="w").pack(
                 fill="x", padx=10, pady=(10, 2)
@@ -206810,7 +211363,7 @@ if fldrcpvar == 223198:
             self.var = tk.StringVar(value=initial)
             entry = tk.Entry(
                 self, textvariable=self.var, bg=W95_TEXT_BG, font=W95_FONT,
-                relief="sunken", bd=2, highlightthickness=0, width=34,
+                relief="sunken", bd=2, highlightthickness=0, width=40,
             )
             entry.pack(fill="x", padx=10)
             entry.select_range(0, "end")
@@ -206823,35 +211376,23 @@ if fldrcpvar == 223198:
 
             btns = tk.Frame(self, bg=W95_BG)
             btns.pack(pady=(4, 10))
-            w95_button(btns, "OK", self._ok, width=8).pack(side="left", padx=(0, 6))
+            w95_button(btns, "OK", self._ok, width=8, bold=True).pack(side="left", padx=(0, 6))
             w95_button(btns, "Cancel", self._cancel, width=8).pack(side="left")
 
             self.bind("<Return>", lambda e: self._ok())
             self.bind("<Escape>", lambda e: self._cancel())
 
-            # Center over parent and make modal
-            self.transient(parent)
-            self.update_idletasks()
-            px = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
-            py = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
-            self.geometry("+%d+%d" % (max(px, 0), max(py, 0)))
-            self.grab_set()
+            w95_show_modal(self, parent)
             entry.focus_set()
             self.wait_window(self)
 
         def _ok(self):
             name = self.var.get().strip()
-            if not name:
-                self.error.config(text="The name cannot be empty.")
-                return
-            if name in (".", ".."):
-                self.error.config(text="'%s' is not a valid folder name." % name)
-                return
-            bad = INVALID_CHARS.intersection(name)
-            if bad:
-                self.error.config(
-                    text="Not allowed in folder names: %s" % " ".join(sorted(bad))
-                )
+            problem = folder_name_problem(name)
+            if problem is None and name.lower() in self.taken:
+                problem = "A folder named '%s' already exists at this level." % name
+            if problem:
+                self.error.config(text=problem)
                 return
             self.result = name
             self.destroy()
@@ -206866,40 +211407,248 @@ if fldrcpvar == 223198:
     # ---------------------------------------------------------------
     class FolderRecipeApp:
         def __init__(self, rootfldrcp):
+            self.rootfldrcp = rootfldrcp          # Fix: the rest of the class uses self.rootfldrcp
             self.root = rootfldrcp
             self.rootfldrcp.title("Folder Recipe")
             self.rootfldrcp.configure(bg=W95_BG)
-            self.rootfldrcp.geometry("900x640")
+            x = max(0, (self.rootfldrcp.winfo_screenwidth() - 900) // 2)
+            y = max(0, (self.rootfldrcp.winfo_screenheight() - 640) // 2)
+            self.rootfldrcp.geometry("900x640+%d+%d" % (x, y))
             self.rootfldrcp.minsize(780, 540)
 
             self.recipes = {}
             self.current_recipe = None
             self.nodes = [list(n) for n in DEFAULT_NODES]   # flat list of [depth, name]
+            self.custom_frame = W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
 
             self._build_ui()
             self._load_recipes()
             self._refresh_listbox()
             self._render_tree(select=0)
             self._set_status("Ready. Build your structure with the buttons, then click Create.")
+            self.rootfldrcp.protocol("WM_DELETE_WINDOW", self.rootfldrcp.destroy)
+            self.rootfldrcp.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            if self.custom_frame:
+                self.rootfldrcp.configure(bd=2, relief="raised")
+                self.rootfldrcp.after(10, self._enable_custom_frame)
+
+        # ===========================================================
+        # Windows 95 window frame
+        # ===========================================================
+        def _build_titlebar(self):
+            root = self.rootfldrcp
+            self.glyphs, glyph_font = w95_glyphs(root)
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if W95_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=W95_TITLE, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=W95_TITLE, bd=0, highlightthickness=0)
+            icon.create_rectangle(1, 4, 6, 6, fill="#ffff80", outline="black")           # a folder tree
+            icon.create_rectangle(1, 6, 9, 12, fill="#ffff80", outline="black")
+            icon.create_rectangle(8, 9, 15, 15, fill="#ffff80", outline="black")
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Folder Recipe", bg=W95_TITLE, fg=W95_TITLE_TEXT, font=W95_FONT_BOLD,
+                             anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption, self.caption_title, self.caption_icon = bar, title, icon
+
+            def caption_button(key, command):
+                return tk.Button(bar, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=W95_BG, fg="black",
+                                 activebackground=W95_BG, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", root.destroy).pack(side="right", padx=(2, 2))
+            self.btn_max = caption_button("max", self.toggle_maximize)
+            self.btn_max.pack(side="right")
+            caption_button("min", self.minimize).pack(side="right")
+            for widget in (bar, title, icon):
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption"):
+                return
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=W95_TITLE if active else W95_SHADOW)
+            self.caption_title.config(fg=W95_TITLE_TEXT if active else W95_BG)
+
+        def _enable_custom_frame(self):
+            self.rootfldrcp.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootfldrcp
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootfldrcp
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootfldrcp.overrideredirect(False)
+            self.rootfldrcp.iconify()
+
+        def toggle_maximize(self):
+            root = self.rootfldrcp
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if W95_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            if hasattr(self, "btn_max"):
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.rootfldrcp.winfo_x(), event.y_root - self.rootfldrcp.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.rootfldrcp.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _grip_press(self, event):
+            self._resize = (event.x_root, event.y_root, self.rootfldrcp.winfo_width(), self.rootfldrcp.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.rootfldrcp.geometry("%dx%d" % (max(780, width + event.x_root - x0), max(540, height + event.y_root - y0)))
+
+        # ===========================================================
+        # Windows 95 message box (always in front, never hidden behind the window)
+        # ===========================================================
+        def _current_focus(self):
+            try:
+                return self.rootfldrcp.focus_get()
+            except (KeyError, tk.TclError):
+                return None
+
+        def _restore_focus(self, widget=None):
+            """Give the keyboard back to this window (and to the field it was in) after a dialog."""
+            try:
+                target = widget if widget is not None and widget.winfo_exists() else self.rootfldrcp
+                target.focus_force()
+            except tk.TclError:
+                pass
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it (a message box, a file dialog, another program). A click in a text field
+            gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        def dialog(self, title, message, icon="info", buttons=("OK",), default=0):
+            root = self.rootfldrcp
+            result = {"value": None}
+            previous = self._current_focus()
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=W95_BG, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+
+            def close(value=None):
+                result["value"] = value
+                win.destroy()
+
+            w95_caption(win, title, lambda: close(buttons[-1] if len(buttons) > 1 else None), self._pixel)
+            body = tk.Frame(win, bg=W95_BG)
+            body.pack(fill="both", expand=True, padx=14, pady=(14, 8))
+            picture = tk.Canvas(body, width=32, height=32, bg=W95_BG, highlightthickness=0, bd=0)
+            if icon == "error":
+                picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                picture.create_line(22, 10, 10, 22, fill="white", width=3)
+            elif icon == "warning":
+                picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline="black")
+                picture.create_text(16, 19, text="!", fill="black", font=("Times New Roman", 15, "bold"))
+            else:
+                picture.create_oval(2, 2, 30, 30, fill="white", outline="black")
+                picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                    font=("Times New Roman", 16, "bold"))
+            picture.pack(side="left", anchor="n", padx=(0, 14))
+            tk.Label(body, text=message, font=W95_FONT, bg=W95_BG, justify="left", wraplength=480).pack(side="left")
+            row = tk.Frame(win, bg=W95_BG)
+            row.pack(pady=(4, 12))
+            for index, text in enumerate(buttons):
+                w95_button(row, text, lambda t=text: close(t), width=9, bold=index == default).pack(side="left", padx=4)
+            win.bind("<Return>", lambda _e: close(buttons[default]))
+            win.bind("<Escape>", lambda _e: close(buttons[-1]))
+            w95_show_modal(win, root)
+            root.wait_window(win)
+            self._restore_focus(previous)
+            return result["value"]
+
+        def ask_yes_no(self, title, message, icon="question"):
+            return self.dialog(title, message, icon, ("Yes", "No"), default=0) == "Yes"
 
         # -----------------------------------------------------------
         # UI construction
         # -----------------------------------------------------------
         def _build_ui(self):
-            banner = tk.Frame(self.rootfldrcp, bg=W95_TITLE, height=26)
-            banner.pack(fill="x", side="top")
-            tk.Label(
-                banner, text="Folder Recipe",
-                bg=W95_TITLE, fg=W95_TITLE_TEXT, font=W95_FONT_BOLD, anchor="w", padx=6,
-            ).pack(fill="x", side="left")
+            root = self.rootfldrcp
+            self._build_titlebar()
+            self._build_menu()
 
+            sbar = tk.Frame(root, bg=W95_BG)
+            sbar.pack(fill="x", side="bottom", padx=2, pady=(0, 2))
+            grip = tk.Canvas(sbar, width=14, height=14, bg=W95_BG, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if W95_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill="white")
+                grip.create_line(13, i + 1, i + 1, 13, fill=W95_SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=W95_SHADOW)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.count_label = tk.Label(sbar, text="", bg=W95_BG, fg="black", font=W95_FONT, relief="sunken", bd=1,
+                                        anchor="w", padx=4, width=18)
+            self.count_label.pack(side="right", padx=1)
             self.status = tk.Label(
-                self.rootfldrcp, text="", bg=W95_BG, fg="black", font=W95_FONT,
-                relief="sunken", bd=2, anchor="w", padx=6,
+                sbar, text="", bg=W95_BG, fg="black", font=W95_FONT,
+                relief="sunken", bd=1, anchor="w", padx=4,
             )
-            self.status.pack(fill="x", side="bottom", padx=2, pady=2)
+            self.status.pack(side="left", fill="x", expand=True, padx=1)
 
-            main = tk.Frame(self.rootfldrcp, bg=W95_BG)
+            main = tk.Frame(root, bg=W95_BG)
             main.pack(fill="both", expand=True, padx=6, pady=6)
 
             # ================= LEFT: saved recipes =================
@@ -206911,12 +211660,18 @@ if fldrcpvar == 223198:
                 bg=W95_BG, font=W95_FONT, justify="left", anchor="w",
             ).pack(fill="x", padx=6, pady=(4, 2))
 
-            list_frame = tk.Frame(recipes_box, bg=W95_BG)
+            btns = tk.Frame(recipes_box, bg=W95_BG)
+            btns.pack(side="bottom", fill="x", padx=6, pady=(2, 6))
+            w95_button(btns, "New", self._new_recipe, width=5).pack(side="left", padx=(0, 3))
+            w95_button(btns, "Save", self._save_recipe, width=5).pack(side="left", padx=(0, 3))
+            w95_button(btns, "Delete", self._delete_recipe, width=6).pack(side="left")
+
+            list_frame = tk.Frame(recipes_box, bg=W95_TEXT_BG, relief="sunken", bd=2)
             list_frame.pack(fill="both", expand=True, padx=6, pady=2)
 
             self.recipe_list = tk.Listbox(
                 list_frame, bg=W95_TEXT_BG, fg="black", font=W95_FONT,
-                relief="sunken", bd=2, width=22, highlightthickness=0,
+                relief="flat", bd=0, width=22, highlightthickness=0,
                 selectbackground=W95_TITLE, selectforeground=W95_TITLE_TEXT,
                 exportselection=False, activestyle="none",
             )
@@ -206928,15 +211683,33 @@ if fldrcpvar == 223198:
             sb.pack(side="right", fill="y")
             self.recipe_list.config(yscrollcommand=sb.set)
 
-            btns = tk.Frame(recipes_box, bg=W95_BG)
-            btns.pack(fill="x", padx=6, pady=(2, 6))
-            w95_button(btns, "New", self._new_recipe, width=5).pack(side="left", padx=(0, 3))
-            w95_button(btns, "Save", self._save_recipe, width=5).pack(side="left", padx=(0, 3))
-            w95_button(btns, "Delete", self._delete_recipe, width=6).pack(side="left")
-
             # ================= RIGHT: 3-step workflow =================
             right = tk.Frame(main, bg=W95_BG)
             right.pack(side="left", fill="both", expand=True)
+
+            # ---- Step 3 and 2 are packed first (bottom), so step 1 takes the rest ----
+            step3 = w95_group(right, "Step 3  -  Create")
+            step3.pack(side="bottom", fill="x", pady=(6, 0))
+
+            action_row = tk.Frame(step3, bg=W95_BG)
+            action_row.pack(fill="x", padx=6, pady=(4, 6))
+            create_btn = w95_button(
+                action_row, "CREATE THE FOLDERS NOW", self._create_folders, bold=True
+            )
+            create_btn.config(pady=6)
+            create_btn.pack(side="left", fill="x", expand=True)
+
+            step2 = w95_group(right, "Step 2  -  Pick where to create it")
+            step2.pack(side="bottom", fill="x", pady=(6, 0))
+
+            row = tk.Frame(step2, bg=W95_BG)
+            row.pack(fill="x", padx=6, pady=(4, 6))
+            self.target_var = tk.StringVar(value=os.path.expanduser("~"))
+            tk.Entry(
+                row, textvariable=self.target_var, bg=W95_TEXT_BG, font=W95_FONT,
+                relief="sunken", bd=2, highlightthickness=0,
+            ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+            w95_button(row, "Browse...", self._browse_target).pack(side="left")
 
             # ---- Step 1 ----
             step1 = w95_group(right, "Step 1  -  Build your structure")
@@ -206957,12 +211730,12 @@ if fldrcpvar == 223198:
             body.pack(fill="both", expand=True, padx=6, pady=(2, 6))
 
             # Tree list
-            tree_frame = tk.Frame(body, bg=W95_BG)
+            tree_frame = tk.Frame(body, bg=W95_TEXT_BG, relief="sunken", bd=2)
             tree_frame.pack(side="left", fill="both", expand=True)
 
             self.tree = tk.Listbox(
                 tree_frame, bg=W95_TEXT_BG, fg="black", font=W95_FONT_MONO,
-                relief="sunken", bd=2, highlightthickness=0,
+                relief="flat", bd=0, highlightthickness=0,
                 selectbackground=W95_TITLE, selectforeground=W95_TITLE_TEXT,
                 exportselection=False, activestyle="none",
             )
@@ -206970,6 +211743,12 @@ if fldrcpvar == 223198:
             self.tree.bind("<Double-Button-1>", lambda e: self._rename())
             self.tree.bind("<F2>", lambda e: self._rename())
             self.tree.bind("<Delete>", lambda e: self._delete_node())
+            self.tree.bind("<Insert>", lambda e: self._add_folder())
+            self.tree.bind("<Control-Up>", lambda e: (self._move_up(), "break")[1])
+            self.tree.bind("<Control-Down>", lambda e: (self._move_down(), "break")[1])
+            self.tree.bind("<Control-Right>", lambda e: (self._indent(), "break")[1])
+            self.tree.bind("<Control-Left>", lambda e: (self._outdent(), "break")[1])
+            self.tree.bind("<Button-3>", self._tree_menu)
 
             tsb = w95_scrollbar(tree_frame, self.tree.yview)
             tsb.pack(side="right", fill="y")
@@ -206996,40 +211775,79 @@ if fldrcpvar == 223198:
 
             tk.Label(
                 ops,
-                text="Double-click = Rename\nDel key = Delete\nF2 = Rename",
+                text="Double-click / F2 = Rename\nIns = Add, Del = Delete\nCtrl+Arrows = Move / Indent",
                 bg=W95_BG, font=W95_FONT, justify="left", anchor="w",
             ).pack(fill="x", pady=(10, 0))
-            
+
             tk.Label(
                 ops,
                 text="Design a folder structure once,\ncreate it anywhere",
-                bg=W95_BG, fg=W95_TITLE, font=(W95_FONT, 8, "bold"), justify="left", anchor="w",
+                bg=W95_BG, fg=W95_TITLE, font=W95_FONT_BOLD, justify="left", anchor="w",   # Fix: was a nested font tuple
             ).pack(fill="x", pady=(10, 0))
 
-            # ---- Step 2 ----
-            step2 = w95_group(right, "Step 2  -  Pick where to create it")
-            step2.pack(fill="x", pady=(6, 0))
+        def _build_menu(self):
+            bar = tk.Frame(self.rootfldrcp, bg=W95_BG)
+            bar.pack(side="top", fill="x")
 
-            row = tk.Frame(step2, bg=W95_BG)
-            row.pack(fill="x", padx=6, pady=(4, 6))
-            self.target_var = tk.StringVar(value=os.path.expanduser("~"))
-            tk.Entry(
-                row, textvariable=self.target_var, bg=W95_TEXT_BG, font=W95_FONT,
-                relief="sunken", bd=2, highlightthickness=0,
-            ).pack(side="left", fill="x", expand=True, padx=(0, 4))
-            w95_button(row, "Browse...", self._browse_target).pack(side="left")
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=W95_FONT, bg=W95_BG, fg="black", activebackground=W95_TITLE,
+                                       activeforeground=W95_TITLE_TEXT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = w95_menu(button)
+                button.config(menu=menu)
+                return menu
 
-            # ---- Step 3 ----
-            step3 = w95_group(right, "Step 3  -  Create")
-            step3.pack(fill="x", pady=(6, 0))
+            m = menubutton("File")
+            m.add_command(label="New Recipe", accelerator="Ctrl+N", command=self._new_recipe)
+            m.add_command(label="Save Recipe", accelerator="Ctrl+S", command=self._save_recipe)
+            m.add_command(label="Delete Recipe", command=self._delete_recipe)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.rootfldrcp.destroy)
+            m = menubutton("Edit")
+            m.add_command(label="Add Folder", accelerator="Ins", command=self._add_folder)
+            m.add_command(label="Add Subfolder", command=self._add_subfolder)
+            m.add_command(label="Rename", accelerator="F2", command=self._rename)
+            m.add_command(label="Delete", accelerator="Del", command=self._delete_node)
+            m.add_separator()
+            m.add_command(label="Move Up", accelerator="Ctrl+Up", command=self._move_up)
+            m.add_command(label="Move Down", accelerator="Ctrl+Down", command=self._move_down)
+            m.add_command(label="Indent", accelerator="Ctrl+Right", command=self._indent)
+            m.add_command(label="Outdent", accelerator="Ctrl+Left", command=self._outdent)
+            m = menubutton("Actions")
+            m.add_command(label="Choose Location...", command=self._browse_target)
+            m.add_command(label="Create the Folders Now", command=self._create_folders)
+            m = menubutton("Help")
+            m.add_command(label="About Folder Recipe", command=lambda: self.dialog(
+                "About Folder Recipe",
+                "Folder Recipe\n\nDesign a folder structure once, save it as a recipe and create it anywhere.\n\n"
+                "1. Build the structure (Add, Rename, Move, Indent).\n"
+                "2. Pick where to create it.\n"
+                "3. Create - folders that already exist are left as they are."))
+            for key, action in (("<Control-n>", self._new_recipe), ("<Control-s>", self._save_recipe)):
+                self.rootfldrcp.bind(key, lambda e, a=action: (a(), "break")[1])
 
-            action_row = tk.Frame(step3, bg=W95_BG)
-            action_row.pack(fill="x", padx=6, pady=(4, 6))
-            create_btn = w95_button(
-                action_row, "CREATE THE FOLDERS NOW", self._create_folders, bold=True
-            )
-            create_btn.config(pady=6)
-            create_btn.pack(side="left", fill="x", expand=True)
+        def _tree_menu(self, event):
+            index = self.tree.nearest(event.y)
+            if 0 <= index < len(self.nodes):
+                self.tree.selection_clear(0, "end")
+                self.tree.selection_set(index)
+                self.tree.activate(index)
+            menu = w95_menu(self.rootfldrcp)
+            menu.add_command(label="Add Folder", command=self._add_folder)
+            menu.add_command(label="Add Subfolder", command=self._add_subfolder)
+            menu.add_command(label="Rename", font=W95_FONT_BOLD, command=self._rename)
+            menu.add_command(label="Delete", command=self._delete_node)
+            menu.add_separator()
+            menu.add_command(label="Move Up", command=self._move_up)
+            menu.add_command(label="Move Down", command=self._move_down)
+            menu.add_command(label="Indent", command=self._indent)
+            menu.add_command(label="Outdent", command=self._outdent)
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
 
         # -----------------------------------------------------------
         # Tree model helpers (self.nodes is a flat list of [depth, name])
@@ -207062,6 +211880,20 @@ if fldrcpvar == 223198:
             if j < len(self.nodes) and self.nodes[j][0] == self.nodes[i][0]:
                 return j
             return None
+
+        def _sibling_names(self, parent, exclude=None):
+            """Names of the children of node `parent` (-1 = the top level), except node `exclude`."""
+            depth = 0 if parent < 0 else self.nodes[parent][0] + 1
+            start = 0 if parent < 0 else parent + 1
+            end = len(self.nodes) if parent < 0 else self._subtree_end(parent)
+            return [self.nodes[k][1] for k in range(start, end) if self.nodes[k][0] == depth and k != exclude]
+
+        def _parent_of(self, i):
+            d = self.nodes[i][0]
+            k = i - 1
+            while k >= 0 and self.nodes[k][0] >= d:
+                k -= 1
+            return k if d > 0 else -1
 
         def _paths(self):
             """Relative folder paths from the model."""
@@ -207106,6 +211938,7 @@ if fldrcpvar == 223198:
                 self.tree.see(select)
 
             count = len(self.nodes)
+            self.count_label.config(text="%d folder(s)" % count)
             if count:
                 self._set_status("%d folder(s) in this recipe." % count)
             else:
@@ -207114,16 +211947,18 @@ if fldrcpvar == 223198:
         # -----------------------------------------------------------
         # Tree operations (all via buttons -> structure is always valid)
         # -----------------------------------------------------------
-        def _ask_name(self, title, initial=""):
-            dlg = NameDialog(self.rootfldrcp, title, "Folder name:", initial)
+        def _ask_name(self, title, initial="", taken=()):
+            dlg = NameDialog(self.rootfldrcp, title, "Folder name:", initial, taken)
+            self._restore_focus(self.tree)
             return dlg.result
 
         def _add_folder(self):
             """Add a folder next to the selected one (same level)."""
-            name = self._ask_name("Add Folder")
+            i = self._selected_index()
+            parent = -1 if i is None or not self.nodes else self._parent_of(i)
+            name = self._ask_name("Add Folder", taken=self._sibling_names(parent) if self.nodes else ())
             if not name:
                 return
-            i = self._selected_index()
             if i is None or not self.nodes:
                 self.nodes.append([0, name])
                 self._render_tree(select=len(self.nodes) - 1)
@@ -207137,11 +211972,11 @@ if fldrcpvar == 223198:
             """Add a folder inside the selected one (as its last child)."""
             i = self._selected_index()
             if i is None:
-                messagebox.showinfo(
+                self.dialog(
                     "Folder Recipe", "Select a folder first, then click 'Add Subfolder'."
                 )
                 return
-            name = self._ask_name("Add Subfolder inside '%s'" % self.nodes[i][1])
+            name = self._ask_name("Add Subfolder inside '%s'" % self.nodes[i][1], taken=self._sibling_names(i))
             if not name:
                 return
             pos = self._subtree_end(i)
@@ -207151,9 +211986,10 @@ if fldrcpvar == 223198:
         def _rename(self):
             i = self._selected_index()
             if i is None:
-                messagebox.showinfo("Folder Recipe", "Select a folder to rename.")
+                self.dialog("Folder Recipe", "Select a folder to rename.")
                 return
-            name = self._ask_name("Rename Folder", self.nodes[i][1])
+            name = self._ask_name("Rename Folder", self.nodes[i][1],
+                                  taken=self._sibling_names(self._parent_of(i), exclude=i))
             if not name:
                 return
             self.nodes[i][1] = name
@@ -207162,15 +211998,15 @@ if fldrcpvar == 223198:
         def _delete_node(self):
             i = self._selected_index()
             if i is None:
-                messagebox.showinfo("Folder Recipe", "Select a folder to delete.")
+                self.dialog("Folder Recipe", "Select a folder to delete.")
                 return
             j = self._subtree_end(i)
             children = j - i - 1
             if children:
-                if not messagebox.askyesno(
+                if not self.ask_yes_no(
                     "Folder Recipe",
                     "'%s' contains %d subfolder(s).\nDelete it together with everything inside?"
-                    % (self.nodes[i][1], children),
+                    % (self.nodes[i][1], children), "warning",
                 ):
                     return
             del self.nodes[i:j]
@@ -207217,6 +212053,10 @@ if fldrcpvar == 223198:
                     % self.nodes[i][1]
                 )
                 return
+            if self.nodes[i][1].lower() in (n.lower() for n in self._sibling_names(s)):
+                self._set_status("Cannot indent: '%s' already has a subfolder named '%s'."
+                                 % (self.nodes[s][1], self.nodes[i][1]))
+                return
             j = self._subtree_end(i)
             for k in range(i, j):
                 self.nodes[k][0] += 1
@@ -207235,6 +212075,9 @@ if fldrcpvar == 223198:
             p = i - 1
             while self.nodes[p][0] != d - 1:
                 p -= 1
+            if self.nodes[i][1].lower() in (n.lower() for n in self._sibling_names(self._parent_of(p), exclude=None)):
+                self._set_status("Cannot outdent: a folder named '%s' already exists at that level." % self.nodes[i][1])
+                return
             pe = self._subtree_end(p)      # end of parent's subtree (includes our block)
             j = self._subtree_end(i)
             block = self.nodes[i:j]
@@ -207308,9 +212151,9 @@ if fldrcpvar == 223198:
                 self.recipes = {row[0]: row[1] for row in cursor.fetchall()}
                 conn.close()
             except sqlite3.Error as e:
-                messagebox.showwarning(
-                    "Folder Recipe", "Could not read recipes from database:\n%s" % e
-                )
+                self.rootfldrcp.after(200, lambda e=e: self.dialog(
+                    "Folder Recipe", "Could not read recipes from database:\n%s" % e, "warning"
+                ))
                 return
             # One-time import of recipes from the old JSON file, if any
             if not self.recipes and os.path.isfile(LEGACY_JSON):
@@ -207339,7 +212182,7 @@ if fldrcpvar == 223198:
                 conn.close()
                 return True
             except sqlite3.Error as e:
-                messagebox.showerror("Folder Recipe", "Could not save recipe:\n%s" % e)
+                self.dialog("Folder Recipe", "Could not save recipe:\n%s" % e, "error")
                 return False
 
         def _db_delete(self, name):
@@ -207351,7 +212194,7 @@ if fldrcpvar == 223198:
                 conn.close()
                 return True
             except sqlite3.Error as e:
-                messagebox.showerror("Folder Recipe", "Could not delete recipe:\n%s" % e)
+                self.dialog("Folder Recipe", "Could not delete recipe:\n%s" % e, "error")
                 return False
 
         def _refresh_listbox(self):
@@ -207384,18 +212227,18 @@ if fldrcpvar == 223198:
         def _save_recipe(self):
             name = self.name_var.get().strip()
             if not name:
-                messagebox.showwarning(
+                self.dialog(
                     "Folder Recipe",
-                    "Give your recipe a name first (the 'Recipe name' box).",
+                    "Give your recipe a name first (the 'Recipe name' box).", "warning",
                 )
                 return
             if not self.nodes:
-                messagebox.showwarning("Folder Recipe", "The structure is empty.")
+                self.dialog("Folder Recipe", "The structure is empty.", "warning")
                 return
 
             if name in self.recipes and name != self.current_recipe:
-                if not messagebox.askyesno(
-                    "Folder Recipe", "Recipe '%s' already exists. Overwrite it?" % name
+                if not self.ask_yes_no(
+                    "Folder Recipe", "Recipe '%s' already exists. Overwrite it?" % name, "warning"
                 ):
                     return
 
@@ -207416,12 +212259,12 @@ if fldrcpvar == 223198:
         def _delete_recipe(self):
             sel = self.recipe_list.curselection()
             if not sel:
-                messagebox.showwarning(
-                    "Folder Recipe", "Click a recipe in the list first, then press Delete."
+                self.dialog(
+                    "Folder Recipe", "Click a recipe in the list first, then press Delete.", "warning"
                 )
                 return
             name = self.recipe_list.get(sel[0])
-            if not messagebox.askyesno("Folder Recipe", "Delete recipe '%s'?" % name):
+            if not self.ask_yes_no("Folder Recipe", "Delete recipe '%s'?" % name, "warning"):
                 return
             self.recipes.pop(name, None)
             self._db_delete(name)
@@ -207436,30 +212279,36 @@ if fldrcpvar == 223198:
         def _browse_target(self):
             chosen = filedialog.askdirectory(
                 title="Select where the folders should be created",
-                initialdir=self.target_var.get() or None,
+                initialdir=self.target_var.get() or None, parent=self.rootfldrcp,
             )
             if chosen:
-                self.target_var.set(chosen)
+                self.target_var.set(os.path.normpath(chosen))
                 self._set_status("Folders will be created inside: %s" % chosen)
 
         def _create_folders(self):
             target = self.target_var.get().strip()
             if not target:
-                messagebox.showwarning(
-                    "Folder Recipe", "Step 2 first: choose where to create the folders."
+                self.dialog(
+                    "Folder Recipe", "Step 2 first: choose where to create the folders.", "warning"
                 )
                 return
             if not os.path.isdir(target):
-                messagebox.showerror(
-                    "Folder Recipe", "This directory does not exist:\n%s" % target
+                self.dialog(
+                    "Folder Recipe", "This directory does not exist:\n%s" % target, "error"
                 )
                 return
             if not self.nodes:
-                messagebox.showwarning("Folder Recipe", "The structure is empty.")
+                self.dialog("Folder Recipe", "The structure is empty.", "warning")
+                return
+
+            # Recipes saved before the name check (or imported) may hold names Windows refuses
+            bad = ["%s (%s)" % (name, folder_name_problem(name)) for _d, name in self.nodes if folder_name_problem(name)]
+            if bad:
+                self.dialog("Folder Recipe", "Rename these folders first:\n\n" + "\n".join(bad[:10]), "error")
                 return
 
             paths = self._paths()
-            if not messagebox.askyesno(
+            if not self.ask_yes_no(
                 "Folder Recipe",
                 "Create %d folder(s) inside:\n%s\n\nContinue?" % (len(paths), target),
             ):
@@ -207482,9 +212331,9 @@ if fldrcpvar == 223198:
             msg = "Created: %d folder(s)\nAlready existed: %d" % (created, skipped)
             if failed:
                 msg += "\n\nFailed:\n" + "\n".join(failed[:10])
-                messagebox.showwarning("Folder Recipe", msg)
+                self.dialog("Folder Recipe", msg, "warning")
             else:
-                messagebox.showinfo("Folder Recipe", msg + "\n\nDone.")
+                self.dialog("Folder Recipe", msg + "\n\nDone.")
             self._set_status(
                 "Done. Created %d, already existed %d, failed %d."
                 % (created, skipped, len(failed))
@@ -207503,7 +212352,7 @@ if fldrcpvar == 223198:
 
     if __name__ == "__main__":
         main()
-
+        
 if arcbrvar == 132454:
     import sqlite3, os as _os
     _db_path = "Config/dbo_bitpack.db"
@@ -207636,23 +212485,28 @@ if arcbrvar == 132454:
             # Rularea buclei principale
             validation.mainloop()
     import os
+    import re
     import fnmatch
     import zipfile
     import tarfile
     import datetime
     import tkinter as tk
-    from tkinter import filedialog, messagebox
+    import tkinter.font as tkfont
+    from tkinter import filedialog
 
     # ---------------------------------------------------------------
     # Windows 95 palette / style constants
     # ---------------------------------------------------------------
     W95_BG = "#c0c0c0"
+    W95_SHADOW = "#808080"
     W95_TITLE = "#000080"
     W95_TITLE_TEXT = "#ffffff"
     W95_TEXT_BG = "#ffffff"
     W95_FONT = ("MS Sans Serif", 8)
     W95_FONT_BOLD = ("MS Sans Serif", 8, "bold")
     W95_FONT_MONO = ("Courier New", 9)
+    W95_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
 
     PREVIEW_MAX_BYTES = 256 * 1024          # read at most 256 KB for preview
 
@@ -207662,6 +212516,9 @@ if arcbrvar == 132454:
         ("Tar archives", "*.tar *.tar.gz *.tgz *.tar.bz2 *.tbz2 *.tar.xz *.txz"),
         ("All files", "*.*"),
     ]
+
+    # columns of the contents list: (title, sort key, width in characters as written by the row format)
+    ARCHIVE_COLUMNS = (("Type", "type", 7), ("Size", "size", 14), ("Modified", "date", 18), ("Path inside archive", "name", 0))
 
 
     # ---------------------------------------------------------------
@@ -207678,9 +212535,12 @@ if arcbrvar == 132454:
             relief="raised",
             bd=2,
             activebackground=W95_BG,
-            highlightthickness=0,
+            disabledforeground=W95_SHADOW,
+            highlightthickness=1 if bold else 0,
+            highlightbackground="black",
             padx=8,
             pady=2,
+            takefocus=0,
         )
         if width:
             btn.config(width=width)
@@ -207693,7 +212553,7 @@ if arcbrvar == 132454:
             text=" " + title + " ",
             bg=W95_BG,
             fg="black",
-            font=W95_FONT_BOLD,
+            font=W95_FONT,
             relief="groove",
             bd=2,
             labelanchor="nw",
@@ -207707,6 +212567,11 @@ if arcbrvar == 132454:
             command=command,
             bg=W95_BG, troughcolor=W95_BG, relief="raised", bd=2, width=16,
         )
+
+
+    def w95_menu(parent):
+        return tk.Menu(parent, tearoff=0, font=W95_FONT, bg=W95_BG, fg="black", activebackground=W95_TITLE,
+                       activeforeground=W95_TITLE_TEXT, disabledforeground=W95_SHADOW, selectcolor="black")
 
 
     def format_size(size):
@@ -207741,6 +212606,13 @@ if arcbrvar == 132454:
                 self._load_tar()
             else:
                 raise ValueError("Not a supported archive (zip or tar).")
+            # Fix: a folder stored AFTER its files was listed twice (once as an added parent, once as itself)
+            unique = {}
+            for entry in self.entries:
+                key = (entry["name"], entry["is_dir"])
+                if key not in unique or (not unique[key]["date"] and entry["date"]):
+                    unique[key] = entry
+            self.entries = list(unique.values())
             # Folders first is not needed; sort by full path
             self.entries.sort(key=lambda e: e["name"].lower())
 
@@ -207817,8 +212689,8 @@ if arcbrvar == 132454:
         # ---- selective extraction ----
         @staticmethod
         def _is_safe(name):
-            """Reject absolute paths and path traversal (zip-slip protection)."""
-            if os.path.isabs(name) or name.startswith(("/", "\\")):
+            """Reject absolute paths, drive letters and path traversal (zip-slip protection)."""
+            if os.path.isabs(name) or name.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", name):
                 return False
             parts = name.replace("\\", "/").split("/")
             return ".." not in parts
@@ -207826,31 +212698,42 @@ if arcbrvar == 132454:
         def extract_entries(self, names, dest_dir):
             done, failed = 0, []
             wanted = set(names)
+            # Fix: a selected folder brings everything inside it (before, only the empty folder was extracted)
+            prefixes = tuple(n + "/" for n in names)
+
+            def is_wanted(n):
+                return n in wanted or (prefixes and n.startswith(prefixes))
+
             if self.kind == "zip":
                 with zipfile.ZipFile(self.path, "r") as zf:
                     for info in zf.infolist():
                         n = info.filename.rstrip("/")
-                        if n in wanted:
+                        if is_wanted(n):
                             if not self._is_safe(n):
                                 failed.append("%s (unsafe path)" % n)
                                 continue
                             try:
                                 zf.extract(info, dest_dir)
                                 done += 1
-                            except (OSError, zipfile.BadZipFile) as e:
+                            # Fix: password-protected / unsupported compression no longer stops the extraction
+                            except (OSError, zipfile.BadZipFile, RuntimeError, NotImplementedError) as e:
                                 failed.append("%s (%s)" % (n, e))
             else:
                 with tarfile.open(self.path, "r:*") as tf:
                     for member in tf.getmembers():
                         n = member.name.rstrip("/")
-                        if n in wanted:
+                        if is_wanted(n):
                             if not self._is_safe(n):
                                 failed.append("%s (unsafe path)" % n)
+                                continue
+                            # Fix: links and devices could point outside the destination folder - never extracted
+                            if member.issym() or member.islnk() or member.isdev():
+                                failed.append("%s (link or device - skipped for safety)" % n)
                                 continue
                             try:
                                 tf.extract(member, dest_dir, set_attrs=False)
                                 done += 1
-                            except (OSError, tarfile.TarError) as e:
+                            except (OSError, tarfile.TarError, EOFError) as e:
                                 failed.append("%s (%s)" % (n, e))
             return done, failed
 
@@ -207863,35 +212746,268 @@ if arcbrvar == 132454:
             self.rootarcbr = rootarcbr
             self.rootarcbr.title("Archive Browser")
             self.rootarcbr.configure(bg=W95_BG)
-            self.rootarcbr.geometry("960x620")
+            x = max(0, (self.rootarcbr.winfo_screenwidth() - 960) // 2)
+            y = max(0, (self.rootarcbr.winfo_screenheight() - 620) // 2)
+            self.rootarcbr.geometry("960x620+%d+%d" % (x, y))
             self.rootarcbr.minsize(820, 520)
 
             self.reader = None
             self.filtered = []          # entries currently shown (parallel to listbox)
             self._search_job = None
+            self.sort_key = "name"
+            self.sort_rev = False
+            self.custom_frame = W95_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
 
             self._build_ui()
             self._set_status("Open an archive to begin. Nothing is ever extracted while browsing.")
+            self.rootarcbr.protocol("WM_DELETE_WINDOW", self.rootarcbr.destroy)
+            self.rootarcbr.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            if self.custom_frame:
+                self.rootarcbr.configure(bd=2, relief="raised")
+                self.rootarcbr.after(10, self._enable_custom_frame)
 
-        # -----------------------------------------------------------
+        # ===========================================================
+        # Windows 95 window frame
+        # ===========================================================
+        def _build_titlebar(self):
+            root = self.rootarcbr
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if W95_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return                                       # the normal Windows title bar is used
+            bar = tk.Frame(root, bg=W95_TITLE, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Canvas(bar, width=16, height=16, bg=W95_TITLE, bd=0, highlightthickness=0)
+            icon.create_rectangle(2, 3, 13, 14, fill="#ffff80", outline="black")        # a zipped folder
+            icon.create_rectangle(2, 3, 7, 5, fill="#ffff80", outline="black")
+            for yy in range(5, 14, 2):
+                icon.create_line(7, yy, 9, yy, fill="black")
+            icon.pack(side="left", padx=(2, 3))
+            title = tk.Label(bar, text="Archive Browser", bg=W95_TITLE, fg=W95_TITLE_TEXT, font=W95_FONT_BOLD,
+                             anchor="w")
+            title.pack(side="left", fill="x", expand=True)
+            self.caption, self.caption_title, self.caption_icon = bar, title, icon
+            glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+
+            def caption_button(key, command):
+                return tk.Button(bar, text=self.glyphs[key], command=command, font=glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=W95_BG, fg="black",
+                                 activebackground=W95_BG, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            caption_button("close", root.destroy).pack(side="right", padx=(2, 2))
+            self.btn_max = caption_button("max", self.toggle_maximize)
+            self.btn_max.pack(side="right")
+            caption_button("min", self.minimize).pack(side="right")
+            for widget in (bar, title, icon):
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda _e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption"):
+                return
+            for widget in (self.caption, self.caption_title, self.caption_icon):
+                widget.config(bg=W95_TITLE if active else W95_SHADOW)
+            self.caption_title.config(fg=W95_TITLE_TEXT if active else W95_BG)
+
+        def _enable_custom_frame(self):
+            self.rootarcbr.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootarcbr
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootarcbr
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootarcbr.overrideredirect(False)
+            self.rootarcbr.iconify()
+
+        def toggle_maximize(self):
+            root = self.rootarcbr
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if W95_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            if hasattr(self, "btn_max"):
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.rootarcbr.winfo_x(), event.y_root - self.rootarcbr.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.rootarcbr.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _grip_press(self, event):
+            self._resize = (event.x_root, event.y_root, self.rootarcbr.winfo_width(), self.rootarcbr.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.rootarcbr.geometry("%dx%d" % (max(820, width + event.x_root - x0), max(520, height + event.y_root - y0)))
+
+        # ===========================================================
+        # Windows 95 message box (always in front, never hidden behind the window)
+        # ===========================================================
+        def _current_focus(self):
+            try:
+                return self.rootarcbr.focus_get()
+            except (KeyError, tk.TclError):
+                return None
+
+        def _restore_focus(self, widget=None):
+            """Give the keyboard back to this window (and to the field it was in) after a dialog."""
+            try:
+                target = widget if widget is not None and widget.winfo_exists() else self.rootarcbr
+                target.focus_force()
+            except tk.TclError:
+                pass
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it (a message box, a file dialog, another program). A click in a text field
+            gives it the keyboard again."""
+            widget = event.widget
+            if isinstance(widget, (tk.Entry, tk.Text, tk.Spinbox, tk.Listbox)):
+                try:
+                    widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        def dialog(self, title, message, icon="info", buttons=("OK",), default=0):
+            root = self.rootarcbr
+            result = {"value": None}
+            previous = self._current_focus()
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=W95_BG, bd=2, relief="raised")
+            win.transient(root)
+            win.attributes("-topmost", True)
+
+            def close(value=None):
+                result["value"] = value
+                win.destroy()
+
+            bar = tk.Frame(win, bg=W95_TITLE, height=20)
+            bar.pack(fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, font=W95_FONT_BOLD, bg=W95_TITLE, fg=W95_TITLE_TEXT).pack(side="left", padx=4)
+            tk.Button(bar, text=self.glyphs["close"], command=lambda: close(buttons[-1] if len(buttons) > 1 else None),
+                      font=("Marlett", 7) if self.glyphs["close"] == "r" else ("MS Sans Serif", 7, "bold"),
+                      image=self._pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=W95_BG,
+                      relief="raised", bd=2, highlightthickness=0, takefocus=0).pack(side="right", padx=2)
+            body = tk.Frame(win, bg=W95_BG)
+            body.pack(fill="both", expand=True, padx=14, pady=(14, 8))
+            picture = tk.Canvas(body, width=32, height=32, bg=W95_BG, highlightthickness=0, bd=0)
+            if icon == "error":
+                picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                picture.create_line(22, 10, 10, 22, fill="white", width=3)
+            elif icon == "warning":
+                picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline="black")
+                picture.create_text(16, 19, text="!", fill="black", font=("Times New Roman", 15, "bold"))
+            else:
+                picture.create_oval(2, 2, 30, 30, fill="white", outline="black")
+                picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                    font=("Times New Roman", 16, "bold"))
+            picture.pack(side="left", anchor="n", padx=(0, 14))
+            tk.Label(body, text=message, font=W95_FONT, bg=W95_BG, justify="left", wraplength=520).pack(side="left")
+            row = tk.Frame(win, bg=W95_BG)
+            row.pack(pady=(4, 12))
+            for index, text in enumerate(buttons):
+                w95_button(row, text, lambda t=text: close(t), width=9, bold=index == default).pack(side="left", padx=4)
+            win.bind("<Return>", lambda _e: close(buttons[default]))
+            win.bind("<Escape>", lambda _e: close(buttons[-1]))
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            x = root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2)
+            y = root.winfo_rooty() + max(0, (root.winfo_height() - h) // 2)
+            win.geometry("+%d+%d" % (x, y))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                # the grab only once the window is really on screen; if that fails, nothing is blocked
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+            root.wait_window(win)
+            self._restore_focus(previous)
+            return result["value"]
+
+        # ===========================================================
         # UI construction
-        # -----------------------------------------------------------
+        # ===========================================================
         def _build_ui(self):
-            banner = tk.Frame(self.rootarcbr, bg=W95_TITLE, height=26)
-            banner.pack(fill="x", side="top")
-            tk.Label(
-                banner,
-                text="Archive Browser",
-                bg=W95_TITLE, fg=W95_TITLE_TEXT, font=W95_FONT_BOLD, anchor="w", padx=6,
-            ).pack(fill="x", side="left")
+            root = self.rootarcbr
+            self._build_titlebar()
+            self._build_menu()
 
-            self.status = tk.Label(
-                self.rootarcbr, text="", bg=W95_BG, fg="black", font=W95_FONT,
-                relief="sunken", bd=2, anchor="w", padx=6,
-            )
-            self.status.pack(fill="x", side="bottom", padx=2, pady=2)
+            # ---- status bar: message, entry count, size grip ----
+            sbar = tk.Frame(root, bg=W95_BG)
+            sbar.pack(fill="x", side="bottom", padx=2, pady=(0, 2))
+            grip = tk.Canvas(sbar, width=14, height=14, bg=W95_BG, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if W95_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill="white")
+                grip.create_line(13, i + 1, i + 1, 13, fill=W95_SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=W95_SHADOW)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.count_label = tk.Label(sbar, text="", bg=W95_BG, fg="black", font=W95_FONT, relief="sunken", bd=1,
+                                        anchor="w", padx=4, width=22)
+            self.count_label.pack(side="right", padx=1)
+            self.status = tk.Label(sbar, text="", bg=W95_BG, fg="black", font=W95_FONT, relief="sunken", bd=1,
+                                   anchor="w", padx=4)
+            self.status.pack(side="left", fill="x", expand=True, padx=1)
 
-            main = tk.Frame(self.rootarcbr, bg=W95_BG)
+            main = tk.Frame(root, bg=W95_BG)
             main.pack(fill="both", expand=True, padx=6, pady=6)
 
             # ---- Archive selection ----
@@ -207901,10 +213017,12 @@ if arcbrvar == 132454:
             row = tk.Frame(arch_box, bg=W95_BG)
             row.pack(fill="x", padx=6, pady=(4, 6))
             self.archive_var = tk.StringVar()
-            tk.Entry(
+            archive_entry = tk.Entry(
                 row, textvariable=self.archive_var, bg=W95_TEXT_BG, font=W95_FONT,
                 relief="sunken", bd=2, highlightthickness=0,
-            ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+            )
+            archive_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+            archive_entry.bind("<Return>", lambda e: self._open_archive())
             w95_button(row, "Browse...", self._browse_archive).pack(side="left", padx=(0, 4))
             w95_button(row, "Open", self._open_archive, bold=True).pack(side="left")
 
@@ -207933,7 +213051,7 @@ if arcbrvar == 132454:
                 tk.Checkbutton(
                     srow, text=text, variable=var, command=self._apply_filter,
                     bg=W95_BG, font=W95_FONT, highlightthickness=0,
-                    activebackground=W95_BG,
+                    activebackground=W95_BG, selectcolor=W95_TEXT_BG,
                 ).pack(side="left", padx=(0, 8))
             w95_button(srow, "Clear", self._clear_search).pack(side="left")
 
@@ -207941,35 +213059,8 @@ if arcbrvar == 132454:
             res_box = w95_group(main, "Contents")
             res_box.pack(fill="both", expand=True, pady=(6, 0))
 
-            header = tk.Label(
-                res_box,
-                text="%-6s %12s  %-16s  %s" % ("Type", "Size", "Modified", "Path inside archive"),
-                bg=W95_BG, font=W95_FONT_MONO, anchor="w",
-            )
-            header.pack(fill="x", padx=6, pady=(4, 0))
-
-            list_frame = tk.Frame(res_box, bg=W95_BG)
-            list_frame.pack(fill="both", expand=True, padx=6, pady=(2, 2))
-
-            self.listbox = tk.Listbox(
-                list_frame, bg=W95_TEXT_BG, fg="black", font=W95_FONT_MONO,
-                relief="sunken", bd=2, highlightthickness=0,
-                selectbackground=W95_TITLE, selectforeground=W95_TITLE_TEXT,
-                exportselection=False, activestyle="none", selectmode="extended",
-            )
-            self.listbox.grid(row=0, column=0, sticky="nsew")
-            self.listbox.bind("<Double-Button-1>", lambda e: self._preview())
-
-            vsb = w95_scrollbar(list_frame, self.listbox.yview)
-            vsb.grid(row=0, column=1, sticky="ns")
-            hsb = w95_scrollbar(list_frame, self.listbox.xview, horizontal=True)
-            hsb.grid(row=1, column=0, sticky="ew")
-            self.listbox.config(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-            list_frame.rowconfigure(0, weight=1)
-            list_frame.columnconfigure(0, weight=1)
-
             actions = tk.Frame(res_box, bg=W95_BG)
-            actions.pack(fill="x", padx=6, pady=(2, 6))
+            actions.pack(fill="x", side="bottom", padx=6, pady=(2, 6))
             w95_button(actions, "Preview File", self._preview).pack(side="left", padx=(0, 4))
             w95_button(actions, "Copy Path", self._copy_path).pack(side="left", padx=(0, 4))
             w95_button(actions, "Extract Selected...", self._extract_selected).pack(side="left")
@@ -207979,12 +213070,130 @@ if arcbrvar == 132454:
                 bg=W95_BG, font=W95_FONT,
             ).pack(side="left", padx=(12, 0))
 
+            list_frame = tk.Frame(res_box, bg=W95_TEXT_BG, relief="sunken", bd=2)
+            list_frame.pack(fill="both", expand=True, padx=6, pady=(4, 2))
+
+            # column headers, exactly as wide as the columns of the rows; click = sort
+            mono = tkfont.Font(root, family=W95_FONT_MONO[0], size=W95_FONT_MONO[1])
+            char = mono.measure("0")
+            header = tk.Frame(list_frame, bg=W95_BG)
+            header.grid(row=0, column=0, columnspan=2, sticky="ew")
+            self.header_labels = {}
+            for title, key, chars in ARCHIVE_COLUMNS:
+                if chars:
+                    cell = tk.Frame(header, bg=W95_BG, width=chars * char, height=20)
+                    cell.pack(side="left")
+                    cell.pack_propagate(False)
+                    parent = cell
+                else:
+                    parent = header
+                label = tk.Label(parent, text=title, bg=W95_BG, fg="black", font=W95_FONT, relief="raised", bd=2,
+                                 anchor="w", padx=3)
+                label.pack(side="left", fill="both", expand=True)
+                label.bind("<ButtonPress-1>", lambda e, w=label: w.config(relief="sunken"))
+                label.bind("<ButtonRelease-1>", lambda e, w=label, k=key: (w.config(relief="raised"), self._sort_by(k)))
+                self.header_labels[key] = (label, title)
+
+            self.listbox = tk.Listbox(
+                list_frame, bg=W95_TEXT_BG, fg="black", font=W95_FONT_MONO,
+                relief="flat", bd=0, highlightthickness=0,
+                selectbackground=W95_TITLE, selectforeground=W95_TITLE_TEXT,
+                exportselection=False, activestyle="none", selectmode="extended",
+            )
+            self.listbox.grid(row=1, column=0, sticky="nsew")
+            self.listbox.bind("<Double-Button-1>", lambda e: self._preview())
+            self.listbox.bind("<Return>", lambda e: self._preview())
+            self.listbox.bind("<Button-3>", self._context_menu)
+            self.listbox.bind("<<ListboxSelect>>", lambda e: self._update_count())
+
+            vsb = w95_scrollbar(list_frame, self.listbox.yview)
+            vsb.grid(row=1, column=1, sticky="ns")
+            hsb = w95_scrollbar(list_frame, self.listbox.xview, horizontal=True)
+            hsb.grid(row=2, column=0, sticky="ew")
+            self.listbox.config(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+            list_frame.rowconfigure(1, weight=1)
+            list_frame.columnconfigure(0, weight=1)
+
+            for key, action in (("<Control-o>", self._browse_archive), ("<Control-a>", self._select_all),
+                                ("<Control-c>", self._copy_path), ("<F5>", self._open_archive)):
+                root.bind(key, lambda e, a=action: (a(), "break")[1])
+            self._update_count()
+
+        def _build_menu(self):
+            bar = tk.Frame(self.rootarcbr, bg=W95_BG)
+            bar.pack(side="top", fill="x")
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=W95_FONT, bg=W95_BG, fg="black", activebackground=W95_TITLE,
+                                       activeforeground=W95_TITLE_TEXT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                       takefocus=0, highlightthickness=0)
+                button.pack(side="left")
+                menu = w95_menu(button)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Open Archive...", accelerator="Ctrl+O", command=self._browse_archive)
+            m.add_command(label="Reload", accelerator="F5", command=self._open_archive)
+            m.add_separator()
+            m.add_command(label="Exit", command=self.rootarcbr.destroy)
+            m = menubutton("Edit")
+            m.add_command(label="Select All", accelerator="Ctrl+A", command=self._select_all)
+            m.add_command(label="Copy Path", accelerator="Ctrl+C", command=self._copy_path)
+            m = menubutton("View")
+            m.add_command(label="Sort by Name", command=lambda: self._sort_by("name"))
+            m.add_command(label="Sort by Size", command=lambda: self._sort_by("size"))
+            m.add_command(label="Sort by Date", command=lambda: self._sort_by("date"))
+            m.add_command(label="Sort by Type", command=lambda: self._sort_by("type"))
+            m = menubutton("Actions")
+            m.add_command(label="Preview File", accelerator="Enter", command=self._preview)
+            m.add_command(label="Extract Selected...", command=self._extract_selected)
+            m = menubutton("Help")
+            m.add_command(label="About Archive Browser", command=lambda: self.dialog(
+                "About Archive Browser",
+                "Archive Browser\n\nBrowse ZIP and TAR archives (tar, tar.gz, tar.bz2, tar.xz) without extracting them.\n"
+                "Search with * and ?, preview files from inside the archive, extract only what you select.\n\n"
+                "Click a column header to sort."))
+
+        def _context_menu(self, event):
+            index = self.listbox.nearest(event.y)
+            if index < 0 or index >= len(self.filtered):
+                return
+            if index not in self.listbox.curselection():
+                self.listbox.selection_clear(0, "end")
+                self.listbox.selection_set(index)
+                self._update_count()
+            menu = w95_menu(self.rootarcbr)
+            menu.add_command(label="Preview", font=W95_FONT_BOLD, command=self._preview)
+            menu.add_command(label="Extract Selected...", command=self._extract_selected)
+            menu.add_separator()
+            menu.add_command(label="Copy Path", command=self._copy_path)
+            self._menu = menu
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        def _select_all(self):
+            self.listbox.selection_set(0, "end")
+            self._update_count()
+
+        def _update_count(self):
+            if not self.reader:
+                self.count_label.config(text="No archive")
+                return
+            selected = len(self.listbox.curselection())
+            text = "%d shown" % len(self.filtered)
+            if selected:
+                text += ", %d selected" % selected
+            self.count_label.config(text=text)
+
         # -----------------------------------------------------------
         # Archive opening
         # -----------------------------------------------------------
         def _browse_archive(self):
             chosen = filedialog.askopenfilename(
-                title="Select an archive", filetypes=ARCHIVE_FILETYPES
+                title="Select an archive", filetypes=ARCHIVE_FILETYPES, parent=self.rootarcbr
             )
             if chosen:
                 self.archive_var.set(chosen)
@@ -207993,18 +213202,25 @@ if arcbrvar == 132454:
         def _open_archive(self):
             path = self.archive_var.get().strip()
             if not path:
-                messagebox.showwarning("Archive Browser", "Choose an archive file first.")
+                self.dialog("Archive Browser", "Choose an archive file first.", "warning")
                 return
             if not os.path.isfile(path):
-                messagebox.showerror("Archive Browser", "File not found:\n%s" % path)
+                self.dialog("Archive Browser", "File not found:\n%s" % path, "error")
                 return
 
             reader = ArchiveReader(path)
+            self._set_status("Reading %s..." % os.path.basename(path))
+            self.rootarcbr.config(cursor="watch")
+            self.rootarcbr.update_idletasks()
             try:
                 reader.load()
-            except (ValueError, OSError, zipfile.BadZipFile, tarfile.TarError) as e:
-                messagebox.showerror("Archive Browser", "Could not open archive:\n%s" % e)
+            # Fix: a damaged or cut-off archive (EOFError, zlib errors...) now shows a message instead of nothing
+            except Exception as e:
+                self.dialog("Archive Browser", "Could not open archive:\n%s" % e, "error")
+                self._set_status("Could not open %s." % os.path.basename(path))
                 return
+            finally:
+                self.rootarcbr.config(cursor="")
 
             self.reader = reader
             self.search_var.set("")
@@ -208028,11 +213244,19 @@ if arcbrvar == 132454:
             self.search_var.set("")
             self._apply_filter()
 
-        def _apply_filter(self):
+        def _sort_by(self, key):
+            self.sort_rev = (not self.sort_rev) if self.sort_key == key else False
+            self.sort_key = key
+            self._apply_filter(keep_status=True)
+
+        def _apply_filter(self, keep_status=False):
             self._search_job = None
             self.listbox.delete(0, "end")
             self.filtered = []
+            for key, (label, title) in self.header_labels.items():
+                label.config(text=title + ((" v" if self.sort_rev else " ^") if key == self.sort_key else ""))
             if not self.reader:
+                self._update_count()
                 return
 
             term = self.search_var.get().strip()
@@ -208062,6 +213286,15 @@ if arcbrvar == 132454:
                         if term_cmp not in hay_full:
                             continue
                 self.filtered.append(entry)
+
+            sort_keys = {
+                "name": lambda e: e["name"].lower(),
+                "size": lambda e: (e["size"] is not None, e["size"] or 0),
+                "date": lambda e: e["date"],
+                "type": lambda e: (not e["is_dir"], e["name"].lower()),
+            }
+            self.filtered.sort(key=sort_keys[self.sort_key], reverse=self.sort_rev)
+            for entry in self.filtered:
                 kind = "[DIR]" if entry["is_dir"] else "     "
                 self.listbox.insert(
                     "end",
@@ -208069,6 +213302,9 @@ if arcbrvar == 132454:
                         kind, format_size(entry["size"]), entry["date"], entry["name"]
                     ),
                 )
+            self._update_count()
+            if keep_status:
+                return
 
             shown = len(self.filtered)
             total = len(self.reader.entries)
@@ -208086,42 +213322,48 @@ if arcbrvar == 132454:
         def _preview(self):
             sel = self._selected_entries()
             if not sel:
-                messagebox.showinfo("Archive Browser", "Select a file to preview.")
+                self.dialog("Archive Browser", "Select a file to preview.")
                 return
             entry = sel[0]
             if entry["is_dir"]:
-                messagebox.showinfo("Archive Browser", "'%s' is a folder." % entry["name"])
+                self.dialog("Archive Browser", "'%s' is a folder." % entry["name"])
                 return
             try:
                 data = self.reader.read_bytes(entry["name"], PREVIEW_MAX_BYTES)
-            except (OSError, KeyError, zipfile.BadZipFile, tarfile.TarError) as e:
-                messagebox.showerror("Archive Browser", "Could not read entry:\n%s" % e)
+            # Fix: password-protected or unsupported entries now show a message instead of nothing
+            except (OSError, KeyError, zipfile.BadZipFile, tarfile.TarError, RuntimeError, NotImplementedError,
+                    EOFError) as e:
+                self.dialog("Archive Browser", "Could not read entry:\n%s" % e, "error")
                 return
 
             win = tk.Toplevel(self.rootarcbr)
             win.title("Preview - %s" % entry["name"])
             win.configure(bg=W95_BG)
-            win.geometry("760x520")
+            win.geometry("760x520+%d+%d" % (self.rootarcbr.winfo_rootx() + 60, self.rootarcbr.winfo_rooty() + 40))
+            win.transient(self.rootarcbr)
 
-            info = "Read %s directly from the archive (max %s shown). Nothing was extracted." % (
-                format_size(len(data)), format_size(PREVIEW_MAX_BYTES)
-            )
-            tk.Label(win, text=info, bg=W95_BG, font=W95_FONT, anchor="w").pack(
-                fill="x", padx=6, pady=(6, 2)
-            )
+            bottom = tk.Frame(win, bg=W95_BG)
+            bottom.pack(side="bottom", fill="x", padx=6, pady=(0, 6))
+            w95_button(bottom, "Close", win.destroy, width=9, bold=True).pack(side="right")
+            win.bind("<Escape>", lambda e: win.destroy())
 
-            frame = tk.Frame(win, bg=W95_BG)
+            frame = tk.Frame(win, bg=W95_TEXT_BG, relief="sunken", bd=2)
+            info_label = tk.Label(win, text="", bg=W95_BG, font=W95_FONT, anchor="w")
+            info_label.pack(fill="x", padx=6, pady=(6, 2))
             frame.pack(fill="both", expand=True, padx=6, pady=(0, 6))
             text = tk.Text(
                 frame, bg=W95_TEXT_BG, fg="black", font=W95_FONT_MONO,
-                relief="sunken", bd=2, highlightthickness=0, wrap="none",
+                relief="flat", bd=0, highlightthickness=0, wrap="none",
             )
-            text.pack(side="left", fill="both", expand=True)
             sb = w95_scrollbar(frame, text.yview)
             sb.pack(side="right", fill="y")
-            text.config(yscrollcommand=sb.set)
+            hb = w95_scrollbar(frame, text.xview, horizontal=True)
+            hb.pack(side="bottom", fill="x")
+            text.pack(side="left", fill="both", expand=True)
+            text.config(yscrollcommand=sb.set, xscrollcommand=hb.set)
 
-            if b"\x00" in data[:4096]:
+            encoding = ""
+            if b"\x00" in data[:4096] and not data.startswith((b"\xff\xfe", b"\xfe\xff")):
                 text.insert(
                     "1.0",
                     "[Binary file - showing hex dump of the first %s]\n\n" % format_size(min(len(data), 4096)),
@@ -208133,13 +213375,23 @@ if arcbrvar == 132454:
                     asciipart = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
                     text.insert("end", "%08X  %-47s  %s\n" % (off, hexpart, asciipart))
             else:
-                text.insert("1.0", data.decode("utf-8", errors="replace"))
+                # Fix: Windows text files (ANSI / UTF-16) keep their diacritics
+                if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+                    content, encoding = data.decode("utf-16", errors="replace"), "UTF-16"
+                else:
+                    try:
+                        content, encoding = data.decode("utf-8"), "UTF-8"
+                    except UnicodeDecodeError:
+                        content, encoding = data.decode("cp1250", errors="replace"), "ANSI"
+                text.insert("1.0", content)
             text.config(state="disabled")
+            info_label.config(text="Read %s directly from the archive (max %s shown)%s. Nothing was extracted." % (
+                format_size(len(data)), format_size(PREVIEW_MAX_BYTES), (", " + encoding) if encoding else ""))
 
         def _copy_path(self):
             sel = self._selected_entries()
             if not sel:
-                messagebox.showinfo("Archive Browser", "Select at least one entry.")
+                self.dialog("Archive Browser", "Select at least one entry.")
                 return
             paths = "\n".join(e["name"] for e in sel)
             self.rootarcbr.clipboard_clear()
@@ -208149,22 +213401,29 @@ if arcbrvar == 132454:
         def _extract_selected(self):
             sel = self._selected_entries()
             if not sel:
-                messagebox.showinfo(
+                self.dialog(
                     "Archive Browser",
                     "Select the entries you want to extract (Ctrl+click for multiple).",
                 )
                 return
-            dest = filedialog.askdirectory(title="Extract the selected entries to...")
+            dest = filedialog.askdirectory(title="Extract the selected entries to...", parent=self.rootarcbr)
             if not dest:
                 return
             names = [e["name"] for e in sel]
-            done, failed = self.reader.extract_entries(names, dest)
+            self.rootarcbr.config(cursor="watch")
+            self.rootarcbr.update_idletasks()
+            try:
+                done, failed = self.reader.extract_entries(names, dest)
+            finally:
+                self.rootarcbr.config(cursor="")
             msg = "Extracted: %d entr%s to\n%s" % (done, "y" if done == 1 else "ies", dest)
             if failed:
                 msg += "\n\nFailed:\n" + "\n".join(failed[:10])
-                messagebox.showwarning("Archive Browser", msg)
+                if len(failed) > 10:
+                    msg += "\n... and %d more" % (len(failed) - 10)
+                self.dialog("Archive Browser", msg, "warning")
             else:
-                messagebox.showinfo("Archive Browser", msg)
+                self.dialog("Archive Browser", msg)
             self._set_status("Extraction finished: %d ok, %d failed." % (done, len(failed)))
 
         # -----------------------------------------------------------
