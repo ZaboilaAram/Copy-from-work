@@ -1,0 +1,8 @@
+if convcalcvar == 11100011100011100011100023:# (+ programmer calc - de verificat de ce se blocheaza interfata#)
+1110001110001110001110002322220099#
+if projmanvar == 111000111000111000111000232222:
+3333#
+if muapdash == 777666092:
+if bpkdshgraphvar == 778832:
+quiz
+de scos kb simplu si excel lite (v1)
