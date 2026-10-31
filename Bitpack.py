@@ -472,6 +472,20 @@ def setup_database_ALL():
             )
         ''')
         
+    # Tabel pentru Time Tracker 95 - sesiunile de lucru (pentru coloana Today si export)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='time_tracker_sessions'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE time_tracker_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_name TEXT NOT NULL,
+                started TEXT NOT NULL,
+                ended TEXT,
+                seconds INTEGER NOT NULL
+            )
+        ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_time_tracker_sessions_task ON time_tracker_sessions (task_name, started)")
+        
     # Tabel pentru Personal Storage - folders
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_storage_folders'")
     if cursor.fetchone() is None:
@@ -552,6 +566,34 @@ def setup_database_ALL():
                 file_size INTEGER
             )
         ''')
+        
+    # Tabel pentru Script Runner 95 - scripturile salvate (inlocuieste scripts.json)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='script_runner_scripts'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE script_runner_scripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                command TEXT NOT NULL,
+                category TEXT,
+                description TEXT,
+                workdir TEXT,
+                last_run TEXT,
+                last_exit INTEGER
+            )
+        ''')
+    
+    # Tabel pentru Universal Converter 95 - istoricul conversiilor (pentru Hash doar metoda si lungimea, nu textul)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='universal_converter_history'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE universal_converter_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                tab TEXT NOT NULL,
+                label TEXT NOT NULL
+            )
+        ''')
     
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activity_network'")
     if cursor.fetchone() is None:
@@ -575,6 +617,18 @@ def setup_database_ALL():
                 timestamp TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 active_processes TEXT
+            )
+        ''')
+        
+    # Tabel pentru Graphing Calculator 95 - expresiile salvate (Save Expression) si istoricul
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='graph_calc_expressions'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE graph_calc_expressions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                expression TEXT NOT NULL UNIQUE,
+                saved INTEGER NOT NULL DEFAULT 0,
+                used_at TEXT NOT NULL
             )
         ''')
     
@@ -1516,6 +1570,20 @@ def setup_database_INSTANCE():
             )
         ''')
     
+    # Tabel pentru Time Tracker 95 - sesiunile de lucru (pentru coloana Today si export)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='time_tracker_sessions'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE time_tracker_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_name TEXT NOT NULL,
+                started TEXT NOT NULL,
+                ended TEXT,
+                seconds INTEGER NOT NULL
+            )
+        ''')
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_time_tracker_sessions_task ON time_tracker_sessions (task_name, started)")
+    
     # Tabel pentru Personal Storage - folders
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_storage_folders'")
     if cursor.fetchone() is None:
@@ -1597,6 +1665,34 @@ def setup_database_INSTANCE():
                 file_size INTEGER
             )
         ''')
+        
+    # Tabel pentru Script Runner 95 - scripturile salvate (inlocuieste scripts.json)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='script_runner_scripts'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE script_runner_scripts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                command TEXT NOT NULL,
+                category TEXT,
+                description TEXT,
+                workdir TEXT,
+                last_run TEXT,
+                last_exit INTEGER
+            )
+        ''')
+
+    # Tabel pentru Universal Converter 95 - istoricul conversiilor (pentru Hash doar metoda si lungimea, nu textul)
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='universal_converter_history'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE universal_converter_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                tab TEXT NOT NULL,
+                label TEXT NOT NULL
+            )
+        ''')
     
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='activity_network'")
     if cursor.fetchone() is None:
@@ -1620,6 +1716,18 @@ def setup_database_INSTANCE():
                 timestamp TEXT NOT NULL,
                 file_path TEXT NOT NULL,
                 active_processes TEXT
+            )
+        ''')
+        
+    # Tabel pentru Graphing Calculator 95 - expresiile salvate (Save Expression) si istoricul
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='graph_calc_expressions'")
+    if cursor.fetchone() is None:
+        cursor.execute('''
+            CREATE TABLE graph_calc_expressions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                expression TEXT NOT NULL UNIQUE,
+                saved INTEGER NOT NULL DEFAULT 0,
+                used_at TEXT NOT NULL
             )
         ''')
     
@@ -75377,277 +75485,742 @@ if cmvar == 3333:
             # Rularea buclei principale
             validation.mainloop()
     
-    import sqlite3
-    from tkinter import *
-    import tkinter.ttk as ttk
-    import tkinter.messagebox as tkMessageBox
+    def contact_list_95():
+        """Contact List (Windows 95 look). Contacts stay in Config/dbo_bitpack.db, table contacts, as before."""
+        import os
+        import re
+        import csv
+        import sqlite3
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from tkinter import filedialog
 
-    # ============================ SETUP ======================================
-    rootcm = Tk()
-    rootcm.title("Contact List")
-    width = 700
-    height = 600
-    screen_width = rootcm.winfo_screenwidth()
-    screen_height = rootcm.winfo_screenheight()
-    x = (screen_width / 2) - (width / 2)
-    y = (screen_height / 2) - (height / 2)
-    rootcm.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
-    rootcm.resizable(0, 0)
-    rootcm.config(bg="gray40")
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        LIST_FONT = ("Courier New", 9)
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Contact List"
+        DB_PATH = "Config/dbo_bitpack.db"
+        FIELDS = (("name", "Name"), ("surname", "Surname"), ("email", "Email"), ("position", "Job Title"),
+                  ("phone", "Phone"), ("details", "Other Details"))
+        COLUMNS = (("surname", "Surname", 16), ("name", "Name", 14), ("phone", "Phone", 15), ("email", "Email", 26),
+                   ("position", "Job Title", 18), ("details", "Other Details", 30))
+        EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-    # ============================ VARIABLES ==================================
-    NAME = StringVar()
-    SURNAME = StringVar()
-    EMAIL = StringVar()
-    POSITION = StringVar()
-    PHONE = StringVar()
-    DETAILS = StringVar()
+        # ══════════════════════════════════════════════════════════════
+        # STORAGE (the same contacts table; every value is kept as text)
+        # ══════════════════════════════════════════════════════════════
 
-    # ============================ DATABASE ===================================
-    def update_database_schema():
-        #conn = sqlite3.connect("contacts.db")
-        conn = sqlite3.connect("Config/dbo_bitpack.db")
-        cursor = conn.cursor()
-        columns = {
-            'surname': 'TEXT',
-            'email': 'TEXT',
-            'position': 'TEXT',
-            'phone': 'TEXT',
-            'details': 'TEXT'
-        }
-        for column, datatype in columns.items():
-            try:
-                cursor.execute(f"ALTER TABLE `contacts` ADD COLUMN `{column}` {datatype}")
-            except sqlite3.OperationalError:
-                pass  # Coloana există deja
+        class Store:
+            def __init__(self, path):
+                self.path = path
+                folder = os.path.dirname(path)
+                if folder and not os.path.isdir(folder):
+                    os.makedirs(folder)
+                with self.db() as conn:
+                    # first the table, then the columns of older versions (it was the other way round before)
+                    conn.execute("CREATE TABLE IF NOT EXISTS contacts (mem_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
+                                 "name TEXT, surname TEXT, email TEXT, position TEXT, phone TEXT, details TEXT)")
+                    have = {row[1] for row in conn.execute("PRAGMA table_info(contacts)")}
+                    for column, _label in FIELDS:
+                        if column not in have:
+                            conn.execute("ALTER TABLE contacts ADD COLUMN %s TEXT" % column)
 
-        conn.commit()
-        cursor.close()
-        conn.close()
+            def db(self):
+                return sqlite3.connect(self.path, timeout=10)
 
-    update_database_schema()
+            def all(self):
+                with self.db() as conn:
+                    rows = conn.execute("SELECT mem_id, name, surname, email, position, phone, details FROM contacts"
+                                        ).fetchall()
+                keys = ("mem_id",) + tuple(k for k, _l in FIELDS)
+                # str() everywhere: a phone like 0722... is text, never a number (the leading 0 was lost before)
+                return [{k: ("" if v is None else (v if k == "mem_id" else str(v))) for k, v in zip(keys, row)}
+                        for row in rows]
 
-    def Database():
-        #conn = sqlite3.connect("contacts.db")
-        conn = sqlite3.connect("Config/dbo_bitpack.db")
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS `contacts` (
-                mem_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                surname TEXT,
-                email TEXT,
-                position TEXT,
-                phone TEXT,
-                details TEXT
-            )
-        """)
-        cursor.execute("SELECT * FROM `contacts` ORDER BY `surname` ASC")
-        fetch = cursor.fetchall()
-        for data in fetch:
-            tree.insert('', 'end', values=(data))
-        cursor.close()
-        conn.close()
+            def save(self, data, mem_id=None):
+                values = tuple(data[k] for k, _l in FIELDS)
+                with self.db() as conn:
+                    if mem_id:
+                        conn.execute("UPDATE contacts SET name=?, surname=?, email=?, position=?, phone=?, details=? "
+                                     "WHERE mem_id=?", values + (mem_id,))
+                        return mem_id
+                    return conn.execute("INSERT INTO contacts (name, surname, email, position, phone, details) "
+                                        "VALUES (?, ?, ?, ?, ?, ?)", values).lastrowid
 
-    # ============================ METHODS ====================================
-    def SubmitData():
-        if all([NAME.get(), SURNAME.get(), EMAIL.get(), POSITION.get(), PHONE.get(), DETAILS.get()]):
-            tree.delete(*tree.get_children())
-            #conn = sqlite3.connect("contacts.db")
-            conn = sqlite3.connect("Config/dbo_bitpack.db")
-            cursor = conn.cursor()
-            cursor.execute("INSERT INTO `contacts` (name, surname, email, position, phone, details) VALUES (?, ?, ?, ?, ?, ?)", 
-                        (NAME.get(), SURNAME.get(), EMAIL.get(), POSITION.get(), PHONE.get(), DETAILS.get()))
-            conn.commit()
-            cursor.execute("SELECT * FROM `contacts` ORDER BY `surname` ASC")
-            fetch = cursor.fetchall()
-            for data in fetch:
-                tree.insert('', 'end', values=(data))
-            cursor.close()
-            conn.close()
-            NAME.set("")
-            SURNAME.set("")
-            EMAIL.set("")
-            POSITION.set("")
-            PHONE.set("")
-            DETAILS.set("")
-        else:
-            tkMessageBox.showwarning('', 'Please Complete The Required Field', icon="warning")
+            def delete(self, ids):
+                with self.db() as conn:
+                    conn.executemany("DELETE FROM contacts WHERE mem_id = ?", [(i,) for i in ids])
 
-    def UpdateData():
-        if EMAIL.get():
-            tree.delete(*tree.get_children())
-            #conn = sqlite3.connect("contacts.db")
-            conn = sqlite3.connect("Config/dbo_bitpack.db")
-            cursor = conn.cursor()
-            cursor.execute("UPDATE `contacts` SET `name` = ?, `surname` = ?, `email` = ?, `position` = ?, `phone` = ?, `details` = ? WHERE `mem_id` = ?",
-                        (NAME.get(), SURNAME.get(), EMAIL.get(), POSITION.get(), PHONE.get(), DETAILS.get(), mem_id))
-            conn.commit()
-            cursor.execute("SELECT * FROM `contacts` ORDER BY `surname` ASC")
-            fetch = cursor.fetchall()
-            for data in fetch:
-                tree.insert('', 'end', values=(data))
-            cursor.close()
-            conn.close()
-            NAME.set("")
-            SURNAME.set("")
-            EMAIL.set("")
-            POSITION.set("")
-            PHONE.set("")
-            DETAILS.set("")
-        else:
-            tkMessageBox.showwarning('', 'Please Complete The Required Field', icon="warning")
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
 
-    def OnSelected(event):
-        global mem_id, UpdateWindow
-        curItem = tree.focus()
-        contents = (tree.item(curItem))
-        selecteditem = contents['values']
-        mem_id = selecteditem[0]
-        NAME.set(selecteditem[1])
-        SURNAME.set(selecteditem[2])
-        EMAIL.set(selecteditem[3])
-        POSITION.set(selecteditem[4])
-        PHONE.set(selecteditem[5])
-        DETAILS.set(selecteditem[6])
-        
-        UpdateWindow = Toplevel()
-        UpdateWindow.title("Update Contact")
-        width = 400
-        height = 300
-        x = (screen_width / 2 + 450) - (width / 2)
-        y = (screen_height / 2 + 20) - (height / 2)
-        #UpdateWindow.resizable(0, 0)
-        UpdateWindow.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
+        class ContactList:
+            def __init__(self):
+                self.rootcm = root = tk.Tk()
+                self.store = Store(DB_PATH)
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.contacts, self.rows = [], []
+                self.sort_key, self.sort_reverse = "surname", False
+                self.editor = None
+                root.title(TITLE)
+                width = min(900, root.winfo_screenwidth() - 40)
+                height = min(600, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(600, 380)            # resizable now (fixed 700 x 600 before)
+                root.configure(bg=FACE)
+                root.protocol("WM_DELETE_WINDOW", self.close)
+                self._make_icon()
+                self.create_title_bar()
+                self.create_widgets()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+                self.refresh()
+                self.search_entry.focus_set()
 
-        if 'NewWindow' in globals():
-            NewWindow.destroy()
+            # ----- frame -----------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((2, 1, 14, 15, BLACK), (3, 2, 13, 14, "#ffffc0"), (1, 3, 3, 4, BLACK),
+                                               (1, 7, 3, 8, BLACK), (1, 11, 3, 12, BLACK), (6, 4, 10, 8, NAVY),
+                                               (5, 9, 11, 12, NAVY)):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
 
-        # Frames and Labels for Update Window
-        FormTitle = Frame(UpdateWindow)
-        FormTitle.pack(side=TOP)
-        ContactForm = Frame(UpdateWindow)
-        ContactForm.pack(side=TOP, pady=10)
-        
-        lbl_title = Label(FormTitle, text="Updating Contacts", font=('arial', 16), bg="orange", width=300)
-        lbl_title.pack(fill=X)
+            def create_title_bar(self):
+                root = self.rootcm
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                title = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                title.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, title, icon)
+                self.caption_button(bar, "close", self.close).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
 
-        labels = ["Name", "Surname", "Email", "Job Title", "Phone", "Other Details"]
-        for idx, label in enumerate(labels):
-            Label(ContactForm, text=label, font=('arial', 14), bd=5).grid(row=idx, sticky=W)
-            Entry(ContactForm, textvariable=[NAME, SURNAME, EMAIL, POSITION, PHONE, DETAILS][idx], font=('arial', 14)).grid(row=idx, column=1)
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
 
-        Button(ContactForm, text="Update", width=50, command=UpdateData).grid(row=6, columnspan=2, pady=10)
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
 
-    def DeleteData():
-        if tree.selection():
-            result = tkMessageBox.askquestion('', 'Are you sure you want to delete this record?', icon="warning")
-            if result == 'yes':
-                curItem = tree.focus()
-                contents = (tree.item(curItem))
-                selecteditem = contents['values']
-                tree.delete(curItem)
-                #conn = sqlite3.connect("contacts.db")
-                conn = sqlite3.connect("Config/dbo_bitpack.db")
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM `contacts` WHERE `mem_id` = ?", (selecteditem[0],))
-                conn.commit()
-                cursor.close()
-                conn.close()
-        else:
-            tkMessageBox.showwarning('', 'Please Select Something First!', icon="warning")
+            def _enable_custom_frame(self):
+                self.rootcm.overrideredirect(True)
+                self._apply_taskbar_style()
 
-    def AddNewWindow():
-        global NewWindow
-        for var in [NAME, SURNAME, EMAIL, POSITION, PHONE, DETAILS]:
-            var.set("")
-            
-        NewWindow = Toplevel()
-        NewWindow.title("Add New Contact")
-        width = 400
-        height = 300
-        x = (screen_width / 2 - 455) - (width / 2)
-        y = (screen_height / 2 + 20) - (height / 2)
-        #NewWindow.resizable(0, 0)
-        NewWindow.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
+            def _apply_taskbar_style(self):
+                root = self.rootcm
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
 
-        if 'UpdateWindow' in globals():
-            UpdateWindow.destroy()
-        
-        # Frames and Labels for Add Window
-        FormTitle = Frame(NewWindow)
-        FormTitle.pack(side=TOP)
-        ContactForm = Frame(NewWindow)
-        ContactForm.pack(side=TOP, pady=10)
-        
-        lbl_title = Label(FormTitle, text="Adding New Contacts", font=('arial', 16), bg="orange", width=300)
-        lbl_title.pack(fill=X)
+            def _on_map(self, event):
+                root = self.rootcm
+                if event.widget is root and self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
 
-        labels = ["Name", "Surname", "Email", "Position", "Phone", "Other Details"]
-        for idx, label in enumerate(labels):
-            Label(ContactForm, text=label, font=('arial', 14), bd=5).grid(row=idx, sticky=W)
-            Entry(ContactForm, textvariable=[NAME, SURNAME, EMAIL, POSITION, PHONE, DETAILS][idx], font=('arial', 14)).grid(row=idx, column=1)
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.rootcm.overrideredirect(False)
+                self.rootcm.iconify()
 
-        Button(ContactForm, text="Save", width=50, command=SubmitData).grid(row=6, columnspan=2, pady=10)
+            def toggle_maximize(self):
+                root = self.rootcm
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
 
-    # ============================ GUI ELEMENTS =================================
-    Top = Frame(rootcm, width=500, bd=1, relief=SOLID)
-    Top.pack(side=TOP)
-    Mid = Frame(rootcm, width=500, bg="gray40")
-    Mid.pack(side=TOP)
-    MidLeft = Frame(Mid, width=100)
-    MidLeft.pack(side=LEFT, pady=10)
-    MidLeftPadding = Frame(Mid, width=370, bg="gray40")
-    MidLeftPadding.pack(side=LEFT)
-    MidRight = Frame(Mid, width=100)
-    MidRight.pack(side=RIGHT, pady=10)
-    TableMargin = Frame(rootcm, width=500)
-    TableMargin.pack(side=TOP)
+            def _caption_press(self, event):
+                self._drag = (event.x_root - self.rootcm.winfo_x(), event.y_root - self.rootcm.winfo_y())
 
-    lbl_title = Label(Top, text="Contact Management System", font=('arial', 16), bg="gray", width=500)
-    lbl_title.pack(fill=X)
+            def _caption_drag(self, event):
+                if self.custom_frame and not self.maximized:
+                    self.rootcm.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
 
-    btn_add = Button(MidLeft, text="+ ADD NEW", bg="lightgreen", command=AddNewWindow)
-    btn_add.pack()
+            def _grip_press(self, event):
+                root = self.rootcm
+                self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
 
-    btn_delete = Button(MidRight, text="DELETE", bg="red", command=DeleteData)
-    btn_delete.pack()
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.rootcm.geometry("%dx%d" % (max(600, width + event.x_root - x0), max(380, height + event.y_root - y0)))
 
-    # Scrollbar and Treeview
-    scrollbarx = Scrollbar(TableMargin, orient=HORIZONTAL)
-    scrollbary = Scrollbar(TableMargin, orient=VERTICAL)
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it. A click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
 
-    tree = ttk.Treeview(TableMargin, columns=("MemberID", "Name", "Surname", "Email", "Position", "Phone", "Details"),
-                        height=400, selectmode="extended", yscrollcommand=scrollbary.set, xscrollcommand=scrollbarx.set)
-    scrollbary.config(command=tree.yview)
-    scrollbary.pack(side=RIGHT, fill=Y)
-    scrollbarx.config(command=tree.xview)
-    scrollbarx.pack(side=BOTTOM, fill=X)
+            # ----- Windows 95 dialogs ---------------------------------------------------------------------
+            def button(self, parent, text, command, width=None, default=False):
+                widget = tk.Button(parent, text=text, command=command, font=FONT_B if default else FONT, bg=FACE,
+                                   fg=BLACK, activebackground=FACE, relief="raised", bd=2, padx=8, pady=1,
+                                   highlightthickness=1 if default else 0, highlightbackground=BLACK, takefocus=0)
+                if width:
+                    widget.config(width=width)
+                return widget
 
-    tree.heading('MemberID', text="MemberID", anchor=W)
-    tree.heading('Name', text="Name", anchor=W)
-    tree.heading('Surname', text="Surname", anchor=W)
-    tree.heading('Email', text="Email", anchor=W)
-    tree.heading('Position', text="Position", anchor=W)
-    tree.heading('Phone', text="Phone", anchor=W)
-    tree.heading('Details', text="Other Details", anchor=W)
+            def window(self, title):
+                root = self.rootcm
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                tk.Label(bar, image=self.icon, bg=NAVY).pack(side="left", padx=(2, 0))
+                label = tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B)
+                label.pack(side="left", padx=4)
+                win.close_button = self.caption_button(bar, "close", win.destroy)
+                win.close_button.pack(side="right", padx=2)
 
-    tree.column('#0', stretch=NO, minwidth=0, width=0)
-    tree.column('#1', stretch=NO, minwidth=0, width=80)
-    tree.column('#2', stretch=NO, minwidth=0, width=120)
-    tree.column('#3', stretch=NO, minwidth=0, width=120)
-    tree.column('#4', stretch=NO, minwidth=0, width=120)
-    tree.column('#5', stretch=NO, minwidth=0, width=120)
-    tree.column('#6', stretch=NO, minwidth=0, width=120)
-    tree.column('#7', stretch=NO, minwidth=0, width=150)
+                def press(event):
+                    win._drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
 
-    tree.pack()
-    tree.bind('<Double-Button-1>', OnSelected)
+                def drag(event):
+                    win.geometry("+%d+%d" % (event.x_root - win._drag[0], event.y_root - win._drag[1]))
+                for widget in (bar, label):
+                    widget.bind("<ButtonPress-1>", press)
+                    widget.bind("<B1-Motion>", drag)
+                return win
 
-    # ============================ INITIALIZATION =============================
-    if __name__ == '__main__':
-        Database()
-        rootcm.mainloop()
+            def show(self, win):
+                """Next to the main window (it was placed 450 px from the screen centre before)."""
+                root = self.rootcm
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                x = root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2)
+                y = root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)
+                x = max(0, min(x, root.winfo_screenwidth() - w))
+                y = max(0, min(y, root.winfo_screenheight() - h - 40))
+                win.geometry("+%d+%d" % (x, y))
+                win.lift()
+                win.focus_force()
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+                try:
+                    self.listbox.focus_set()
+                except tk.TclError:
+                    pass
+
+            def message(self, title, text, icon="info", buttons=("OK",), default=0):
+                win = self.window(title)
+                result = {"value": buttons[-1]}
+
+                def answer(value):
+                    result["value"] = value
+                    win.destroy()
+                win.close_button.config(command=lambda: answer(buttons[-1]))
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                picture = tk.Canvas(body, width=32, height=32, bg=FACE, highlightthickness=0)
+                if icon == "error":
+                    picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                    picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                    picture.create_line(22, 10, 10, 22, fill="white", width=3)
+                elif icon == "warning":
+                    picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=BLACK)
+                    picture.create_text(16, 19, text="!", fill=BLACK, font=("Times New Roman", 15, "bold"))
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=LIGHT, outline=BLACK)
+                    picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                        font=("Times New Roman", 16, "bold"))
+                picture.pack(side="left", anchor="n", padx=(0, 12))
+                tk.Label(body, text=text, bg=FACE, font=FONT, justify="left", wraplength=380).pack(side="left")
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                for index, label in enumerate(buttons):
+                    self.button(row, label, lambda v=label: answer(v), width=9, default=index == default).pack(
+                        side="left", padx=4)
+                win.bind("<Return>", lambda e: answer(buttons[default]))
+                win.bind("<Escape>", lambda e: answer(buttons[-1]))
+                self.show(win)
+                return result["value"]
+
+            def from_menu(self, action):
+                """Menu commands run after the menu has closed (a box opened inside the menu's click could keep the
+                clicks captured on Windows)."""
+                return lambda: self.rootcm.after(10, action)
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def create_widgets(self):
+                root = self.rootcm
+                bar = tk.Frame(root, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                m = menubutton("File")
+                m.add_command(label="New Contact...", accelerator="Ctrl+N", command=self.from_menu(self.add_contact))
+                m.add_separator()
+                m.add_command(label="Import from CSV...", command=self.from_menu(self.import_csv))
+                m.add_command(label="Export to CSV...", command=self.from_menu(self.export_csv))
+                m.add_separator()
+                m.add_command(label="Exit", command=self.from_menu(self.close))
+                m = menubutton("Edit")
+                m.add_command(label="Edit Contact...", accelerator="Enter", command=self.from_menu(self.edit_contact))
+                m.add_command(label="Delete", accelerator="Del", command=self.from_menu(self.delete_contacts))
+                m.add_separator()
+                m.add_command(label="Copy Email", command=self.from_menu(lambda: self.copy_field("email")))
+                m.add_command(label="Copy Phone", command=self.from_menu(lambda: self.copy_field("phone")))
+                m.add_command(label="Copy Contact", accelerator="Ctrl+C", command=self.from_menu(self.copy_contact))
+                m.add_separator()
+                m.add_command(label="Find", accelerator="Ctrl+F", command=self.from_menu(self.focus_search))
+                m = menubutton("Help")
+                m.add_command(label="About Contact List", command=self.from_menu(lambda: self.message(
+                    "About Contact List", "Contact List\n\nDouble-click or Enter edits a contact. Ctrl+click or "
+                    "Shift+click selects several (for Delete or Copy).\nThe search looks in every field.\n\n"
+                    "Export / Import CSV use ';' (Excel in Romanian opens them directly).")))
+
+                toolbar = tk.Frame(root, bg=FACE, bd=1, relief="raised")
+                toolbar.pack(side="top", fill="x")
+                self.button(toolbar, "+ Add New", self.add_contact, default=True).pack(side="left", padx=(3, 1), pady=3)
+                self.button(toolbar, "Edit", self.edit_contact).pack(side="left", padx=1, pady=3)
+                self.button(toolbar, "Delete", self.delete_contacts).pack(side="left", padx=1, pady=3)
+                tk.Frame(toolbar, bg=FACE, width=2, height=22, bd=1, relief="sunken").pack(side="left", padx=6)
+                tk.Label(toolbar, text="Search:", font=FONT, bg=FACE).pack(side="left")
+                self.search_var = tk.StringVar()
+                self.search_var.trace_add("write", lambda *a: self.fill_list())
+                self.search_entry = tk.Entry(toolbar, textvariable=self.search_var, font=FONT, bg=LIGHT, relief="sunken",
+                                             bd=2, highlightthickness=0, width=30)
+                self.search_entry.pack(side="left", padx=4)
+                self.search_entry.bind("<Down>", lambda e: (self.listbox.focus_set(), self._select(0), "break")[2])
+                self.search_entry.bind("<Return>", lambda e: (self.listbox.focus_set(), self._select(0), "break")[2])
+                self.button(toolbar, "Clear", lambda: self.search_var.set("")).pack(side="left")
+
+                status = tk.Frame(root, bg=FACE)
+                status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(status, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=LIGHT)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                self.count_label = tk.Label(status, text="", font=FONT, bg=FACE, relief="sunken", bd=1, width=24,
+                                            anchor="w", padx=4)
+                self.count_label.pack(side="right", padx=1)
+                self.status_label = tk.Label(status, text="Ready", font=FONT, bg=FACE, relief="sunken", bd=1, anchor="w",
+                                             padx=4)
+                self.status_label.pack(side="left", fill="x", expand=True, padx=1)
+
+                holder = tk.Frame(root, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=6, pady=6)
+                vbar = tk.Scrollbar(holder, orient="vertical")
+                vbar.pack(side="right", fill="y")
+                hbar = tk.Scrollbar(holder, orient="horizontal")
+                hbar.pack(side="bottom", fill="x")
+                self.char_w = tkfont.Font(font=LIST_FONT).measure("0")
+                self.header = tk.Listbox(holder, font=LIST_FONT, height=1, bg=FACE, fg=BLACK, bd=0, highlightthickness=0,
+                                         activestyle="none", selectbackground=FACE, selectforeground=BLACK,
+                                         exportselection=False, cursor="hand2", takefocus=0)
+                self.header.pack(side="top", fill="x")
+                self.listbox = tk.Listbox(holder, font=LIST_FONT, bg=LIGHT, fg=BLACK, bd=0, highlightthickness=0,
+                                          activestyle="none", selectbackground=NAVY, selectforeground=LIGHT,
+                                          exportselection=False, selectmode="extended", yscrollcommand=vbar.set)
+                self.listbox.pack(fill="both", expand=True)
+                vbar.config(command=self.listbox.yview)
+
+                def xview(*args):
+                    self.listbox.xview(*args)
+                    self.header.xview(*args)
+                hbar.config(command=xview)
+                self.listbox.config(xscrollcommand=lambda a, b: (hbar.set(a, b), self.header.xview_moveto(a)))
+                self.header.bind("<ButtonRelease-1>", self._header_click)
+                self.listbox.bind("<Double-Button-1>", self._double_click)
+                self.listbox.bind("<Return>", lambda e: self.edit_contact())
+                self.listbox.bind("<Delete>", lambda e: self.delete_contacts())
+                self.listbox.bind("<Button-3>", self._context_menu)
+                self.listbox.bind("<<ListboxSelect>>", lambda e: self.update_status())
+                self.listbox.bind("<Control-c>", lambda e: (self.copy_contact(), "break")[1])
+                for key, action in (("<Control-n>", self.add_contact), ("<Control-f>", self.focus_search)):
+                    root.bind(key, lambda e, a=action: (a(), "break")[1])
+
+            def focus_search(self):
+                self.search_entry.focus_set()
+                self.search_entry.select_range(0, "end")
+
+            # ----- the list ----------------------------------------------------------------------------------
+            def _line(self, values):
+                parts = []
+                for (_k, _t, width), value in zip(COLUMNS, values):
+                    text = str(value).replace("\n", " ")
+                    parts.append((text[:width - 2] + "~ ") if len(text) > width - 1 else text.ljust(width))
+                return " " + "".join(parts)
+
+            def _header_click(self, event):
+                self.header.selection_clear(0, "end")
+                position = self.char_w
+                x = event.x + self.header.xview()[0] * (len(self._line([""] * len(COLUMNS))) * self.char_w)
+                for key, _title, width in COLUMNS:
+                    if position <= x < position + width * self.char_w:
+                        self.sort_reverse = not self.sort_reverse if self.sort_key == key else False
+                        self.sort_key = key
+                        self.fill_list()
+                        return
+                    position += width * self.char_w
+
+            def refresh(self, select_id=None):
+                try:
+                    self.contacts = self.store.all()
+                except sqlite3.Error as exc:
+                    self.contacts = []
+                    self.status_label.config(text="The contacts could not be read: %s" % exc)
+                self.fill_list(select_id)
+
+            def fill_list(self, select_id=None):
+                keep = set(select_id if isinstance(select_id, (list, set)) else [select_id]) if select_id else \
+                    {c["mem_id"] for c in self.selected()}
+                term = self.search_var.get().strip().lower()
+                words = term.split()
+                rows = [c for c in self.contacts
+                        if all(any(w in c[k].lower() for k, _l in FIELDS) for w in words)]
+                # by surname, then name (empty ones last), or by the clicked column
+                rows.sort(key=lambda c: (c[self.sort_key] == "", c[self.sort_key].lower(), c["surname"].lower(),
+                                         c["name"].lower()), reverse=self.sort_reverse)
+                self.rows = rows
+                self.header.delete(0, "end")
+                self.header.insert("end", self._line([t + ((" v" if self.sort_reverse else " ^") if k == self.sort_key
+                                                           else "") for k, t, _w in COLUMNS]))
+                self.listbox.delete(0, "end")
+                for c in rows:
+                    self.listbox.insert("end", self._line([c[k] for k, _t, _w in COLUMNS]))
+                for index, c in enumerate(rows):
+                    if c["mem_id"] in keep:
+                        self.listbox.selection_set(index)
+                        self.listbox.see(index)
+                self.count_label.config(text="%d of %d contact(s)" % (len(rows), len(self.contacts)) if term else
+                                        "%d contact(s)" % len(self.contacts))
+                self.update_status()
+
+            def _select(self, index):
+                if self.rows:
+                    self.listbox.selection_clear(0, "end")
+                    self.listbox.selection_set(index)
+                    self.listbox.activate(index)
+                    self.listbox.see(index)
+                    self.update_status()
+
+            def selected(self):
+                if not hasattr(self, "listbox"):
+                    return []
+                return [self.rows[i] for i in self.listbox.curselection() if i < len(self.rows)]
+
+            def update_status(self):
+                picked = self.selected()
+                if len(picked) == 1:
+                    c = picked[0]
+                    bits = [x for x in ("%s %s" % (c["name"], c["surname"]), c["phone"], c["email"]) if x.strip()]
+                    self.status_label.config(text="   ".join(bits))
+                elif picked:
+                    self.status_label.config(text="%d contacts selected" % len(picked))
+                else:
+                    self.status_label.config(text="Ready")
+
+            def _double_click(self, event):
+                """Only on a contact (a click on empty space or on the header gave an error before)."""
+                index = self.listbox.nearest(event.y)
+                bbox = self.listbox.bbox(index) if index >= 0 else None
+                if bbox and bbox[1] <= event.y <= bbox[1] + bbox[3]:
+                    self._select(index)
+                    self.edit_contact()
+
+            def _context_menu(self, event):
+                index = self.listbox.nearest(event.y)
+                if index >= 0 and index not in self.listbox.curselection():
+                    self._select(index)
+                menu = tk.Menu(self.rootcm, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                menu.add_command(label="Edit...", command=self.from_menu(self.edit_contact))
+                menu.add_command(label="Delete", command=self.from_menu(self.delete_contacts))
+                menu.add_separator()
+                menu.add_command(label="Copy Email", command=lambda: self.copy_field("email"))
+                menu.add_command(label="Copy Phone", command=lambda: self.copy_field("phone"))
+                menu.add_command(label="Copy Contact", command=self.copy_contact)
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    menu.grab_release()
+
+            # ----- the form ----------------------------------------------------------------------------------
+            def contact_form(self, title, contact=None):
+                """One form for Add and Edit; only one at a time (two windows could be open before)."""
+                if self.editor is not None:
+                    try:
+                        self.editor.lift()
+                        return None
+                    except tk.TclError:
+                        self.editor = None
+                contact = contact or {k: "" for k, _l in FIELDS}
+                win = self.editor = self.window(title)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(padx=14, pady=(10, 4))
+                entries = {}
+                for row, (key, label) in enumerate(FIELDS):
+                    tk.Label(body, text=label + ":", font=FONT, bg=FACE).grid(row=row, column=0, sticky="nw", pady=3)
+                    if key == "details":
+                        holder = tk.Frame(body, bg=LIGHT, bd=2, relief="sunken")
+                        holder.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
+                        widget = tk.Text(holder, font=FONT, width=42, height=4, bd=0, highlightthickness=0, wrap="word",
+                                         undo=True)
+                        widget.pack(fill="both", expand=True)
+                        widget.insert("1.0", contact[key])
+                        widget.bind("<Tab>", lambda e: (e.widget.tk_focusNext().focus_set(), "break")[1])
+                    else:
+                        widget = tk.Entry(body, font=FONT, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0, width=44)
+                        widget.insert(0, contact[key])                  # text, so 0722... keeps its 0
+                        widget.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
+                    entries[key] = widget
+                note = tk.Label(win, text="Name or Surname is required; the rest is optional.", font=FONT, bg=FACE,
+                                fg=SHADOW)
+                note.pack()
+                error = tk.Label(win, text="", font=FONT, bg=FACE, fg="#c00000")
+                error.pack()
+                result = {}
+
+                def values():
+                    out = {}
+                    for key, widget in entries.items():
+                        out[key] = (widget.get("1.0", "end-1c") if isinstance(widget, tk.Text) else widget.get()).strip()
+                    return out
+
+                def save():
+                    data = values()
+                    # Name or Surname is enough (all six fields were required to add a contact before)
+                    if not data["name"] and not data["surname"]:
+                        error.config(text="Enter a Name or a Surname.")
+                        entries["name"].focus_set()
+                        return
+                    if data["email"] and not EMAIL_RE.match(data["email"]):
+                        error.config(text="The email address does not look right (name@example.com).")
+                        entries["email"].focus_set()
+                        return
+                    if data["phone"] and not re.match(r"^[0-9+()./ -]{3,}$", data["phone"]):
+                        error.config(text="The phone may contain digits, spaces and + ( ) - . / only.")
+                        entries["phone"].focus_set()
+                        return
+                    result.update(data)
+                    win.destroy()
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                self.button(row, "Save", save, width=10, default=True).pack(side="left", padx=4)
+                self.button(row, "Cancel", win.destroy, width=10).pack(side="left", padx=4)
+                win.bind("<Return>", lambda e: None if isinstance(e.widget, tk.Text) else save())
+                win.bind("<Escape>", lambda e: win.destroy())
+                win.bind("<Destroy>", lambda e: setattr(self, "editor", None) if e.widget is win else None, add="+")
+                entries["name"].focus_set()
+                self.show(win)
+                return result or None
+
+            def add_contact(self):
+                data = self.contact_form("Add New Contact")
+                if data:
+                    new_id = self.store.save(data)
+                    self.search_var.set("")
+                    self.refresh(select_id=new_id)
+                    self.status_label.config(text="Added: %s %s" % (data["name"], data["surname"]))
+
+            def edit_contact(self):
+                picked = self.selected()
+                if not picked:
+                    self.message("Edit Contact", "Select a contact first.", "warning")
+                    return
+                contact = picked[0]
+                data = self.contact_form("Edit Contact - %s %s" % (contact["name"], contact["surname"]), contact)
+                if data:
+                    self.store.save(data, contact["mem_id"])       # the window closes after saving (it stayed before)
+                    self.refresh(select_id=contact["mem_id"])
+                    self.status_label.config(text="Saved: %s %s" % (data["name"], data["surname"]))
+
+            def delete_contacts(self):
+                """Every selected contact (only the one with the focus was deleted before)."""
+                picked = self.selected()
+                if not picked:
+                    self.message("Delete", "Please select something first!", "warning")
+                    return
+                names = ", ".join(("%s %s" % (c["name"], c["surname"])).strip() for c in picked[:5])
+                text = ("Delete this contact?\n\n%s" % names if len(picked) == 1 else
+                        "Delete these %d contacts?\n\n%s%s" % (len(picked), names, " ..." if len(picked) > 5 else ""))
+                if self.message("Confirm Delete", text, "warning", ("Yes", "No"), default=1) == "Yes":
+                    self.store.delete([c["mem_id"] for c in picked])
+                    self.refresh()
+                    self.status_label.config(text="%d contact(s) deleted" % len(picked))
+
+            # ----- copy, export, import ----------------------------------------------------------------------
+            def _copy(self, text, what):
+                self.rootcm.clipboard_clear()
+                self.rootcm.clipboard_append(text)
+                self.status_label.config(text="%s copied to the clipboard" % what)
+
+            def copy_field(self, key):
+                values = [c[key] for c in self.selected() if c[key]]
+                if values:
+                    self._copy("; ".join(values) if key == "email" else "\n".join(values),
+                               "Email" if key == "email" else "Phone")
+
+            def copy_contact(self):
+                blocks = []
+                for c in self.selected():
+                    lines = [("%s %s" % (c["name"], c["surname"])).strip()]
+                    lines += [c[k] for k in ("position", "phone", "email") if c[k]]
+                    if c["details"]:
+                        lines.append(c["details"])
+                    blocks.append("\n".join(lines))
+                if blocks:
+                    self._copy("\n\n".join(blocks), "Contact" if len(blocks) == 1 else "%d contacts" % len(blocks))
+
+            def export_csv(self):
+                rows = self.selected() if len(self.selected()) > 1 else self.rows
+                path = filedialog.asksaveasfilename(parent=self.rootcm, defaultextension=".csv", initialfile="contacts.csv",
+                                                    filetypes=[("CSV files", "*.csv")])
+                if not path:
+                    return
+                try:
+                    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+                        writer = csv.writer(fh, delimiter=";")
+                        writer.writerow([label for _k, label in FIELDS])
+                        for c in rows:
+                            # ="0722..." keeps the leading 0 when Excel opens the file
+                            writer.writerow([('="%s"' % c[k]) if k == "phone" and c[k].startswith("0") else c[k]
+                                             for k, _l in FIELDS])
+                except OSError as exc:
+                    self.message("Export", "Could not save:\n%s" % exc, "error")
+                    return
+                self.status_label.config(text="Exported %d contact(s) to %s" % (len(rows), path))
+
+            def import_csv(self):
+                path = filedialog.askopenfilename(parent=self.rootcm, filetypes=[("CSV files", "*.csv"),
+                                                                                ("All files", "*.*")])
+                if not path:
+                    return
+                try:
+                    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+                        sample = fh.read(4096)
+                        fh.seek(0)
+                        dialect = csv.Sniffer().sniff(sample, delimiters=";,\t") if sample else csv.excel
+                        reader = csv.reader(fh, dialect)
+                        header = [h.strip().lower() for h in next(reader, [])]
+                        names = {"name": "name", "first name": "name", "prenume": "name", "surname": "surname",
+                                 "last name": "surname", "nume": "surname", "email": "email", "e-mail": "email",
+                                 "job title": "position", "position": "position", "functie": "position",
+                                 "phone": "phone", "telefon": "phone", "other details": "details", "details": "details"}
+                        columns = [names.get(h) for h in header]
+                        if "name" not in columns and "surname" not in columns:
+                            self.message("Import", "The first row must name the columns (Name, Surname, Email, Phone, ...).",
+                                         "warning")
+                            return
+                        added = 0
+                        existing = {(c["name"].lower(), c["surname"].lower(), c["email"].lower()) for c in self.contacts}
+                        for row in reader:
+                            data = {k: "" for k, _l in FIELDS}
+                            for key, value in zip(columns, row):
+                                if key:
+                                    value = value.strip()
+                                    if value.startswith('="') and value.endswith('"'):
+                                        value = value[2:-1]
+                                    data[key] = value
+                            if not data["name"] and not data["surname"]:
+                                continue
+                            if (data["name"].lower(), data["surname"].lower(), data["email"].lower()) in existing:
+                                continue                                   # already in the list
+                            self.store.save(data)
+                            added += 1
+                except (OSError, csv.Error, UnicodeDecodeError) as exc:
+                    self.message("Import", "Could not read the file:\n%s" % exc, "error")
+                    return
+                self.refresh()
+                self.message("Import", "%d contact(s) imported (the ones already in the list were skipped)." % added)
+
+            def close(self):
+                self.rootcm.destroy()
+
+        app = ContactList()
+        app.rootcm.mainloop()
+        return app
+
+    contact_list_95()
 
 if pingalivevar == 5566:
     import sqlite3, os as _os
@@ -104394,814 +104967,1416 @@ if commandervar == 88888888:
             # Rularea buclei principale
             validation.mainloop()
 
-    class RetroFileManagerApp:
-        def __init__(self, rootcomm):
-            self.rootcomm = rootcomm
-            self.rootcomm.title("Commander - File Manager")
-            self.rootcomm.geometry("1000x600")
-            
-            # Definim culorile Windows 95
-            self.bg_color = "#C0C0C0"  # Gri deschis specific Windows 95
-            self.text_color = "#000000"  # Negru
-            self.button_color = "#C0C0C0"  # Gri pentru butoane
-            self.highlight_color = "#000080"  # Albastru închis pentru selecție
-            self.button_shadow = "#808080"  # Gri închis pentru umbră butoane
-            self.button_highlight = "#FFFFFF"  # Alb pentru highlight butoane
-            
-            # Configurăm rootcomm
-            self.rootcomm.configure(bg=self.bg_color)
-            
-            # Creăm un stil pentru elemente
-            self.create_retro_style()
-            
-            # Creăm frame-ul principal
-            self.main_frame = tk.Frame(rootcomm, bg=self.bg_color, relief="raised", bd=2)
-            self.main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            # Bara de titlu cu logo Windows 95
-            self.title_bar = tk.Frame(self.main_frame, bg="#000080", height=20)
-            self.title_bar.pack(fill=tk.X)
-            self.title_label = tk.Label(self.title_bar, text="RetroCommander - File Manager", 
-                                        bg="#000080", fg="white", font=("Arial", 10, "bold"))
-            self.title_label.pack(side=tk.LEFT, padx=5)
-            
-            # Bara de meniu
-            self.menu_bar = tk.Frame(self.main_frame, bg=self.bg_color, relief="raised", bd=1)
-            self.menu_bar.pack(fill=tk.X)
-            
-            # Butoane de meniu
-            menu_buttons = ["File", "Edit", "View", "Options", "Help"]
-            for btn_text in menu_buttons:
-                btn = tk.Button(self.menu_bar, text=btn_text, bg=self.bg_color, relief="flat",
-                                borderwidth=1, font=("Arial", 9), pady=1)
-                btn.pack(side=tk.LEFT, padx=2)
-            
-            # Creăm panoul împărțit
-            self.paned_window = tk.PanedWindow(self.main_frame, orient=tk.HORIZONTAL, 
-                                               bg=self.bg_color, sashwidth=4, relief="sunken")
-            self.paned_window.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            # Panoul stâng
-            self.left_frame = tk.Frame(self.paned_window, bg=self.bg_color, relief="sunken", bd=2)
-            self.paned_window.add(self.left_frame, width=400)
-            
-            # Panoul drept
-            self.right_frame = tk.Frame(self.paned_window, bg=self.bg_color, relief="sunken", bd=2)
-            self.paned_window.add(self.right_frame, width=400)
-            
-            # Configurăm fiecare panou
-            self.setup_panel(self.left_frame, "left")
-            self.setup_panel(self.right_frame, "right")
-            
-            # Căile curente pentru fiecare panou
-            self.paths = {
-                "left": os.path.expanduser("~"),
-                "right": os.path.expanduser("~")
-            }
-            
-            # Panoul activ (implicit: stâng)
-            self.active_panel = "left"
-            self.highlight_active_panel()
-            
-            # Bara de instrumente de jos cu scurtături
-            self.setup_toolbar()
-            
-            # Asocieri de taste
-            self.setup_keybindings()
-            
-            # Încărcarea inițială a directoarelor
-            self.refresh_panels()
-        
-        def create_retro_style(self):
-            # Stilizare pentru Windows 95
-            style = ttk.Style()
-            style.theme_use('clam')
-            
-            # Stilizare pentru Treeview
-            style.configure("Treeview", 
-                            background="white",
-                            foreground="black",
-                            fieldbackground="white",
-                            borderwidth=1)
-            style.map("Treeview", 
-                     background=[('selected', '#000080')])
-            
-            # Stilizare pentru entrye-uri
-            style.configure("TEntry", 
-                            fieldbackground="white", 
-                            borderwidth=2)
-            
-            # Stilizare pentru butoane
-            style.configure("Retro.TButton", 
-                        font=("Arial", 9, "bold"),
-                        borderwidth=2,
-                        relief="raised")
-            
-            # Stilizare pentru frame-uri
-            style.configure("TFrame", background=self.bg_color)
-        
-        def setup_panel(self, frame, side):
-            # Frame pentru calea curentă
-            path_frame = tk.Frame(frame, bg=self.bg_color)
-            path_frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            # Label pentru cale
-            path_label = tk.Label(path_frame, text="Path:", bg=self.bg_color)
-            path_label.pack(side=tk.LEFT, padx=5)
-            
-            # Entry pentru cale
-            self.path_vars = self.path_vars if hasattr(self, 'path_vars') else {}
-            self.path_vars[side] = tk.StringVar()
-            
-            path_entry = tk.Entry(path_frame, textvariable=self.path_vars[side], 
-                                  relief="sunken", bd=2, bg="white")
-            path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-            path_entry.bind("<Return>", lambda e, s=side: self.navigate_to_path(s))
-            
-            # Buton Go
-            go_button = tk.Button(path_frame, text="Go", bg=self.button_color,
-                                 relief="raised", bd=2, command=lambda s=side: self.navigate_to_path(s))
-            go_button.pack(side=tk.RIGHT, padx=5)
-            
-            # Frame pentru Treeview
-            self.tree_frames = self.tree_frames if hasattr(self, 'tree_frames') else {}
-            self.tree_frames[side] = tk.Frame(frame, bg=self.bg_color, relief="sunken", bd=2)
-            self.tree_frames[side].pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            
-            # Treeview cu scrollbar
-            self.trees = self.trees if hasattr(self, 'trees') else {}
-            
-            # Scrollbar
-            tree_scroll = tk.Scrollbar(self.tree_frames[side], relief="raised", bd=2)
-            tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            # Treeview pentru fișiere
-            self.trees[side] = ttk.Treeview(self.tree_frames[side], 
-                                           columns=("name", "size", "modified"),
-                                           show="headings",
-                                           yscrollcommand=tree_scroll.set)
-            
-            tree_scroll.config(command=self.trees[side].yview)
-            
-            # Configurăm coloanele
-            self.trees[side].heading("name", text="Name")
-            self.trees[side].heading("size", text="Size")
-            self.trees[side].heading("modified", text="Modified")
-            
-            self.trees[side].column("name", width=200)
-            self.trees[side].column("size", width=100)
-            self.trees[side].column("modified", width=150)
-            
-            self.trees[side].pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            # Asociem evenimente
-            self.trees[side].bind("<Double-1>", lambda e, s=side: self.on_item_double_click(s))
-            self.trees[side].bind("<ButtonRelease-1>", lambda e, s=side: self.on_item_click(s))
-        
-        def setup_toolbar(self):
-            # Frame pentru bara de instrumente
-            toolbar_frame = tk.Frame(self.main_frame, bg=self.bg_color, relief="raised", bd=2)
-            toolbar_frame.pack(fill=tk.X, pady=5)
-            
-            # Butoane pentru funcții
-            buttons = [
-                ("F1 Help", self.show_help),
-                ("F2 Rename", self.rename_item),
-                ("F3 View", self.view_item),
-                ("F4 Edit", self.edit_item),
-                ("F5 Copy", self.copy_item),
-                ("F6 Move", self.move_item),
-                ("F7 MkDir", self.make_directory),
-                ("F8 Delete", self.delete_item),
-                ("F10 Quit", self.quit_app)
-            ]
-            
-            # Creăm butoanele cu stil Windows 95
-            for text, command in buttons:
-                btn = tk.Button(toolbar_frame, text=text, command=command,
-                               bg=self.button_color, bd=3, relief="raised",
-                               font=("Arial", 9, "bold"), width=8)
-                btn.pack(side=tk.LEFT, padx=3, pady=3)
-        
-        def setup_keybindings(self):
-            self.rootcomm.bind("<F1>", lambda e: self.show_help())
-            self.rootcomm.bind("<F2>", lambda e: self.rename_item())
-            self.rootcomm.bind("<F3>", lambda e: self.view_item())
-            self.rootcomm.bind("<F4>", lambda e: self.edit_item())
-            self.rootcomm.bind("<F5>", lambda e: self.copy_item())
-            self.rootcomm.bind("<F6>", lambda e: self.move_item())
-            self.rootcomm.bind("<F7>", lambda e: self.make_directory())
-            self.rootcomm.bind("<F8>", lambda e: self.delete_item())
-            self.rootcomm.bind("<F10>", lambda e: self.quit_app())
-            self.rootcomm.bind("<Tab>", lambda e: self.toggle_active_panel())
-        
-        def toggle_active_panel(self):
-            self.active_panel = "right" if self.active_panel == "left" else "left"
-            self.highlight_active_panel()
-        
-        def highlight_active_panel(self):
-            for side in ["left", "right"]:
-                if side == self.active_panel:
-                    self.tree_frames[side].configure(relief="groove", bd=3)
-                else:
-                    self.tree_frames[side].configure(relief="sunken", bd=2)
-        
-        def navigate_to_path(self, side):
-            path = self.path_vars[side].get()
-            if os.path.exists(path) and os.path.isdir(path):
-                self.paths[side] = path
-                self.refresh_panel(side)
-            else:
-                self.show_error_dialog("Error", f"Invalid path: {path}")
-        
-        def load_directory(self, side, path):
-            self.trees[side].delete(*self.trees[side].get_children())
-            
-            # Adăugăm elementul pentru directorul părinte
-            if path != os.path.dirname(path):
-                self.trees[side].insert("", "end", values=("..", "", ""), tags=("parent",))
-            
-            try:
-                items = os.listdir(path)
-                
-                # Adăugăm mai întâi directoarele
-                for item in sorted(items):
-                    item_path = os.path.join(path, item)
-                    if os.path.isdir(item_path):
-                        size = ""
-                        try:
-                            modified = os.path.getmtime(item_path)
-                            modified_str = tk.Tcl().call('clock', 'format', int(modified), '-format', '%Y-%m-%d %H:%M')
-                        except:
-                            modified_str = ""
-                        
-                        self.trees[side].insert("", "end", values=(item + "/", size, modified_str), tags=("dir",))
-                
-                # Apoi adăugăm fișierele
-                for item in sorted(items):
-                    item_path = os.path.join(path, item)
-                    if os.path.isfile(item_path):
-                        try:
-                            size = self.format_size(os.path.getsize(item_path))
-                            modified = os.path.getmtime(item_path)
-                            modified_str = tk.Tcl().call('clock', 'format', int(modified), '-format', '%Y-%m-%d %H:%M')
-                        except:
-                            size = ""
-                            modified_str = ""
-                        
-                        self.trees[side].insert("", "end", values=(item, size, modified_str), tags=("file",))
-                        
-            except PermissionError:
-                self.show_error_dialog("Error", f"Permission denied: {path}")
-            except Exception as e:
-                self.show_error_dialog("Error", f"Error loading directory: {str(e)}")
-        
-        def show_error_dialog(self, title, message):
-            dialog = tk.Toplevel(self.rootcomm)
-            dialog.title(title)
-            dialog.geometry("300x150")
-            dialog.configure(bg=self.bg_color)
-            dialog.transient(self.rootcomm)
-            dialog.grab_set()
-            
-            icon_label = tk.Label(dialog, text="X", font=("Arial", 24), fg="red", bg=self.bg_color)
-            icon_label.pack(pady=(10, 5))
-            
-            message_label = tk.Label(dialog, text=message, wraplength=250, bg=self.bg_color)
-            message_label.pack(pady=5)
-            
-            btn_frame = tk.Frame(dialog, bg=self.bg_color)
-            btn_frame.pack(pady=10)
-            
-            ok_button = tk.Button(btn_frame, text="OK", width=10, bg=self.button_color,
-                                 relief="raised", bd=3, command=dialog.destroy)
-            ok_button.pack()
-        
-        def format_size(self, size):
-            for unit in ["B", "KB", "MB", "GB", "TB"]:
-                if size < 1024.0:
-                    return f"{size:.2f} {unit}"
+    def commander_95():
+        """Commander - File Manager (Windows 95 look, two panels in the style of Norton / Total Commander)."""
+        import os
+        import re
+        import time
+        import queue
+        import shutil
+        import fnmatch
+        import sqlite3
+        import threading
+        import subprocess
+        import tkinter as tk
+        import tkinter.font as tkfont
+
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        MARKED = "#d00000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        LIST_FONT = ("Courier New", 9)
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Commander - File Manager"
+        DB_PATH = "Config/dbo_bitpack.db"
+        VIEW_LIMIT = 4 * 1024 * 1024
+        COLUMNS = (("Name", 34, "name"), ("Ext", 6, "ext"), ("Size", 12, "size"), ("Date", 17, "date"))
+
+        def fmt_size(size):
+            if size is None:
+                return ""
+            if size < 1024:
+                return "{:,} B".format(size)
+            for unit in ("KB", "MB", "GB", "TB"):
                 size /= 1024.0
-            return f"{size:.2f} TB"
-        
-        def refresh_panel(self, side):
-            self.path_vars[side].set(self.paths[side])
-            self.load_directory(side, self.paths[side])
-        
-        def refresh_panels(self):
-            for side in ["left", "right"]:
-                self.refresh_panel(side)
-        
-        def on_item_double_click(self, side):
-            selected = self.trees[side].focus()
-            if not selected:
-                return
-                
-            values = self.trees[side].item(selected, "values")
-            if not values:
-                return
-                
-            name = values[0]
-            
-            if name == "..":
-                # Mergem un director mai sus
-                self.paths[side] = os.path.dirname(self.paths[side])
-            elif name.endswith("/"):
-                # Intrăm în director
-                name = name[:-1]  # Eliminăm slash-ul final
-                new_path = os.path.join(self.paths[side], name)
-                if os.path.exists(new_path) and os.path.isdir(new_path):
-                    self.paths[side] = new_path
-            else:
-                # Deschidem fișierul (în acest caz doar vizualizare)
-                self.view_item()
-                return
-                
-            self.refresh_panel(side)
-        
-        def on_item_click(self, side):
-            self.active_panel = side
-            self.highlight_active_panel()
-        
-        def get_selected_item(self):
-            side = self.active_panel
-            selected = self.trees[side].focus()
-            if not selected:
-                return None, None
-                
-            values = self.trees[side].item(selected, "values")
-            if not values:
-                return None, None
-                
-            name = values[0]
-            if name == "..":
-                return None, None
-                
-            if name.endswith("/"):
-                name = name[:-1]  # Eliminăm slash-ul final
-                
-            path = os.path.join(self.paths[side], name)
-            return name, path
-        
-        def get_inactive_panel_path(self):
-            inactive = "right" if self.active_panel == "left" else "left"
-            return self.paths[inactive]
-        
-        # Funcții pentru acțiuni
-        def show_help(self):
-            help_text = """
-            RetroCommander File Manager Help
-            --------------------------------
-            F1: Help - Show this help screen
-            F2: Rename - Rename selected file/folder
-            F3: View - View selected file
-            F4: Edit - Edit selected file
-            F5: Copy - Copy to other panel
-            F6: Move - Move to other panel
-            F7: MkDir - Create new directory
-            F8: Delete - Delete selected file/folder
-            F10: Quit - Exit application
-            Tab: Switch active panel
-            """
-            
-            # Creăm o fereastră de ajutor în stil Windows 95
-            help_window = tk.Toplevel(self.rootcomm)
-            help_window.title("Help")
-            help_window.geometry("400x350")
-            help_window.configure(bg=self.bg_color)
-            help_window.transient(self.rootcomm)
-            
-            # Titlu
-            title_frame = tk.Frame(help_window, bg="#000080", height=20)
-            title_frame.pack(fill=tk.X)
-            title_label = tk.Label(title_frame, text="RetroCommander Help", 
-                                  bg="#000080", fg="white", font=("Arial", 10, "bold"))
-            title_label.pack(side=tk.LEFT, padx=5)
-            
-            # Conținut
-            content_frame = tk.Frame(help_window, bg=self.bg_color, relief="sunken", bd=2)
-            content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            help_label = tk.Label(content_frame, text=help_text, justify=tk.LEFT, 
-                                 bg="white", relief="sunken", bd=2, padx=10, pady=10)
-            help_label.pack(fill=tk.BOTH, expand=True)
-            
-            # Buton OK
-            button_frame = tk.Frame(help_window, bg=self.bg_color)
-            button_frame.pack(pady=10)
-            
-            ok_button = tk.Button(button_frame, text="OK", width=10, bg=self.button_color,
-                                 relief="raised", bd=3, command=help_window.destroy)
-            ok_button.pack()
-        
-        def rename_item(self):
-            name, path = self.get_selected_item()
-            if not path:
-                return
-            
-            # Dialog pentru redenumire în stil Windows 95
-            rename_dialog = tk.Toplevel(self.rootcomm)
-            rename_dialog.title("Rename")
-            rename_dialog.geometry("300x120")
-            rename_dialog.configure(bg=self.bg_color)
-            rename_dialog.transient(self.rootcomm)
-            rename_dialog.grab_set()
-            
-            tk.Label(rename_dialog, text="Enter new name:", bg=self.bg_color).pack(pady=(10, 5))
-            
-            new_name_var = tk.StringVar(value=name)
-            entry = tk.Entry(rename_dialog, textvariable=new_name_var, width=40, 
-                            relief="sunken", bd=2, bg="white")
-            entry.pack(padx=10, pady=5)
-            entry.select_range(0, tk.END)
-            entry.focus_set()
-            
-            button_frame = tk.Frame(rename_dialog, bg=self.bg_color)
-            button_frame.pack(pady=10)
-            
-            def do_rename():
-                new_name = new_name_var.get()
-                if new_name and new_name != name:
-                    try:
-                        new_path = os.path.join(os.path.dirname(path), new_name)
-                        os.rename(path, new_path)
-                        self.refresh_panels()
-                        rename_dialog.destroy()
-                    except Exception as e:
-                        self.show_error_dialog("Error", f"Cannot rename: {str(e)}")
-                else:
-                    rename_dialog.destroy()
-            
-            ok_button = tk.Button(button_frame, text="OK", width=10, bg=self.button_color,
-                                 relief="raised", bd=3, command=do_rename)
-            ok_button.pack(side=tk.LEFT, padx=5)
-            
-            cancel_button = tk.Button(button_frame, text="Cancel", width=10, bg=self.button_color,
-                                     relief="raised", bd=3, command=rename_dialog.destroy)
-            cancel_button.pack(side=tk.LEFT, padx=5)
-            
-            entry.bind("<Return>", lambda e: do_rename())
-        
-        def view_item(self):
-            name, path = self.get_selected_item()
-            if not path or not os.path.isfile(path):
-                return
-                
+                if size < 1024 or unit == "TB":
+                    return ("%.0f %s" if size >= 100 else "%.1f %s") % (size, unit)
+
+        def norm(path):
+            return os.path.normcase(os.path.abspath(path))
+
+        def drives():
+            if not IS_WINDOWS:
+                return ["/"]
             try:
-                # Fereastră simplă pentru vizualizare fișiere în stil Windows 95
-                viewer = tk.Toplevel(self.rootcomm)
-                viewer.title(f"View: {name}")
-                viewer.geometry("700x500")
-                viewer.configure(bg=self.bg_color)
-                
-                # Bara de titlu
-                title_frame = tk.Frame(viewer, bg="#000080", height=20)
-                title_frame.pack(fill=tk.X)
-                title_label = tk.Label(title_frame, text=f"View: {name}", 
-                                      bg="#000080", fg="white", font=("Arial", 10, "bold"))
-                title_label.pack(side=tk.LEFT, padx=5)
-                
-                # Conținut
-                content_frame = tk.Frame(viewer, bg=self.bg_color, padx=5, pady=5)
-                content_frame.pack(fill=tk.BOTH, expand=True)
-                
-                text = tk.Text(content_frame, wrap=tk.WORD, bg="white", fg="black", 
-                              relief="sunken", bd=2, font=("Courier", 10))
-                scroll = tk.Scrollbar(content_frame, command=text.yview, relief="raised", bd=2)
-                text.configure(yscrollcommand=scroll.set)
-                
-                text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                scroll.pack(side=tk.RIGHT, fill=tk.Y)
-                
+                import ctypes
+                mask = ctypes.windll.kernel32.GetLogicalDrives()   # no access to A: (it is not touched)
+                return ["%s:\\" % chr(65 + i) for i in range(26) if mask & (1 << i)]
+            except Exception:
+                return ["C:\\"]
+
+        def is_hidden(path, name):
+            if name.startswith(".") and name not in (".", ".."):
+                return True
+            if IS_WINDOWS:
                 try:
-                    with open(path, 'r') as f:
-                        content = f.read()
-                    text.insert(tk.END, content)
-                    text.configure(state='disabled')
-                except UnicodeDecodeError:
-                    text.insert(tk.END, "Cannot display binary file content.")
-                    text.configure(state='disabled')
-                    
-                # Buton de închidere
-                button_frame = tk.Frame(viewer, bg=self.bg_color)
-                button_frame.pack(pady=5)
-                
-                close_button = tk.Button(button_frame, text="Close", width=10, bg=self.button_color,
-                                        relief="raised", bd=3, command=viewer.destroy)
-                close_button.pack()
-                    
-            except Exception as e:
-                self.show_error_dialog("Error", f"Cannot view file: {str(e)}")
-        
-        def edit_item(self):
-            name, path = self.get_selected_item()
-            if not path or not os.path.isfile(path):
-                return
-                
+                    return bool(os.stat(path, follow_symlinks=False).st_file_attributes & 6)   # hidden or system
+                except (OSError, AttributeError):
+                    return False
+            return False
+
+        def read_text(path):
+            """(text, encoding) or (None, None) for a binary file. UTF-8 / UTF-16 / ANSI are kept as they were."""
+            with open(path, "rb") as fh:
+                raw = fh.read(VIEW_LIMIT + 1)
+            if raw.startswith(b"\xef\xbb\xbf"):
+                return raw[3:].decode("utf-8", errors="replace"), "utf-8-sig"
+            if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+                return raw.decode("utf-16", errors="replace"), "utf-16"
+            if b"\x00" in raw[:8192]:
+                return None, None
             try:
-                # Fereastră simplă pentru editare fișiere în stil Windows 95
-                editor = tk.Toplevel(self.rootcomm)
-                editor.title(f"Edit: {name}")
-                editor.geometry("700x500")
-                editor.configure(bg=self.bg_color)
-                
-                # Bara de titlu
-                title_frame = tk.Frame(editor, bg="#000080", height=20)
-                title_frame.pack(fill=tk.X)
-                title_label = tk.Label(title_frame, text=f"Edit: {name}", 
-                                      bg="#000080", fg="white", font=("Arial", 10, "bold"))
-                title_label.pack(side=tk.LEFT, padx=5)
-                
-                # Conținut
-                content_frame = tk.Frame(editor, bg=self.bg_color, padx=5, pady=5)
-                content_frame.pack(fill=tk.BOTH, expand=True)
-                
-                text = tk.Text(content_frame, wrap=tk.WORD, bg="white", fg="black", 
-                              relief="sunken", bd=2, font=("Courier", 10))
-                scroll = tk.Scrollbar(content_frame, command=text.yview, relief="raised", bd=2)
-                text.configure(yscrollcommand=scroll.set)
-                
-                text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-                scroll.pack(side=tk.RIGHT, fill=tk.Y)
-                
+                return raw.decode("utf-8"), "utf-8"
+            except UnicodeDecodeError:
+                return raw.decode("cp1250", errors="replace"), "cp1250"
+
+        # ══════════════════════════════════════════════════════════════
+        # SETTINGS (last folders, show hidden) AND THE HOTLIST
+        # ══════════════════════════════════════════════════════════════
+
+        class Store:
+            def __init__(self, path):
+                self.path = path
                 try:
-                    with open(path, 'r') as f:
-                        content = f.read()
-                    text.insert(tk.END, content)
-                except UnicodeDecodeError:
-                    self.show_error_dialog("Error", "Cannot edit binary file.")
-                    editor.destroy()
-                    return
-                    
-                def save_file():
-                    try:
-                        with open(path, 'w') as f:
-                            f.write(text.get(1.0, tk.END))
-                        self.refresh_panels()
-                        editor.destroy()
-                    except Exception as e:
-                        self.show_error_dialog("Error", f"Cannot save file: {str(e)}")
-                
-                # Butoane
-                button_frame = tk.Frame(editor, bg=self.bg_color)
-                button_frame.pack(pady=5)
-                
-                save_button = tk.Button(button_frame, text="Save", width=10, bg=self.button_color,
-                                       relief="raised", bd=3, command=save_file)
-                save_button.pack(side=tk.LEFT, padx=5)
-                
-                cancel_button = tk.Button(button_frame, text="Cancel", width=10, bg=self.button_color,
-                                         relief="raised", bd=3, command=editor.destroy)
-                cancel_button.pack(side=tk.LEFT, padx=5)
-                    
-            except Exception as e:
-                self.show_error_dialog("Error", f"Cannot edit file: {str(e)}")
-        
-        def copy_item(self):
-            name, path = self.get_selected_item()
-            if not path:
-                return
-                
-            target_dir = self.get_inactive_panel_path()
-            target_path = os.path.join(target_dir, name)
-            
-            if os.path.exists(target_path):
-                # Dialog de confirmare în stil Windows 95
-                confirm_dialog = tk.Toplevel(self.rootcomm)
-                confirm_dialog.title("Confirm")
-                confirm_dialog.geometry("350x150")
-                confirm_dialog.configure(bg=self.bg_color)
-                confirm_dialog.transient(self.rootcomm)
-                confirm_dialog.grab_set()
-                
-                icon_label = tk.Label(confirm_dialog, text="?", font=("Arial", 24), fg="blue", bg=self.bg_color)
-                icon_label.pack(pady=(10, 5))
-                
-                message_label = tk.Label(confirm_dialog, 
-                                        text=f"{name} already exists. Overwrite?", 
-                                        wraplength=300, bg=self.bg_color)
-                message_label.pack(pady=5)
-                
-                button_frame = tk.Frame(confirm_dialog, bg=self.bg_color)
-                button_frame.pack(pady=10)
-                
-                result = [False]  # Folosim o listă pentru a stoca rezultatul
-                
-                def on_yes():
-                    result[0] = True
-                    confirm_dialog.destroy()
-                    
-                def on_no():
-                    result[0] = False
-                    confirm_dialog.destroy()
-                
-                yes_button = tk.Button(button_frame, text="Yes", width=10, bg=self.button_color,
-                                      relief="raised", bd=3, command=on_yes)
-                yes_button.pack(side=tk.LEFT, padx=5)
-                
-                no_button = tk.Button(button_frame, text="No", width=10, bg=self.button_color,
-                                     relief="raised", bd=3, command=on_no)
-                no_button.pack(side=tk.LEFT, padx=5)
-                
-                # Așteptăm închiderea dialogului
-                self.rootcomm.wait_window(confirm_dialog)
-                
-                if not result[0]:
-                    return
-            
-            try:
-                if os.path.isdir(path):
-                    shutil.copytree(path, target_path)
-                else:
-                    shutil.copy2(path, target_path)
-                self.refresh_panels()
-            except Exception as e:
-                self.show_error_dialog("Error", f"Cannot copy: {str(e)}")
-        
-        def move_item(self):
-            name, path = self.get_selected_item()
-            if not path:
-                return
-                
-            target_dir = self.get_inactive_panel_path()
-            target_path = os.path.join(target_dir, name)
-            
-            if os.path.exists(target_path):
-                # Dialog de confirmare în stil Windows 95
-                confirm_dialog = tk.Toplevel(self.rootcomm)
-                confirm_dialog.title("Confirm")
-                confirm_dialog.geometry("350x150")
-                confirm_dialog.configure(bg=self.bg_color)
-                confirm_dialog.transient(self.rootcomm)
-                confirm_dialog.grab_set()
-                
-                icon_label = tk.Label(confirm_dialog, text="?", font=("Arial", 24), fg="blue", bg=self.bg_color)
-                icon_label.pack(pady=(10, 5))
-                
-                message_label = tk.Label(confirm_dialog, 
-                                        text=f"{name} already exists. Overwrite?", 
-                                        wraplength=300, bg=self.bg_color)
-                message_label.pack(pady=5)
-                
-                button_frame = tk.Frame(confirm_dialog, bg=self.bg_color)
-                button_frame.pack(pady=10)
-                
-                result = [False]  # Folosim o listă pentru a stoca rezultatul
-                
-                def on_yes():
-                    result[0] = True
-                    confirm_dialog.destroy()
-                    
-                def on_no():
-                    result[0] = False
-                    confirm_dialog.destroy()
-                
-                yes_button = tk.Button(button_frame, text="Yes", width=10, bg=self.button_color,
-                                      relief="raised", bd=3, command=on_yes)
-                yes_button.pack(side=tk.LEFT, padx=5)
-                
-                no_button = tk.Button(button_frame, text="No", width=10, bg=self.button_color,
-                                     relief="raised", bd=3, command=on_no)
-                no_button.pack(side=tk.LEFT, padx=5)
-                
-                # Așteptăm închiderea dialogului
-                self.rootcomm.wait_window(confirm_dialog)
-                
-                if not result[0]:
-                    return
-            
-            try:
-                shutil.move(path, target_path)
-                self.refresh_panels()
-            except Exception as e:
-                self.show_error_dialog("Error", f"Cannot move: {str(e)}")
-        
-        def make_directory(self):
-            side = self.active_panel
-            
-            # Dialog pentru nume director în stil Windows 95
-            mkdir_dialog = tk.Toplevel(self.rootcomm)
-            mkdir_dialog.title("Create Directory")
-            mkdir_dialog.geometry("300x120")
-            mkdir_dialog.configure(bg=self.bg_color)
-            mkdir_dialog.transient(self.rootcomm)
-            mkdir_dialog.grab_set()
-            
-            tk.Label(mkdir_dialog, text="Enter directory name:", bg=self.bg_color).pack(pady=(10, 5))
-            
-            dir_name_var = tk.StringVar()
-            entry = tk.Entry(mkdir_dialog, textvariable=dir_name_var, width=40, 
-                            relief="sunken", bd=2, bg="white")
-            entry.pack(padx=10, pady=5)
-            entry.focus_set()
-            
-            button_frame = tk.Frame(mkdir_dialog, bg=self.bg_color)
-            button_frame.pack(pady=10)
-            
-            def do_mkdir():
-                dir_name = dir_name_var.get()
-                if dir_name:
-                    try:
-                        new_dir = os.path.join(self.paths[side], dir_name)
-                        os.mkdir(new_dir)
-                        self.refresh_panels()
-                        mkdir_dialog.destroy()
-                    except Exception as e:
-                        self.show_error_dialog("Error", f"Cannot create directory: {str(e)}")
-                else:
-                    mkdir_dialog.destroy()
-            
-            ok_button = tk.Button(button_frame, text="OK", width=10, bg=self.button_color,
-                                 relief="raised", bd=3, command=do_mkdir)
-            ok_button.pack(side=tk.LEFT, padx=5)
-            
-            cancel_button = tk.Button(button_frame, text="Cancel", width=10, bg=self.button_color,
-                                     relief="raised", bd=3, command=mkdir_dialog.destroy)
-            cancel_button.pack(side=tk.LEFT, padx=5)
-            
-            entry.bind("<Return>", lambda e: do_mkdir())
-        
-        def delete_item(self):
-            name, path = self.get_selected_item()
-            if not path:
-                return
-                
-            # Dialog de confirmare în stil Windows 95
-            confirm_dialog = tk.Toplevel(self.rootcomm)
-            confirm_dialog.title("Confirm Delete")
-            confirm_dialog.geometry("350x150")
-            confirm_dialog.configure(bg=self.bg_color)
-            confirm_dialog.transient(self.rootcomm)
-            confirm_dialog.grab_set()
-            
-            icon_label = tk.Label(confirm_dialog, text="!", font=("Arial", 24), fg="red", bg=self.bg_color)
-            icon_label.pack(pady=(10, 5))
-            
-            is_dir = os.path.isdir(path)
-            message = f"Are you sure you want to delete this {'directory' if is_dir else 'file'}?\n{name}"
-            
-            message_label = tk.Label(confirm_dialog, text=message, wraplength=300, bg=self.bg_color)
-            message_label.pack(pady=5)
-            
-            button_frame = tk.Frame(confirm_dialog, bg=self.bg_color)
-            button_frame.pack(pady=10)
-            
-            def do_delete():
+                    folder = os.path.dirname(path)
+                    if folder and not os.path.isdir(folder):
+                        os.makedirs(folder)
+                    with sqlite3.connect(path) as conn:      # the same tables setup_database_ALL() makes
+                        conn.execute("CREATE TABLE IF NOT EXISTS commander_settings (key TEXT PRIMARY KEY, value TEXT)")
+                        conn.execute("CREATE TABLE IF NOT EXISTS commander_hotlist (path TEXT PRIMARY KEY, "
+                                     "added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+                    self.ok = True
+                except (OSError, sqlite3.Error):
+                    self.ok = False
+
+            def get(self, key, default=None):
+                if not self.ok:
+                    return default
                 try:
-                    if is_dir:
-                        shutil.rmtree(path)
+                    with sqlite3.connect(self.path) as conn:
+                        row = conn.execute("SELECT value FROM commander_settings WHERE key = ?", (key,)).fetchone()
+                    return row[0] if row else default
+                except sqlite3.Error:
+                    return default
+
+            def set(self, key, value):
+                if self.ok:
+                    try:
+                        with sqlite3.connect(self.path) as conn:
+                            conn.execute("INSERT INTO commander_settings (key, value) VALUES (?, ?) "
+                                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
+                    except sqlite3.Error:
+                        pass
+
+            def hotlist(self):
+                if not self.ok:
+                    return []
+                try:
+                    with sqlite3.connect(self.path) as conn:
+                        return [r[0] for r in conn.execute("SELECT path FROM commander_hotlist ORDER BY path COLLATE NOCASE")]
+                except sqlite3.Error:
+                    return []
+
+            def add_hot(self, path):
+                if self.ok:
+                    try:
+                        with sqlite3.connect(self.path) as conn:
+                            conn.execute("INSERT OR IGNORE INTO commander_hotlist (path) VALUES (?)", (path,))
+                    except sqlite3.Error:
+                        pass
+
+            def remove_hot(self, path):
+                if self.ok:
+                    try:
+                        with sqlite3.connect(self.path) as conn:
+                            conn.execute("DELETE FROM commander_hotlist WHERE path = ?", (path,))
+                    except sqlite3.Error:
+                        pass
+
+        # ══════════════════════════════════════════════════════════════
+        # FILE OPERATIONS (a thread; it asks the window through a queue when a name already exists)
+        # ══════════════════════════════════════════════════════════════
+
+        class Cancelled(Exception):
+            pass
+
+        def recycle(paths):
+            """Windows: to the Recycle Bin (the old version deleted everything for good). None if not possible."""
+            if not IS_WINDOWS:
+                return None
+            import ctypes
+            from ctypes import wintypes
+
+            class SHFILEOPSTRUCTW(ctypes.Structure):
+                _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                            ("pTo", wintypes.LPCWSTR), ("fFlags", ctypes.c_uint16), ("fAnyOperationsAborted", wintypes.BOOL),
+                            ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR)]
+            op = SHFILEOPSTRUCTW()
+            op.wFunc = 3                                          # FO_DELETE
+            op.pFrom = "\0".join(os.path.abspath(p) for p in paths) + "\0\0"
+            op.fFlags = 0x40 | 0x10 | 0x04 | 0x400                # ALLOWUNDO, NOCONFIRMATION, SILENT, NOERRORUI
+            return ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) == 0
+
+        class Worker:
+            def __init__(self, events):
+                self.events = events
+                self.cancel = threading.Event()
+                self.policy = None               # "overwrite all" / "skip all"
+                self.done_bytes = self.total_bytes = 0
+                self.errors = []
+                self.count = 0
+                self.skipped = 0
+
+            def ask(self, question):
+                """Waits for the window's answer: Overwrite / Skip / Overwrite All / Skip All / Cancel."""
+                if self.policy:
+                    return self.policy
+                answer = {}
+                ready = threading.Event()
+                self.events.put(("ask", question, answer, ready))
+                ready.wait()
+                choice = answer.get("value", "Cancel")
+                if choice == "Cancel":
+                    raise Cancelled()
+                if choice in ("Overwrite All", "Skip All"):
+                    self.policy = choice.split()[0]
+                    choice = self.policy
+                return choice
+
+            def progress(self, text):
+                self.events.put(("progress", text, self.done_bytes, self.total_bytes))
+
+            @staticmethod
+            def size_of(path):
+                if os.path.isfile(path) or os.path.islink(path):
+                    try:
+                        return os.path.getsize(path)
+                    except OSError:
+                        return 0
+                total = 0
+                for base, _dirs, files in os.walk(path):
+                    for name in files:
+                        try:
+                            total += os.path.getsize(os.path.join(base, name))
+                        except OSError:
+                            pass
+                return total
+
+            def copy_file(self, src, dst):
+                if os.path.exists(dst):
+                    if norm(src) == norm(dst):
+                        raise OSError("A file cannot be copied onto itself: %s" % src)
+                    if self.ask("'%s' already exists.\n\nReplace it with the one from\n%s?" % (dst, os.path.dirname(src)))\
+                            .startswith("Skip"):
+                        self.done_bytes += os.path.getsize(src)
+                        self.skipped += 1
+                        return False
+                self.progress("Copying %s" % os.path.basename(src))
+                with open(src, "rb") as fin, open(dst + ".commander_part", "wb") as fout:
+                    while True:
+                        if self.cancel.is_set():
+                            raise Cancelled()
+                        chunk = fin.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        fout.write(chunk)
+                        self.done_bytes += len(chunk)
+                        self.progress("Copying %s" % os.path.basename(src))
+                shutil.copystat(src, dst + ".commander_part")
+                os.replace(dst + ".commander_part", dst)     # a cancelled copy never leaves half a file under the name
+                self.count += 1
+                return True
+
+            def copy_tree(self, src, dst):
+                """Into an existing folder too (copytree refused that, even after 'Overwrite? Yes')."""
+                if norm(dst).startswith(norm(src) + os.sep) or norm(dst) == norm(src):
+                    raise OSError("A folder cannot be copied into itself: %s" % src)
+                os.makedirs(dst, exist_ok=True)
+                for name in sorted(os.listdir(src)):
+                    if self.cancel.is_set():
+                        raise Cancelled()
+                    s, d = os.path.join(src, name), os.path.join(dst, name)
+                    try:
+                        if os.path.isdir(s) and not os.path.islink(s):
+                            self.copy_tree(s, d)
+                        else:
+                            self.copy_file(s, d)
+                    except Cancelled:
+                        raise
+                    except OSError as exc:
+                        self.errors.append("%s: %s" % (s, exc.strerror or exc))
+                try:
+                    shutil.copystat(src, dst)
+                except OSError:
+                    pass
+
+            def run_copy(self, items, target, move):
+                self.total_bytes = sum(self.size_of(p) for p in items)
+                for src in items:
+                    if self.cancel.is_set():
+                        break
+                    dst = os.path.join(target, os.path.basename(src.rstrip("/\\")))
+                    try:
+                        if move and not os.path.exists(dst):
+                            try:
+                                os.rename(src, dst)              # same drive: instant
+                                self.done_bytes += self.size_of(dst)
+                                self.count += 1
+                                continue
+                            except OSError:
+                                pass                              # another drive: copy, then delete
+                        skipped, errors = self.skipped, len(self.errors)
+                        if os.path.isdir(src) and not os.path.islink(src):
+                            if move and norm(dst).startswith(norm(src) + os.sep):
+                                raise OSError("A folder cannot be moved into itself: %s" % src)
+                            self.copy_tree(src, dst)
+                            copied = True
+                        else:
+                            copied = self.copy_file(src, dst)
+                        if move and copied and not self.cancel.is_set():
+                            # a folder moved onto an existing one is merged (it was put INSIDE it before);
+                            # what was skipped or failed stays where it was, with its folder
+                            if os.path.isdir(src) and not os.path.islink(src):
+                                if self.skipped == skipped and len(self.errors) == errors:
+                                    shutil.rmtree(src)
+                            else:
+                                os.remove(src)
+                    except Cancelled:
+                        self.cancel.set()
+                        break
+                    except OSError as exc:
+                        self.errors.append("%s: %s" % (src, exc.strerror or exc))
+
+            def run_delete(self, items, permanent):
+                if not permanent:
+                    result = recycle(items)
+                    if result:
+                        self.count = len(items)
+                        return
+                    if result is False:
+                        self.errors.append("The Recycle Bin did not accept the items (nothing was deleted).")
+                        return
+                self.total_bytes = len(items)
+                for index, path in enumerate(items):
+                    if self.cancel.is_set():
+                        break
+                    self.done_bytes = index
+                    self.progress("Deleting %s" % os.path.basename(path))
+                    try:
+                        if os.path.isdir(path) and not os.path.islink(path):
+                            shutil.rmtree(path)
+                        else:
+                            os.remove(path)
+                        self.count += 1
+                    except OSError as exc:
+                        self.errors.append("%s: %s" % (path, exc.strerror or exc))
+
+        # ══════════════════════════════════════════════════════════════
+        # ONE PANEL
+        # ══════════════════════════════════════════════════════════════
+
+        class Panel:
+            def __init__(self, app, parent, side, path):
+                self.app, self.side = app, side
+                self.path = path
+                self.entries = []                 # [{"name", "dir", "size", "mtime", "ext", "hidden"}]
+                self.marked = set()
+                self.sort_key, self.sort_reverse = "name", False
+                frame = self.frame = tk.Frame(parent, bg=FACE, bd=2, relief="sunken")
+                top = tk.Frame(frame, bg=FACE)
+                top.pack(fill="x", padx=2, pady=2)
+                self.drive_bar = tk.Frame(top, bg=FACE)
+                self.drive_bar.pack(side="left")
+                self.path_var = tk.StringVar(value=path)
+                self.path_entry = tk.Entry(top, textvariable=self.path_var, font=FONT, bg=LIGHT, relief="sunken", bd=2,
+                                           highlightthickness=0)
+                self.path_entry.pack(side="left", fill="x", expand=True, padx=(4, 2))
+                self.path_entry.bind("<Return>", lambda e: (self.go(self.path_var.get()), "break")[1])
+                self.app.button(top, "Go", lambda: self.go(self.path_var.get())).pack(side="left")
+                self.caption = tk.Label(frame, text="", font=FONT_B, anchor="w", padx=4)
+                self.caption.pack(fill="x")
+                holder = tk.Frame(frame, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=2)
+                vbar = tk.Scrollbar(holder, orient="vertical")
+                vbar.pack(side="right", fill="y")
+                self.header = tk.Listbox(holder, font=LIST_FONT, height=1, bg=FACE, fg=BLACK, bd=0, highlightthickness=0,
+                                         activestyle="none", selectbackground=FACE, selectforeground=BLACK,
+                                         exportselection=False, cursor="hand2", takefocus=0)
+                self.header.pack(side="top", fill="x")
+                self.box = tk.Listbox(holder, font=LIST_FONT, bg=LIGHT, fg=BLACK, bd=0, highlightthickness=0,
+                                      activestyle="none", selectbackground=NAVY, selectforeground=LIGHT,
+                                      exportselection=False, yscrollcommand=vbar.set, selectmode="browse")
+                self.box.pack(fill="both", expand=True)
+                vbar.config(command=self.box.yview)
+                self.status = tk.Label(frame, text="", font=FONT, bg=FACE, anchor="w", relief="sunken", bd=1, padx=4)
+                self.status.pack(fill="x", padx=2, pady=2)
+                self.char_w = tkfont.Font(font=LIST_FONT).measure("0")
+                self.widths = [w for _t, w, _k in COLUMNS]
+                self.box.bind("<Configure>", self._fit_columns)
+                self.header.bind("<ButtonRelease-1>", self._header_click)
+                box = self.box
+                box.bind("<FocusIn>", lambda e: self.app.set_active(self))
+                box.bind("<ButtonPress-1>", lambda e: self.app.set_active(self), add="+")
+                box.bind("<Control-ButtonPress-1>", self._ctrl_click)
+                box.bind("<Double-Button-1>", lambda e: self.enter())
+                box.bind("<Return>", lambda e: (self.enter(), "break")[1])
+                box.bind("<Shift-Return>", lambda e: (self.app.open_with_windows(), "break")[1])
+                box.bind("<BackSpace>", lambda e: (self.up(), "break")[1])
+                box.bind("<Insert>", lambda e: (self.toggle_mark(move=True), "break")[1])
+                box.bind("<space>", lambda e: (self.toggle_mark(move=True), "break")[1])
+                box.bind("<Tab>", lambda e: (self.app.other(self).focus(), "break")[1])
+                box.bind("<Control-a>", lambda e: (self.mark_all(), "break")[1])
+                box.bind("<plus>", lambda e: (self.app.select_pattern(True), "break")[1])
+                box.bind("<KP_Add>", lambda e: (self.app.select_pattern(True), "break")[1])
+                box.bind("<minus>", lambda e: (self.app.select_pattern(False), "break")[1])
+                box.bind("<KP_Subtract>", lambda e: (self.app.select_pattern(False), "break")[1])
+                box.bind("<asterisk>", lambda e: (self.invert(), "break")[1])
+                box.bind("<KP_Multiply>", lambda e: (self.invert(), "break")[1])
+                box.bind("<Delete>", lambda e: (self.app.delete_item(), "break")[1])
+                box.bind("<Shift-Delete>", lambda e: (self.app.delete_item(permanent=True), "break")[1])
+                box.bind("<Button-3>", self._context_menu)
+                self.draw_drives()
+                self._draw_header()
+
+            # ----- drawing -----------------------------------------------------------------------------------
+            def draw_drives(self):
+                for child in self.drive_bar.winfo_children():
+                    child.destroy()
+                for drive in drives():
+                    label = drive[:2] if IS_WINDOWS else drive
+                    b = tk.Button(self.drive_bar, text=label, font=FONT, bg=FACE, activebackground=FACE, relief="raised",
+                                  bd=2, padx=2, pady=0, highlightthickness=0, takefocus=0,
+                                  command=lambda d=drive: self.go(d))
+                    b.pack(side="left", padx=1)
+
+            def _line(self, values):
+                parts = []
+                for width, value in zip(self.widths, values):
+                    text = str(value)
+                    parts.append((text[:width - 2] + "~ ") if len(text) > width - 1 else text.ljust(width))
+                return " " + "".join(parts)
+
+            def _draw_header(self):
+                titles = [t + ((" v" if self.sort_reverse else " ^") if k == self.sort_key else "") for t, _w, k in COLUMNS]
+                self.header.delete(0, "end")
+                self.header.insert("end", self._line(titles))
+
+            def _fit_columns(self, event):
+                """Name takes what is left, so Ext, Size and Date always fit (the date was cut)."""
+                chars = max(40, event.width // self.char_w - 1)
+                fixed = sum(w for _t, w, _k in COLUMNS[1:])
+                widths = [max(12, chars - fixed)] + [w for _t, w, _k in COLUMNS[1:]]
+                if widths != self.widths:
+                    self.widths = widths
+                    self._draw_header()
+                    if hasattr(self, "has_parent"):
+                        self.refresh(keep=True)
+
+            def _header_click(self, event):
+                self.header.selection_clear(0, "end")
+                position = self.char_w
+                for (_title, _w, key), width in zip(COLUMNS, self.widths):
+                    if position <= event.x < position + width * self.char_w:
+                        self.sort_reverse = not self.sort_reverse if self.sort_key == key else False
+                        self.sort_key = key
+                        self._draw_header()
+                        self.refresh(keep=True)
+                        return
+                    position += width * self.char_w
+
+            def set_active(self, active):
+                self.caption.config(bg=NAVY if active else SHADOW, fg=LIGHT if active else FACE)
+
+            # ----- reading a folder ----------------------------------------------------------------------------
+            def load(self):
+                entries = []
+                try:
+                    with os.scandir(self.path) as it:
+                        for item in it:
+                            try:
+                                is_dir = item.is_dir()
+                                info = item.stat(follow_symlinks=True)
+                                size, mtime = (None if is_dir else info.st_size), info.st_mtime
+                            except OSError:
+                                is_dir, size, mtime = False, None, None
+                            name = item.name
+                            hidden = is_hidden(item.path, name)
+                            if hidden and not self.app.show_hidden.get():
+                                continue
+                            stem, ext = (name, "") if is_dir else os.path.splitext(name)
+                            entries.append({"name": name, "dir": is_dir, "size": size, "mtime": mtime,
+                                            "ext": ext[1:] if ext and stem else "", "stem": stem if ext and stem else name,
+                                            "hidden": hidden})
+                except OSError as exc:
+                    return str(exc.strerror or exc)
+                key = self.sort_key
+
+                def order(e):
+                    if key == "size":
+                        return (e["size"] or 0, e["name"].lower())
+                    if key == "date":
+                        return (e["mtime"] or 0, e["name"].lower())
+                    if key == "ext":
+                        return (e["ext"].lower(), e["name"].lower())
+                    return e["name"].lower()                 # case-insensitive ("B" came before "a")
+                dirs = sorted([e for e in entries if e["dir"]], key=order, reverse=self.sort_reverse and key == "name")
+                files = sorted([e for e in entries if not e["dir"]], key=order, reverse=self.sort_reverse)
+                self.entries = dirs + files
+                return None
+
+            def refresh(self, keep=True, select=None):
+                current = self.current_name() if keep else None
+                top = self.box.yview()[0] if keep else 0
+                error = self.load()
+                if error:
+                    self.app.message("Error", "Cannot read\n%s\n\n%s" % (self.path, error), "error")
+                    return False
+                names = {e["name"] for e in self.entries}
+                self.marked &= names
+                self.path_var.set(self.path)
+                self.caption.config(text=" " + self.path)
+                box = self.box
+                box.delete(0, "end")
+                parent = os.path.dirname(self.path.rstrip("/\\")) or self.path
+                self.has_parent = norm(parent) != norm(self.path)
+                if self.has_parent:
+                    box.insert("end", self._line(("[..]", "", "<UP-DIR>", "")))
+                for e in self.entries:
+                    # the date with time.strftime (a new Tcl interpreter was made for every file before)
+                    date = time.strftime("%d.%m.%Y %H:%M", time.localtime(e["mtime"])) if e["mtime"] else ""
+                    if e["dir"]:
+                        values = ("[%s]" % e["name"], "", "<DIR>", date)
                     else:
-                        os.remove(path)
+                        values = (e["stem"], e["ext"], fmt_size(e["size"]), date)
+                    text = self._line(values)
+                    if e["name"] in self.marked:
+                        text = "*" + text[1:]
+                    box.insert("end", text)
+                    if e["name"] in self.marked:
+                        box.itemconfig("end", fg=MARKED, selectforeground="#ffc0c0")
+                    elif e["hidden"]:
+                        box.itemconfig("end", fg=SHADOW)
+                index = 0
+                target = select or current
+                if target:
+                    for i, e in enumerate(self.entries):
+                        if e["name"] == target:
+                            index = i + (1 if self.has_parent else 0)
+                            break
+                box.yview_moveto(top)
+                if box.size():
+                    box.selection_clear(0, "end")
+                    box.selection_set(index)
+                    box.activate(index)
+                    box.see(index)
+                self.update_status()
+                return True
+
+            def update_status(self):
+                files = [e for e in self.entries if not e["dir"]]
+                marked = [e for e in self.entries if e["name"] in self.marked]
+                marked_size = sum(e["size"] or 0 for e in marked if not e["dir"])
+                self.status.config(text="%s of %s in %d of %d file(s), %d folder(s)%s" % (
+                    fmt_size(marked_size), fmt_size(sum(e["size"] or 0 for e in files)), len(marked), len(files),
+                    sum(1 for e in self.entries if e["dir"]), "" if self.app.show_hidden.get() else "  (hidden not shown)"))
+
+            # ----- moving around ---------------------------------------------------------------------------
+            def current_entry(self):
+                picked = self.box.curselection()
+                if not picked:
+                    return None
+                index = picked[0] - (1 if self.has_parent else 0)
+                return self.entries[index] if 0 <= index < len(self.entries) else None
+
+            def current_name(self):
+                e = self.current_entry() if hasattr(self, "has_parent") else None
+                return e["name"] if e else None
+
+            def targets(self):
+                """The marked items, or the one under the cursor."""
+                if self.marked:
+                    return [os.path.join(self.path, e["name"]) for e in self.entries if e["name"] in self.marked]
+                e = self.current_entry()
+                return [os.path.join(self.path, e["name"])] if e else []
+
+            def go(self, path, select=None):
+                path = os.path.expandvars(os.path.expanduser(path.strip().strip('"')))
+                if IS_WINDOWS and re.match(r"^[A-Za-z]:$", path):
+                    path += "\\"
+                if not os.path.isdir(path):
+                    self.app.message("Error", "Invalid path:\n%s" % path, "error")
+                    self.path_var.set(self.path)
+                    return
+                old_path, old_marked = self.path, self.marked
+                self.path, self.marked = os.path.abspath(path), set()
+                if not self.refresh(keep=False, select=select):
+                    self.path, self.marked = old_path, old_marked      # no access: stays where it was (it emptied)
+                    self.refresh(keep=False)
+                    return
+                self.app.remember()
+                self.focus()
+
+            def up(self):
+                parent = os.path.dirname(self.path.rstrip("/\\")) or self.path
+                if IS_WINDOWS and re.match(r"^[A-Za-z]:$", parent):
+                    parent += "\\"
+                if norm(parent) != norm(self.path):
+                    self.go(parent, select=os.path.basename(self.path.rstrip("/\\")))
+
+            def enter(self):
+                picked = self.box.curselection()
+                if picked and picked[0] == 0 and self.has_parent:
+                    self.up()
+                    return
+                e = self.current_entry()
+                if e is None:
+                    return
+                if e["dir"]:
+                    self.go(os.path.join(self.path, e["name"]))
+                else:
+                    self.app.view_item()
+
+            def focus(self):
+                self.box.focus_set()
+                self.app.set_active(self)
+
+            # ----- marking ---------------------------------------------------------------------------------
+            def toggle_mark(self, move=False):
+                e = self.current_entry()
+                if e:
+                    self.marked.symmetric_difference_update({e["name"]})
+                    index = self.box.curselection()[0]
+                    self.refresh(keep=True)
+                    if move and index + 1 < self.box.size():
+                        self.box.selection_clear(0, "end")
+                        self.box.selection_set(index + 1)
+                        self.box.activate(index + 1)
+                        self.box.see(index + 1)
+
+            def _ctrl_click(self, event):
+                index = self.box.nearest(event.y)
+                self.box.selection_clear(0, "end")
+                self.box.selection_set(index)
+                self.app.set_active(self)
+                self.toggle_mark()
+                return "break"
+
+            def mark_all(self):
+                self.marked = {e["name"] for e in self.entries}
+                self.refresh(keep=True)
+
+            def invert(self):
+                self.marked = {e["name"] for e in self.entries if e["name"] not in self.marked and not e["dir"]}
+                self.refresh(keep=True)
+
+            def mark_pattern(self, pattern, add):
+                names = {e["name"] for e in self.entries if fnmatch.fnmatch(e["name"].lower(), pattern.lower())}
+                self.marked = (self.marked | names) if add else (self.marked - names)
+                self.refresh(keep=True)
+
+            def _context_menu(self, event):
+                index = self.box.nearest(event.y)
+                if index >= 0:
+                    self.box.selection_clear(0, "end")
+                    self.box.selection_set(index)
+                self.app.set_active(self)
+                menu = tk.Menu(self.app.rootcomm, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                for label, command in (("Open", self.enter), ("Open with Windows", self.app.open_with_windows),
+                                       (None, None), ("View    F3", self.app.view_item), ("Edit    F4", self.app.edit_item),
+                                       (None, None), ("Copy    F5", self.app.copy_item), ("Move    F6", self.app.move_item),
+                                       ("Rename  F2", self.app.rename_item), ("Delete  F8", self.app.delete_item),
+                                       (None, None), ("Copy Path", self.app.copy_path),
+                                       ("Show in Explorer", self.app.show_in_explorer)):
+                    if label is None:
+                        menu.add_separator()
+                    else:
+                        menu.add_command(label=label, command=command)
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    menu.grab_release()
+
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
+
+        class RetroFileManagerApp:
+            def __init__(self):
+                self.rootcomm = root = tk.Tk()
+                self.store = Store(DB_PATH)
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.events = queue.Queue()
+                self.worker = None
+                self.show_hidden = tk.BooleanVar(value=self.store.get("show_hidden", "1") == "1")
+                root.title(TITLE)
+                width = min(1000, root.winfo_screenwidth() - 40)
+                height = min(640, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(700, 420)
+                root.configure(bg=FACE)
+                root.protocol("WM_DELETE_WINDOW", self.quit_app)
+                self._make_icon()
+                self.create_title_bar()
+                self.create_menu()
+                self.create_keybar()
+                home = os.path.expanduser("~")
+                paths = []
+                for side in ("left", "right"):
+                    saved = self.store.get(side + "_path")       # the panels open where they were last time
+                    paths.append(saved if saved and os.path.isdir(saved) else home)
+                self.paned = tk.PanedWindow(root, orient="horizontal", sashwidth=4, sashrelief="raised", bg=FACE, bd=0)
+                self.paned.pack(fill="both", expand=True, padx=4, pady=(2, 2))
+                self.panels = {}
+                for side, path in zip(("left", "right"), paths):
+                    panel = Panel(self, self.paned, side, path)
+                    self.paned.add(panel.frame, minsize=280, stretch="always")
+                    self.panels[side] = panel
+                self.active = self.panels["left"]
+                for panel in self.panels.values():
+                    panel.refresh(keep=False)
+                self.set_active(self.active)
+                self.bind_keys()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+                root.after(100, self.active.focus)
+                self.poll()
+
+            # ----- frame -----------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((0, 1, 16, 15, BLACK), (1, 2, 8, 14, NAVY), (9, 2, 15, 14, NAVY),
+                                               (2, 4, 7, 5, "#00ffff"), (2, 6, 6, 7, LIGHT), (2, 8, 7, 9, LIGHT),
+                                               (10, 4, 14, 5, "#00ffff"), (10, 6, 13, 7, LIGHT), (10, 8, 14, 9, LIGHT),
+                                               (1, 13, 15, 14, FACE)):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+
+            def create_title_bar(self):
+                root = self.rootcomm
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                title = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                title.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, title, icon)
+                self.caption_button(bar, "close", self.quit_app).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.rootcomm.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                root = self.rootcomm
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+            def _on_map(self, event):
+                root = self.rootcomm
+                if event.widget is root and self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.rootcomm.overrideredirect(False)
+                self.rootcomm.iconify()
+
+            def toggle_maximize(self):
+                root = self.rootcomm
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self._drag = (event.x_root - self.rootcomm.winfo_x(), event.y_root - self.rootcomm.winfo_y())
+
+            def _caption_drag(self, event):
+                if self.custom_frame and not self.maximized:
+                    self.rootcomm.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it. A click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            # ----- Windows 95 dialogs ---------------------------------------------------------------------
+            def button(self, parent, text, command, width=None, default=False, state="normal"):
+                widget = tk.Button(parent, text=text, command=command, font=FONT_B if default else FONT, bg=FACE,
+                                   fg=BLACK, activebackground=FACE, relief="raised", bd=2, padx=6, pady=1, state=state,
+                                   disabledforeground=SHADOW, highlightthickness=1 if default else 0,
+                                   highlightbackground=BLACK, takefocus=0)
+                if width:
+                    widget.config(width=width)
+                return widget
+
+            def window(self, title, topmost=True):
+                root = self.rootcomm
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                if topmost:
+                    win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                label = tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B)
+                label.pack(side="left", padx=4)
+                win.close_button = self.caption_button(bar, "close", win.destroy)
+                win.close_button.pack(side="right", padx=2)
+
+                def press(event):
+                    win._drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+                def drag(event):
+                    win.geometry("+%d+%d" % (event.x_root - win._drag[0], event.y_root - win._drag[1]))
+                for widget in (bar, label):
+                    widget.bind("<ButtonPress-1>", press)
+                    widget.bind("<B1-Motion>", drag)
+                return win
+
+            def show(self, win, modal=True):
+                root = self.rootcomm
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                         root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+                win.lift()
+                win.focus_force()
+                if not modal:
+                    return
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+                try:
+                    self.active.focus()
+                except tk.TclError:
+                    pass
+
+            def _picture(self, parent, icon):
+                picture = tk.Canvas(parent, width=32, height=32, bg=FACE, highlightthickness=0)
+                if icon == "error":
+                    picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                    picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                    picture.create_line(22, 10, 10, 22, fill="white", width=3)
+                elif icon == "warning":
+                    picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=BLACK)
+                    picture.create_text(16, 19, text="!", fill=BLACK, font=("Times New Roman", 15, "bold"))
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=LIGHT, outline=BLACK)
+                    picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                        font=("Times New Roman", 16, "bold"))
+                return picture
+
+            def message(self, title, text, icon="info", buttons=("OK",), default=0):
+                win = self.window(title)
+                result = {"value": buttons[-1]}
+
+                def answer(value):
+                    result["value"] = value
+                    win.destroy()
+                win.close_button.config(command=lambda: answer(buttons[-1]))
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                self._picture(body, icon).pack(side="left", anchor="n", padx=(0, 12))
+                tk.Label(body, text=text, bg=FACE, font=FONT, justify="left", wraplength=420).pack(side="left")
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                for index, label in enumerate(buttons):
+                    self.button(row, label, lambda v=label: answer(v), width=max(9, len(label) + 2),
+                                default=index == default).pack(side="left", padx=3)
+                win.bind("<Return>", lambda e: answer(buttons[default]))
+                win.bind("<Escape>", lambda e: answer(buttons[-1]))
+                self.show(win)
+                return result["value"]
+
+            def ask_text(self, title, prompt, initial="", select_stem=False):
+                win = self.window(title)
+                result = {"value": None}
+                body = tk.Frame(win, bg=FACE)
+                body.pack(padx=14, pady=(12, 6), fill="x")
+                tk.Label(body, text=prompt, font=FONT, bg=FACE, justify="left").pack(anchor="w")
+                entry = tk.Entry(body, font=FONT, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0, width=50)
+                entry.pack(anchor="w", pady=(4, 0), fill="x")
+                entry.insert(0, initial)
+                stem = os.path.splitext(initial)[0] if select_stem and "." in initial[1:] else initial
+                entry.select_range(0, len(stem))
+                entry.icursor(len(stem))
+
+                def ok():
+                    result["value"] = entry.get().strip()
+                    win.destroy()
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(6, 12))
+                self.button(row, "OK", ok, width=9, default=True).pack(side="left", padx=4)
+                self.button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=4)
+                entry.bind("<Return>", lambda e: ok())
+                win.bind("<Escape>", lambda e: win.destroy())
+                entry.focus_set()
+                self.show(win)
+                return result["value"] or None
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def create_menu(self):
+                bar = tk.Frame(self.rootcomm, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                # the menus work now (the old ones were buttons that did nothing)
+                m = menubutton("Files")
+                for label, accel, command in (("Rename", "F2", self.rename_item), ("View", "F3", self.view_item),
+                                              ("Edit", "F4", self.edit_item), ("Copy", "F5", self.copy_item),
+                                              ("Move", "F6", self.move_item), ("New Folder", "F7", self.make_directory),
+                                              ("Delete (Recycle Bin)", "F8", self.delete_item),
+                                              ("Delete Permanently", "Shift+Del", lambda: self.delete_item(permanent=True))):
+                    m.add_command(label=label, accelerator=accel, command=command)
+                m.add_separator()
+                m.add_command(label="Open with Windows", accelerator="Shift+Enter", command=self.open_with_windows)
+                m.add_command(label="Show in Explorer", command=self.show_in_explorer)
+                m.add_command(label="Copy Path", command=self.copy_path)
+                m.add_separator()
+                m.add_command(label="Exit", accelerator="F10", command=self.quit_app)
+                m = menubutton("Mark")
+                m.add_command(label="Select Group...", accelerator="+", command=lambda: self.select_pattern(True))
+                m.add_command(label="Unselect Group...", accelerator="-", command=lambda: self.select_pattern(False))
+                m.add_command(label="Select All", accelerator="Ctrl+A", command=lambda: self.active.mark_all())
+                m.add_command(label="Unselect All", command=lambda: (self.active.marked.clear(), self.active.refresh()))
+                m.add_command(label="Invert Selection", accelerator="*", command=lambda: self.active.invert())
+                m = menubutton("Commands")
+                m.add_command(label="Refresh", accelerator="Ctrl+R", command=self.refresh_panels)
+                m.add_command(label="Swap Panels", accelerator="Ctrl+U", command=self.swap_panels)
+                m.add_command(label="Same Folder in Other Panel", accelerator="Ctrl+E", command=self.same_path)
+                m.add_separator()
+                m.add_command(label="Folder Hotlist...", accelerator="Ctrl+D", command=self.hotlist)
+                m.add_command(label="Add Current Folder to Hotlist", command=self.add_hot)
+                m = menubutton("Show")
+                m.add_checkbutton(label="Hidden and System Files", variable=self.show_hidden, command=self.toggle_hidden)
+                m.add_separator()
+                for label, key in (("By Name", "name"), ("By Extension", "ext"), ("By Size", "size"), ("By Date", "date")):
+                    m.add_command(label="Sort " + label, command=lambda k=key: self.sort_by(k))
+                m = menubutton("Help")
+                m.add_command(label="Keyboard", accelerator="F1", command=self.show_help)
+                m.add_command(label="About Commander", command=lambda: self.message(
+                    "About Commander", "Commander - File Manager\n\nTwo panels: the operations go from the active panel "
+                    "(blue title) to the other one. Mark several files with Insert, Space or Ctrl+click.\n\nDelete sends "
+                    "to the Recycle Bin; Shift+Del deletes for good."))
+
+            def create_keybar(self):
+                bar = tk.Frame(self.rootcomm, bg=FACE)
+                bar.pack(side="bottom", fill="x", padx=4, pady=(0, 4))
+                for text, command in (("F1 Help", self.show_help), ("F2 Rename", self.rename_item),
+                                      ("F3 View", self.view_item), ("F4 Edit", self.edit_item), ("F5 Copy", self.copy_item),
+                                      ("F6 Move", self.move_item), ("F7 NewFolder", self.make_directory),
+                                      ("F8 Delete", self.delete_item), ("F10 Quit", self.quit_app)):
+                    self.button(bar, text, command).pack(side="left", fill="x", expand=True, padx=1)
+
+            def bind_keys(self):
+                root = self.rootcomm
+                keys = (("<F1>", self.show_help), ("<F2>", self.rename_item), ("<F3>", self.view_item),
+                        ("<F4>", self.edit_item), ("<F5>", self.copy_item), ("<F6>", self.move_item),
+                        ("<F7>", self.make_directory), ("<F8>", self.delete_item), ("<Shift-F8>",
+                        lambda: self.delete_item(permanent=True)), ("<F10>", self.quit_app),
+                        ("<Control-r>", self.refresh_panels), ("<Control-u>", self.swap_panels),
+                        ("<Control-e>", self.same_path), ("<Control-d>", self.hotlist))
+                for key, action in keys:
+                    root.bind(key, lambda e, a=action: (a(), "break")[1])
+
+            def set_active(self, panel):
+                self.active = panel
+                for p in self.panels.values():
+                    p.set_active(p is panel)
+
+            def other(self, panel=None):
+                panel = panel or self.active
+                return self.panels["right" if panel.side == "left" else "left"]
+
+            def remember(self):
+                for side, panel in self.panels.items():
+                    self.store.set(side + "_path", panel.path)
+
+            def refresh_panels(self):
+                for panel in self.panels.values():
+                    panel.refresh(keep=True)
+
+            # ----- commands ----------------------------------------------------------------------------------
+            def select_pattern(self, add):
+                pattern = self.ask_text("Select Group" if add else "Unselect Group", "Files (for example *.txt or raport*):",
+                                        "*.*" if add else "*")
+                if pattern:
+                    self.active.mark_pattern(pattern if pattern != "*.*" else "*", add)
+
+            def swap_panels(self):
+                left, right = self.panels["left"], self.panels["right"]
+                left.path, right.path = right.path, left.path
+                left.marked, right.marked = set(), set()
+                self.refresh_panels()
+                self.remember()
+
+            def same_path(self):
+                self.other().go(self.active.path)
+                self.active.focus()
+
+            def toggle_hidden(self):
+                self.store.set("show_hidden", "1" if self.show_hidden.get() else "0")
+                self.refresh_panels()
+
+            def sort_by(self, key):
+                panel = self.active
+                panel.sort_key, panel.sort_reverse = key, False
+                panel._draw_header()
+                panel.refresh(keep=True)
+
+            def add_hot(self):
+                self.store.add_hot(self.active.path)
+                self.message("Hotlist", "Added to the hotlist:\n%s" % self.active.path)
+
+            def hotlist(self):
+                paths = self.store.hotlist()
+                win = self.window("Folder Hotlist")
+                holder = tk.Frame(win, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=10, pady=(10, 4))
+                box = tk.Listbox(holder, font=FONT, width=60, height=12, bd=0, highlightthickness=0, bg=LIGHT,
+                                 selectbackground=NAVY, selectforeground=LIGHT, activestyle="none")
+                box.pack(fill="both", expand=True)
+                for p in paths:
+                    box.insert("end", p)
+                if paths:
+                    box.selection_set(0)
+                else:
+                    box.insert("end", "(empty - use Add Current)")
+
+                def go():
+                    picked = box.curselection()
+                    if picked and picked[0] < len(paths):
+                        win.destroy()
+                        self.active.go(paths[picked[0]])
+
+                def add():
+                    self.store.add_hot(self.active.path)
+                    win.destroy()
+                    self.hotlist()
+
+                def remove():
+                    picked = box.curselection()
+                    if picked and picked[0] < len(paths):
+                        self.store.remove_hot(paths[picked[0]])
+                        win.destroy()
+                        self.hotlist()
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 10))
+                self.button(row, "Go", go, width=9, default=True).pack(side="left", padx=3)
+                self.button(row, "Add Current", add, width=12).pack(side="left", padx=3)
+                self.button(row, "Remove", remove, width=9).pack(side="left", padx=3)
+                self.button(row, "Close", win.destroy, width=9).pack(side="left", padx=3)
+                box.bind("<Double-Button-1>", lambda e: go())
+                box.bind("<Return>", lambda e: go())
+                win.bind("<Escape>", lambda e: win.destroy())
+                box.focus_set()
+                self.show(win)
+
+            def open_with_windows(self):
+                e = self.active.current_entry()
+                if not e:
+                    return
+                path = os.path.join(self.active.path, e["name"])
+                try:
+                    if IS_WINDOWS:
+                        os.startfile(path)
+                    else:
+                        subprocess.Popen(["xdg-open", path])
+                except OSError as exc:
+                    self.message("Open", "Cannot open:\n%s\n\n%s" % (path, exc), "error")
+
+            def show_in_explorer(self):
+                e = self.active.current_entry()
+                path = os.path.join(self.active.path, e["name"]) if e else self.active.path
+                if IS_WINDOWS:
+                    subprocess.Popen(["explorer", "/select,", path] if e else ["explorer", path])
+                else:
+                    self.message("Show in Explorer", path)
+
+            def copy_path(self):
+                items = self.active.targets() or [self.active.path]
+                self.rootcomm.clipboard_clear()
+                self.rootcomm.clipboard_append("\n".join(items))
+
+            def show_help(self):
+                self.message("Commander Help", "F1 Help   F2 Rename   F3 View   F4 Edit\nF5 Copy   F6 Move   F7 New Folder   "
+                             "F8 Delete   F10 Quit\n\nTab: the other panel     Enter: open     Backspace: up\n"
+                             "Insert / Space / Ctrl+click: mark     + / - : mark / unmark a group     *: invert\n"
+                             "Shift+Enter: open with Windows     Shift+Del: delete for good\n"
+                             "Ctrl+R refresh   Ctrl+U swap panels   Ctrl+E same folder   Ctrl+D hotlist\n\n"
+                             "Copy and Move go from the active panel (blue title) to the other one.")
+
+            def rename_item(self):
+                e = self.active.current_entry()
+                if not e:
+                    return
+                new = self.ask_text("Rename", "New name for '%s':" % e["name"], e["name"], select_stem=True)
+                if not new or new == e["name"]:
+                    return
+                if any(ch in new for ch in '\\/:*?"<>|'):
+                    self.message("Rename", 'A name cannot contain any of these characters:\n\\ / : * ? " < > |', "warning")
+                    return
+                src, dst = os.path.join(self.active.path, e["name"]), os.path.join(self.active.path, new)
+                if os.path.exists(dst) and norm(src) != norm(dst):
+                    self.message("Rename", "'%s' already exists." % new, "warning")
+                    return
+                try:
+                    os.rename(src, dst)
+                except OSError as exc:
+                    self.message("Error", "Cannot rename:\n%s" % (exc.strerror or exc), "error")
+                    return
+                self.active.marked.discard(e["name"])
+                self.active.refresh(keep=False, select=new)
+                if norm(self.other().path) == norm(self.active.path):
+                    self.other().refresh()
+
+            def make_directory(self):
+                name = self.ask_text("New Folder", "Folder name (a\\b makes both):", "New Folder", select_stem=False)
+                if not name:
+                    return
+                path = os.path.join(self.active.path, name)
+                try:
+                    os.makedirs(path)
+                except OSError as exc:
+                    self.message("Error", "Cannot create the folder:\n%s" % (exc.strerror or exc), "error")
+                    return
+                self.active.refresh(keep=False, select=name.replace("/", "\\").split("\\")[0])
+                if norm(self.other().path) == norm(self.active.path):
+                    self.other().refresh()
+
+            # ----- copy / move / delete in a thread, with a progress window ------------------------------------
+            def copy_item(self):
+                self._transfer(move=False)
+
+            def move_item(self):
+                self._transfer(move=True)
+
+            def _transfer(self, move):
+                items = self.active.targets()
+                if not items or self.worker:
+                    return
+                target = self.other().path
+                what = os.path.basename(items[0]) if len(items) == 1 else "%d items" % len(items)
+                title = "Move" if move else "Copy"
+                new_target = self.ask_text(title, "%s %s to:" % (title, what), target)
+                if not new_target:
+                    return
+                if not os.path.isdir(new_target):
+                    if self.message(title, "The folder does not exist:\n%s\n\nCreate it?" % new_target, "question",
+                                    ("Yes", "No")) != "Yes":
+                        return
+                    try:
+                        os.makedirs(new_target)
+                    except OSError as exc:
+                        self.message("Error", str(exc.strerror or exc), "error")
+                        return
+                if all(norm(os.path.dirname(i)) == norm(new_target) for i in items):
+                    self.message(title, "The source and the target are the same folder.", "warning")
+                    return
+                self._run(title, lambda w: w.run_copy(items, new_target, move))
+
+            def delete_item(self, permanent=False):
+                items = self.active.targets()
+                if not items or self.worker:
+                    return
+                what = "'%s'" % os.path.basename(items[0]) if len(items) == 1 else "these %d items" % len(items)
+                folders = sum(1 for i in items if os.path.isdir(i))
+                if permanent or not IS_WINDOWS:
+                    text = "Delete %s FOR GOOD?%s\n\nThey do not go to the Recycle Bin." % (
+                        what, "\n(%d folder(s) with everything inside)" % folders if folders else "")
+                    icon = "warning"
+                else:
+                    text = "Send %s to the Recycle Bin?" % what
+                    icon = "question"
+                if self.message("Confirm Delete", text, icon, ("Yes", "No"), default=1) != "Yes":
+                    return
+                self._run("Delete", lambda w: w.run_delete(items, permanent or not IS_WINDOWS))
+
+            def _run(self, title, job):
+                worker = self.worker = Worker(self.events)
+                win = self.progress_win = self.window(title)
+                win.close_button.config(command=worker.cancel.set)
+                self.progress_text = tk.Label(win, text="Preparing...", font=FONT, bg=FACE, anchor="w", width=60)
+                self.progress_text.pack(padx=12, pady=(10, 4), fill="x")
+                self.progress_bar = tk.Canvas(win, height=16, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0)
+                self.progress_bar.pack(fill="x", padx=12)
+                self.progress_info = tk.Label(win, text="", font=FONT, bg=FACE, anchor="w")
+                self.progress_info.pack(padx=12, pady=4, fill="x")
+                self.button(win, "Cancel", worker.cancel.set, width=10).pack(pady=(0, 10))
+                self.show(win, modal=False)
+
+                def run():
+                    try:
+                        job(worker)
+                    except Exception as exc:
+                        worker.errors.append(str(exc))
+                    self.events.put(("done", worker))
+                threading.Thread(target=run, daemon=True).start()
+
+            def poll(self):
+                try:
+                    for _ in range(50):
+                        event = self.events.get_nowait()
+                        if event[0] == "progress":
+                            _k, text, done, total = event
+                            self._draw_progress(text, done, total)
+                        elif event[0] == "ask":
+                            _k, question, answer, ready = event
+                            answer["value"] = self.message("Confirm Replace", question, "question",
+                                                           ("Overwrite", "Skip", "Overwrite All", "Skip All", "Cancel"))
+                            ready.set()
+                        elif event[0] == "done":
+                            self._finished(event[1])
+                except queue.Empty:
+                    pass
+                self.poll_job = self.rootcomm.after(60, self.poll)
+
+            def _draw_progress(self, text, done, total):
+                if not getattr(self, "progress_win", None) or not self.progress_win.winfo_exists():
+                    return
+                self.progress_text.config(text=text[:80])
+                canvas = self.progress_bar
+                canvas.delete("all")
+                width = canvas.winfo_width() - 4
+                fraction = done / float(total) if total else 0
+                for i in range(int(width * min(1.0, fraction)) // 9):
+                    canvas.create_rectangle(3 + i * 9, 3, 3 + i * 9 + 7, 15, fill=NAVY, outline="")
+                self.progress_info.config(text="%s of %s" % (fmt_size(done), fmt_size(total)) if total > 50 else "")
+
+            def _finished(self, worker):
+                self.worker = None
+                try:
+                    self.progress_win.destroy()
+                except (AttributeError, tk.TclError):
+                    pass
+                for panel in self.panels.values():
+                    panel.marked.clear()
+                self.refresh_panels()
+                if worker.errors:
+                    self.message("Some items failed", "\n".join(worker.errors[:12]) +
+                                 ("\n..." if len(worker.errors) > 12 else ""), "error")
+                elif worker.cancel.is_set():
+                    self.message("Cancelled", "The operation was cancelled (%d item(s) done)." % worker.count)
+
+            # ----- view and edit ---------------------------------------------------------------------------
+            def _text_window(self, title, size=(760, 540)):
+                win = self.window(title, topmost=False)
+                win.geometry("%dx%d" % size)
+                buttons = tk.Frame(win, bg=FACE)
+                buttons.pack(side="bottom", fill="x", padx=8, pady=(2, 8))
+                holder = tk.Frame(win, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=8, pady=(8, 2))
+                ys = tk.Scrollbar(holder, orient="vertical")
+                ys.pack(side="right", fill="y")
+                xs = tk.Scrollbar(holder, orient="horizontal")
+                xs.pack(side="bottom", fill="x")
+                text = tk.Text(holder, font=("Courier New", 10), bd=0, highlightthickness=0, wrap="none", undo=True,
+                               yscrollcommand=ys.set, xscrollcommand=xs.set, padx=4, selectbackground=NAVY,
+                               selectforeground=LIGHT)
+                text.pack(fill="both", expand=True)
+                ys.config(command=text.yview)
+                xs.config(command=text.xview)
+                return win, text, buttons
+
+            def view_item(self):
+                e = self.active.current_entry()
+                if not e or e["dir"]:
+                    return
+                path = os.path.join(self.active.path, e["name"])
+                try:
+                    content, encoding = read_text(path)
+                    if content is None:                                  # binary: a hex dump (it showed an error)
+                        with open(path, "rb") as fh:
+                            data = fh.read(64 * 1024)
+                        lines = ["%08X  %-48s  %s" % (i, " ".join("%02X" % b for b in data[i:i + 16]),
+                                                      "".join(chr(b) if 32 <= b < 127 else "." for b in data[i:i + 16]))
+                                 for i in range(0, len(data), 16)]
+                        content, encoding = "\n".join(lines), "binary, first 64 KB"
+                except OSError as exc:
+                    self.message("Error", "Cannot view the file:\n%s" % (exc.strerror or exc), "error")
+                    return
+                win, text, buttons = self._text_window("View: %s" % e["name"])
+                text.insert("1.0", content)
+                if os.path.getsize(path) > VIEW_LIMIT and encoding != "binary, first 64 KB":
+                    text.insert("end", "\n\n[... only the first %s are shown]" % fmt_size(VIEW_LIMIT))
+                text.config(state="disabled")
+                tk.Label(buttons, text="%s  -  %s" % (fmt_size(os.path.getsize(path)), encoding), font=FONT,
+                         bg=FACE).pack(side="left")
+                self.button(buttons, "Close", win.destroy, width=10, default=True).pack(side="right")
+                win.bind("<Escape>", lambda e: win.destroy())
+                self.show(win, modal=False)
+
+            def edit_item(self):
+                e = self.active.current_entry()
+                if not e or e["dir"]:
+                    return
+                path = os.path.join(self.active.path, e["name"])
+                try:
+                    if os.path.getsize(path) > VIEW_LIMIT:
+                        self.message("Edit", "The file is larger than %s. Use Open with Windows (Shift+Enter)." %
+                                     fmt_size(VIEW_LIMIT), "warning")
+                        return
+                    content, encoding = read_text(path)
+                except OSError as exc:
+                    self.message("Error", "Cannot open the file:\n%s" % (exc.strerror or exc), "error")
+                    return
+                if content is None:
+                    self.message("Error", "Cannot edit a binary file.", "error")
+                    return
+                newline = "\r\n" if "\r\n" in content else "\n"
+                win, text, buttons = self._text_window("Edit: %s" % e["name"])
+                text.insert("1.0", content.replace("\r\n", "\n"))
+                text.edit_reset()
+                text.edit_modified(False)
+                info = tk.Label(buttons, text="%s  -  %s  -  Ctrl+S saves" % (encoding, "CRLF" if newline == "\r\n" else "LF"),
+                                font=FONT, bg=FACE)
+                info.pack(side="left")
+
+                def save():
+                    # the same encoding and line ends as before, and no extra empty line (one was added on every save)
+                    data = text.get("1.0", "end-1c")
+                    try:
+                        with open(path, "w", encoding=encoding, newline=newline) as fh:
+                            fh.write(data)
+                    except (OSError, UnicodeEncodeError) as exc:
+                        self.message("Error", "Cannot save the file:\n%s" % exc, "error")
+                        return False
+                    text.edit_modified(False)
+                    info.config(text="Saved %s  -  %s" % (time.strftime("%H:%M:%S"), encoding))
                     self.refresh_panels()
-                    confirm_dialog.destroy()
-                except Exception as e:
-                    self.show_error_dialog("Error", f"Cannot delete: {str(e)}")
-                    confirm_dialog.destroy()
-            
-            yes_button = tk.Button(button_frame, text="Yes", width=10, bg=self.button_color,
-                                  relief="raised", bd=3, command=do_delete)
-            yes_button.pack(side=tk.LEFT, padx=5)
-            
-            no_button = tk.Button(button_frame, text="No", width=10, bg=self.button_color,
-                                 relief="raised", bd=3, command=confirm_dialog.destroy)
-            no_button.pack(side=tk.LEFT, padx=5)
-        
-        def quit_app(self):
-            # Dialog de confirmare în stil Windows 95
-            confirm_dialog = tk.Toplevel(self.rootcomm)
-            confirm_dialog.title("Confirm Exit")
-            confirm_dialog.geometry("300x150")
-            confirm_dialog.configure(bg=self.bg_color)
-            confirm_dialog.transient(self.rootcomm)
-            confirm_dialog.grab_set()
-            
-            icon_label = tk.Label(confirm_dialog, text="?", font=("Arial", 24), fg="blue", bg=self.bg_color)
-            icon_label.pack(pady=(10, 5))
-            
-            message_label = tk.Label(confirm_dialog, text="Are you sure you want to exit?", 
-                                    wraplength=250, bg=self.bg_color)
-            message_label.pack(pady=5)
-            
-            button_frame = tk.Frame(confirm_dialog, bg=self.bg_color)
-            button_frame.pack(pady=10)
-            
-            yes_button = tk.Button(button_frame, text="Yes", width=10, bg=self.button_color,
-                                  relief="raised", bd=3, command=self.rootcomm.destroy)
-            yes_button.pack(side=tk.LEFT, padx=5)
-            
-            no_button = tk.Button(button_frame, text="No", width=10, bg=self.button_color,
-                                 relief="raised", bd=3, command=confirm_dialog.destroy)
-            no_button.pack(side=tk.LEFT, padx=5)
+                    return True
 
+                def close():
+                    if text.edit_modified():
+                        answer = self.message("Edit", "Save the changes to '%s'?" % e["name"], "question",
+                                              ("Yes", "No", "Cancel"))
+                        if answer == "Cancel" or (answer == "Yes" and not save()):
+                            return
+                    win.destroy()
+                win.close_button.config(command=close)
+                self.button(buttons, "Save", save, width=10, default=True).pack(side="right", padx=(4, 0))
+                self.button(buttons, "Close", close, width=10).pack(side="right")
+                text.bind("<Control-s>", lambda ev: (save(), "break")[1])
+                win.bind("<Escape>", lambda ev: close())
+                text.focus_set()
+                self.show(win, modal=False)
 
-    # Funcția principală pentru a rula aplicația
-    def main():
-        rootcomm = tk.Tk()
-        app = RetroFileManagerApp(rootcomm)
-        rootcomm.mainloop()
+            def quit_app(self):
+                if self.worker:
+                    if self.message("Exit", "A copy / move / delete is running. Stop it and exit?", "question",
+                                    ("Yes", "No"), default=1) != "Yes":
+                        return
+                    self.worker.cancel.set()
+                elif self.message("Confirm Exit", "Are you sure you want to exit?", "question", ("Yes", "No")) != "Yes":
+                    return
+                self.remember()
+                try:
+                    self.rootcomm.after_cancel(self.poll_job)
+                except (AttributeError, tk.TclError):
+                    pass
+                self.rootcomm.destroy()
 
-    if __name__ == "__main__":
-        main()
+        app = RetroFileManagerApp()
+        app.rootcomm.mainloop()
+        return app
+
+    commander_95()
 
 if calendarvar == 999000:
     import tkinter as tk
@@ -113573,469 +114748,857 @@ if scrpVar == 777666014:
             # Rularea buclei principale
             validation.mainloop()
         
-    class Win95ScriptRunner:
-        def __init__(self):
-            self.root_scr = tk.Tk()
-            self.setup_window()
-            self.scripts = {}
-            self.load_scripts()
-            self.setup_gui()
-            self.running_process = None
-            
-        def setup_window(self):
-            self.root_scr.title("Script Runner")
-            self.root_scr.geometry("800x600")
-            self.root_scr.configure(bg='#c0c0c0')
-            
-            # Windows 95 style configuration
-            style = ttk.Style()
-            style.theme_use('classic')
-            
-            # Custom colors for Windows 95 look
-            self.bg_color = '#c0c0c0'
-            self.button_color = '#c0c0c0'
-            self.text_color = '#000000'
-            self.highlight_color = '#0000ff'
-            
-        def setup_gui(self):
-            # Main frame
-            main_frame = tk.Frame(self.root_scr, bg=self.bg_color, relief='raised', bd=2)
-            main_frame.pack(fill='both', expand=True, padx=5, pady=5)
-            
-            # Title bar
-            title_frame = tk.Frame(main_frame, bg='#000080', height=25)
-            title_frame.pack(fill='x', pady=(0, 5))
-            title_frame.pack_propagate(False)
-            
-            title_label = tk.Label(title_frame, text="Script Runner", 
-                                  bg='#000080', fg='white', font=('MS Sans Serif', 8, 'bold'))
-            title_label.pack(side='left', padx=5, pady=2)
-            
-            # Toolbar
-            toolbar = tk.Frame(main_frame, bg=self.bg_color, relief='raised', bd=1)
-            toolbar.pack(fill='x', pady=(0, 5))
-            
-            # Toolbar buttons with Windows 95 style
-            btn_new = tk.Button(toolbar, text="New Script", command=self.add_script,
-                               relief='raised', bd=2, bg=self.button_color, font=('MS Sans Serif', 8))
-            btn_new.pack(side='left', padx=2, pady=2)
-            
-            btn_edit = tk.Button(toolbar, text="Edit", command=self.edit_script,
-                                relief='raised', bd=2, bg=self.button_color, font=('MS Sans Serif', 8))
-            btn_edit.pack(side='left', padx=2, pady=2)
-            
-            btn_delete = tk.Button(toolbar, text="Delete", command=self.delete_script,
-                                  relief='raised', bd=2, bg=self.button_color, font=('MS Sans Serif', 8))
-            btn_delete.pack(side='left', padx=2, pady=2)
-            
-            btn_refresh = tk.Button(toolbar, text="Refresh", command=self.refresh_scripts,
-                                   relief='raised', bd=2, bg=self.button_color, font=('MS Sans Serif', 8))
-            btn_refresh.pack(side='left', padx=2, pady=2)
-            
-            # Main content area
-            content_frame = tk.Frame(main_frame, bg=self.bg_color, relief='sunken', bd=2)
-            content_frame.pack(fill='both', expand=True)
-            
-            # Left panel - Script list
-            left_panel = tk.Frame(content_frame, bg=self.bg_color, width=250, relief='sunken', bd=1)
-            left_panel.pack(side='left', fill='y', padx=5, pady=5)
-            left_panel.pack_propagate(False)
-            
-            tk.Label(left_panel, text="Available Scripts", bg=self.bg_color, 
-                    font=('MS Sans Serif', 8, 'bold')).pack(anchor='w', padx=5, pady=5)
-            
-            # Script listbox with scrollbar
-            listbox_frame = tk.Frame(left_panel, bg=self.bg_color)
-            listbox_frame.pack(fill='both', expand=True, padx=5, pady=5)
-            
-            self.script_listbox = tk.Listbox(listbox_frame, font=('MS Sans Serif', 8),
-                                            bg='white', selectmode='single',
-                                            relief='sunken', bd=2)
-            scrollbar = tk.Scrollbar(listbox_frame, orient='vertical', command=self.script_listbox.yview)
-            self.script_listbox.configure(yscrollcommand=scrollbar.set)
-            
-            self.script_listbox.pack(side='left', fill='both', expand=True)
-            scrollbar.pack(side='right', fill='y')
-            
-            # Bind double click to run script
-            self.script_listbox.bind('<Double-Button-1>', self.run_selected_script)
-            
-            # Right panel - Output and controls
-            right_panel = tk.Frame(content_frame, bg=self.bg_color, relief='sunken', bd=1)
-            right_panel.pack(side='right', fill='both', expand=True, padx=5, pady=5)
-            
-            # Control buttons
-            control_frame = tk.Frame(right_panel, bg=self.bg_color)
-            control_frame.pack(fill='x', padx=5, pady=5)
-            
-            self.run_button = tk.Button(control_frame, text="Run Script", command=self.run_selected_script,
-                                       relief='raised', bd=2, bg='#00ff00', font=('MS Sans Serif', 8, 'bold'))
-            self.run_button.pack(side='left', padx=5)
-            
-            self.stop_button = tk.Button(control_frame, text="Stop", command=self.stop_script,
-                                        relief='raised', bd=2, bg='#ff0000', font=('MS Sans Serif', 8, 'bold'),
-                                        state='disabled')
-            self.stop_button.pack(side='left', padx=5)
-            
-            # Output area
-            tk.Label(right_panel, text="Output Console", bg=self.bg_color, 
-                    font=('MS Sans Serif', 8, 'bold')).pack(anchor='w', padx=5, pady=(10, 5))
-            
-            self.output_text = scrolledtext.ScrolledText(right_panel, height=20, width=50,
-                                                        font=('Courier New', 8), bg='black', fg='#00ff00',
-                                                        relief='sunken', bd=2)
-            self.output_text.pack(fill='both', expand=True, padx=5, pady=5)
-            
-            # Status bar
-            status_frame = tk.Frame(main_frame, bg=self.bg_color, relief='sunken', bd=1, height=25)
-            status_frame.pack(fill='x', side='bottom')
-            status_frame.pack_propagate(False)
-            
-            self.status_label = tk.Label(status_frame, text="Ready", bg=self.bg_color, 
-                                        font=('MS Sans Serif', 8), anchor='w')
-            self.status_label.pack(fill='x', padx=5, pady=2)
-            
-            # Load initial scripts
-            self.refresh_script_list()
-            
-        def load_scripts(self):
-            """Load scripts from JSON file"""
-            try:
-                if os.path.exists('scripts.json'):
-                    with open('scripts.json', 'r', encoding='utf-8') as f:
-                        self.scripts = json.load(f)
-                else:
-                    # Default scripts
-                    self.scripts = {
-                        "System Info": {
-                            "command": "python -c \"import platform; print('System:', platform.system()); print('Version:', platform.version()); print('Machine:', platform.machine())\"",
-                            "category": "System",
-                            "description": "Display system information"
-                        },
-                        "List Files": {
-                            "command": "dir" if sys.platform == "win32" else "ls -la",
-                            "category": "Files",
-                            "description": "List files in current directory"
-                        },
-                        "Python Version": {
-                            "command": "python --version",
-                            "category": "Development",
-                            "description": "Show Python version"
-                        },
-                        "Disk Usage": {
-                            "command": "python -c \"import shutil; total, used, free = shutil.disk_usage('.'); print(f'Total: {total//1024//1024//1024}GB'); print(f'Used: {used//1024//1024//1024}GB'); print(f'Free: {free//1024//1024//1024}GB')\"",
-                            "category": "System",
-                            "description": "Show disk usage"
-                        },
-                        "Current Time": {
-                            "command": "python -c \"from datetime import datetime; print('Current time:', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))\"",
-                            "category": "Utilities",
-                            "description": "Display current date and time"
-                        }
-                    }
-                    self.save_scripts()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load scripts: {e}")
-                self.scripts = {}
-        
-        def save_scripts(self):
-            """Save scripts to JSON file"""
-            try:
-                with open('scripts.json', 'w', encoding='utf-8') as f:
-                    json.dump(self.scripts, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to save scripts: {e}")
-        
-        def refresh_script_list(self):
-            """Refresh the script list display"""
-            self.script_listbox.delete(0, tk.END)
-            for name, script in self.scripts.items():
-                category = script.get('category', 'General')
-                self.script_listbox.insert(tk.END, f"[{category}] {name}")
-        
-        def add_script(self):
-            """Add a new script"""
-            dialog = ScriptDialog(self.root_scr, "Add New Script")
-            result = dialog.show()
-            
-            if result:
-                name, command, category, description = result
-                if name in self.scripts:
-                    messagebox.showerror("Error", "Script name already exists!")
-                    return
-                    
-                self.scripts[name] = {
-                    "command": command,
-                    "category": category,
-                    "description": description
-                }
-                self.save_scripts()
-                self.refresh_script_list()
-                self.update_status(f"Added script: {name}")
-        
-        def edit_script(self):
-            """Edit selected script"""
-            selection = self.script_listbox.curselection()
-            if not selection:
-                messagebox.showwarning("Warning", "Please select a script to edit")
-                return
-                
-            item_text = self.script_listbox.get(selection[0])
-            script_name = item_text.split('] ', 1)[1]
-            
-            if script_name not in self.scripts:
-                messagebox.showerror("Error", "Script not found!")
-                return
-                
-            script = self.scripts[script_name]
-            dialog = ScriptDialog(self.root_scr, "Edit Script", script_name, 
-                                 script['command'], script['category'], script['description'])
-            result = dialog.show()
-            
-            if result:
-                name, command, category, description = result
-                
-                # If name changed, remove old entry
-                if name != script_name:
-                    del self.scripts[script_name]
-                    
-                self.scripts[name] = {
-                    "command": command,
-                    "category": category,
-                    "description": description
-                }
-                self.save_scripts()
-                self.refresh_script_list()
-                self.update_status(f"Updated script: {name}")
-        
-        def delete_script(self):
-            """Delete selected script"""
-            selection = self.script_listbox.curselection()
-            if not selection:
-                messagebox.showwarning("Warning", "Please select a script to delete")
-                return
-                
-            item_text = self.script_listbox.get(selection[0])
-            script_name = item_text.split('] ', 1)[1]
-            
-            if messagebox.askyesno("Confirm Delete", f"Delete script '{script_name}'?"):
-                if script_name in self.scripts:
-                    del self.scripts[script_name]
-                    self.save_scripts()
-                    self.refresh_script_list()
-                    self.update_status(f"Deleted script: {script_name}")
-        
-        def refresh_scripts(self):
-            """Refresh script list"""
-            self.load_scripts()
-            self.refresh_script_list()
-            self.update_status("Scripts refreshed")
-        
-        def run_selected_script(self, event=None):
-            """Run the selected script"""
-            selection = self.script_listbox.curselection()
-            if not selection:
-                messagebox.showwarning("Warning", "Please select a script to run")
-                return
-                
-            item_text = self.script_listbox.get(selection[0])
-            script_name = item_text.split('] ', 1)[1]
-            
-            if script_name not in self.scripts:
-                messagebox.showerror("Error", "Script not found!")
-                return
-                
-            self.run_script(script_name)
-        
-        def run_script(self, script_name):
-            """Execute a script in a separate thread"""
-            if self.running_process:
-                messagebox.showwarning("Warning", "A script is already running!")
-                return
-                
-            script = self.scripts[script_name]
-            command = script['command']
-            
-            # Clear output
-            self.output_text.delete(1.0, tk.END)
-            self.output_text.insert(tk.END, f">>> Running: {script_name}\n")
-            self.output_text.insert(tk.END, f">>> Command: {command}\n")
-            self.output_text.insert(tk.END, f">>> Started at: {datetime.now().strftime('%H:%M:%S')}\n\n")
-            
-            # Update UI state
-            self.run_button.config(state='disabled')
-            self.stop_button.config(state='normal')
-            self.update_status(f"Running: {script_name}")
-            
-            # Start script in thread
-            thread = threading.Thread(target=self._execute_script, args=(command, script_name))
-            thread.daemon = True
-            thread.start()
-        
-        def _execute_script(self, command, script_name):
-            """Execute script in subprocess"""
-            try:
-                # Determine shell based on OS
-                shell = True if sys.platform == "win32" else False
-                
-                self.running_process = subprocess.Popen(
-                    command,
-                    shell=shell,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
-                
-                # Read output line by line
-                for line in iter(self.running_process.stdout.readline, ''):
-                    if line:
-                        self.root_scr.after(0, self._update_output, line)
-                
-                self.running_process.wait()
-                return_code = self.running_process.returncode
-                
-                # Update UI when finished
-                self.root_scr.after(0, self._script_finished, script_name, return_code)
-                
-            except Exception as e:
-                self.root_scr.after(0, self._script_error, script_name, str(e))
-            finally:
-                self.running_process = None
-        
-        def _update_output(self, text):
-            """Update output text (called from main thread)"""
-            self.output_text.insert(tk.END, text)
-            self.output_text.see(tk.END)
-            self.root_scr.update_idletasks()
-        
-        def _script_finished(self, script_name, return_code):
-            """Handle script completion"""
-            self.output_text.insert(tk.END, f"\n>>> Finished: {script_name}\n")
-            self.output_text.insert(tk.END, f">>> Exit code: {return_code}\n")
-            self.output_text.insert(tk.END, f">>> Ended at: {datetime.now().strftime('%H:%M:%S')}\n")
-            
-            self.run_button.config(state='normal')
-            self.stop_button.config(state='disabled')
-            
-            if return_code == 0:
-                self.update_status(f"Completed: {script_name}")
-            else:
-                self.update_status(f"Failed: {script_name} (exit code: {return_code})")
-        
-        def _script_error(self, script_name, error):
-            """Handle script error"""
-            self.output_text.insert(tk.END, f"\n>>> ERROR running {script_name}: {error}\n")
-            self.run_button.config(state='normal')
-            self.stop_button.config(state='disabled')
-            self.update_status(f"Error: {script_name}")
-        
-        def stop_script(self):
-            """Stop running script"""
-            if self.running_process:
+    def script_runner_95():
+        """Script Runner (Windows 95 look). The scripts are kept in Config/dbo_bitpack.db, table script_runner_scripts;
+        the old scripts.json is imported the first time."""
+        import os
+        import json
+        import time
+        import queue
+        import signal
+        import sqlite3
+        import threading
+        import subprocess
+        from datetime import datetime
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from tkinter import filedialog
+
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Script Runner"
+        DB_PATH = "Config/dbo_bitpack.db"
+        OLD_JSON = "scripts.json"
+        MAX_OUTPUT_LINES = 20000
+        CREATE_NO_WINDOW = 0x08000000
+        DEFAULT_SCRIPTS = [
+            ("System Info", "python -c \"import platform; print('System:', platform.system()); print('Version:', "
+                            "platform.version()); print('Machine:', platform.machine())\"",
+             "System", "Display system information"),
+            ("List Files", "dir" if IS_WINDOWS else "ls -la", "Files", "List files in current directory"),
+            ("Python Version", "python --version", "Development", "Show Python version"),
+            ("Disk Usage", "python -c \"import shutil; total, used, free = shutil.disk_usage('.'); "
+                           "print('Total: %d GB' % (total // 2**30)); print('Used: %d GB' % (used // 2**30)); "
+                           "print('Free: %d GB' % (free // 2**30))\"", "System", "Show disk usage"),
+            ("Current Time", "python -c \"from datetime import datetime; print('Current time:', "
+                             "datetime.now().strftime('%Y-%m-%d %H:%M:%S'))\"", "Utilities", "Display current date and time"),
+        ]
+
+        def oem_codepage():
+            if IS_WINDOWS:
                 try:
-                    self.running_process.terminate()
-                    self.output_text.insert(tk.END, "\n>>> Script terminated by user\n")
-                    self.update_status("Script stopped")
-                except Exception as e:
-                    self.output_text.insert(tk.END, f"\n>>> Error stopping script: {e}\n")
+                    import ctypes
+                    return "cp%d" % ctypes.windll.kernel32.GetOEMCP()
+                except Exception:
+                    return "cp852"
+            return "utf-8"
+
+        OEM = oem_codepage()
+
+        def decode(raw):
+            """A line of output: UTF-8 first, then the console code page (diacritics were broken before)."""
+            for encoding in ("utf-8", OEM, "cp1250"):
+                try:
+                    return raw.decode(encoding)
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            return raw.decode("latin-1")
+
+        # ══════════════════════════════════════════════════════════════
+        # STORAGE (scripts.json is read once and moved into the database)
+        # ══════════════════════════════════════════════════════════════
+
+        class Store:
+            def __init__(self, path):
+                self.path = path
+                folder = os.path.dirname(path)
+                if folder and not os.path.isdir(folder):
+                    os.makedirs(folder)
+                with self.db() as conn:                  # the same table setup_database_ALL() makes
+                    conn.execute("CREATE TABLE IF NOT EXISTS script_runner_scripts (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                 "name TEXT NOT NULL UNIQUE, command TEXT NOT NULL, category TEXT, description TEXT, "
+                                 "workdir TEXT, last_run TEXT, last_exit INTEGER)")
+                    empty = conn.execute("SELECT COUNT(*) FROM script_runner_scripts").fetchone()[0] == 0
+                if empty:
+                    self.first_fill()
+
+            def db(self):
+                return sqlite3.connect(self.path, timeout=10)
+
+            def first_fill(self):
+                scripts = []
+                if os.path.isfile(OLD_JSON):
+                    try:
+                        with open(OLD_JSON, "r", encoding="utf-8") as fh:
+                            data = json.load(fh)
+                        for name, item in data.items():
+                            scripts.append((name, item.get("command", ""), item.get("category") or "General",
+                                            item.get("description") or ""))
+                    except (OSError, ValueError, AttributeError):
+                        scripts = []
+                if not scripts:
+                    scripts = DEFAULT_SCRIPTS
+                with self.db() as conn:
+                    conn.executemany("INSERT OR IGNORE INTO script_runner_scripts (name, command, category, description) "
+                                     "VALUES (?, ?, ?, ?)", [s for s in scripts if s[1]])
+
+            def all(self):
+                with self.db() as conn:
+                    rows = conn.execute("SELECT id, name, command, category, description, workdir, last_run, last_exit "
+                                        "FROM script_runner_scripts ORDER BY category COLLATE NOCASE, name COLLATE NOCASE"
+                                        ).fetchall()
+                keys = ("id", "name", "command", "category", "description", "workdir", "last_run", "last_exit")
+                return [dict(zip(keys, row)) for row in rows]
+
+            def save(self, data, script_id=None):
+                values = (data["name"], data["command"], data["category"] or "General", data["description"],
+                          data["workdir"] or None)
+                with self.db() as conn:
+                    if script_id:
+                        conn.execute("UPDATE script_runner_scripts SET name=?, command=?, category=?, description=?, "
+                                     "workdir=? WHERE id=?", values + (script_id,))
+                        return script_id
+                    return conn.execute("INSERT INTO script_runner_scripts (name, command, category, description, workdir) "
+                                        "VALUES (?, ?, ?, ?, ?)", values).lastrowid
+
+            def name_taken(self, name, except_id=None):
+                with self.db() as conn:
+                    return conn.execute("SELECT id FROM script_runner_scripts WHERE name = ? COLLATE NOCASE AND id IS NOT ?",
+                                        (name, except_id)).fetchone() is not None
+
+            def delete(self, script_id):
+                with self.db() as conn:
+                    conn.execute("DELETE FROM script_runner_scripts WHERE id = ?", (script_id,))
+
+            def finished(self, script_id, exit_code):
+                with self.db() as conn:
+                    conn.execute("UPDATE script_runner_scripts SET last_run = ?, last_exit = ? WHERE id = ?",
+                                 (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), exit_code, script_id))
+
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
+
+        class Win95ScriptRunner:
+            def __init__(self):
+                self.root_scr = root = tk.Tk()
+                self.store = Store(DB_PATH)
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.scripts, self.rows = [], []
+                self.running = None               # {"script", "process", "started", "stopped"} while a script runs
+                self.events = queue.Queue()
+                self.output_lines = 0
+                root.title(TITLE)
+                width = min(880, root.winfo_screenwidth() - 40)
+                height = min(620, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(620, 420)
+                root.configure(bg=FACE)
+                root.protocol("WM_DELETE_WINDOW", self.close)
+                self._make_icon()
+                self.create_title_bar()
+                self.setup_gui()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+                self.refresh_script_list()
+                self.poll()
+                self.tick()
+
+            # ----- frame -----------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((0, 1, 16, 15, BLACK), (1, 2, 15, 4, NAVY), (1, 4, 15, 14, BLACK),
+                                               (2, 6, 3, 7, "#c0c0c0"), (3, 7, 4, 8, "#c0c0c0"), (2, 8, 3, 9, "#c0c0c0"),
+                                               (5, 8, 9, 9, "#c0c0c0"), (12, 2, 14, 3, LIGHT)):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+
+            def create_title_bar(self):
+                root = self.root_scr
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                self.title_label = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                self.title_label.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, self.title_label, icon)
+                self.caption_button(bar, "close", self.close).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.root_scr.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                root = self.root_scr
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+            def _on_map(self, event):
+                root = self.root_scr
+                if event.widget is root and self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.root_scr.overrideredirect(False)
+                self.root_scr.iconify()
+
+            def toggle_maximize(self):
+                root = self.root_scr
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self._drag = (event.x_root - self.root_scr.winfo_x(), event.y_root - self.root_scr.winfo_y())
+
+            def _caption_drag(self, event):
+                if self.custom_frame and not self.maximized:
+                    self.root_scr.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+            def _grip_press(self, event):
+                root = self.root_scr
+                self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.root_scr.geometry("%dx%d" % (max(620, width + event.x_root - x0), max(420, height + event.y_root - y0)))
+
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it. A click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            # ----- Windows 95 dialogs ---------------------------------------------------------------------
+            def button(self, parent, text, command, width=None, default=False, state="normal", fg=BLACK):
+                widget = tk.Button(parent, text=text, command=command, font=FONT_B if default else FONT, bg=FACE,
+                                   fg=fg, activebackground=FACE, relief="raised", bd=2, padx=6, pady=1, state=state,
+                                   disabledforeground=SHADOW, highlightthickness=1 if default else 0,
+                                   highlightbackground=BLACK, takefocus=0)
+                if width:
+                    widget.config(width=width)
+                return widget
+
+            def window(self, title):
+                root = self.root_scr
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                label = tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B)
+                label.pack(side="left", padx=4)
+                win.close_button = self.caption_button(bar, "close", win.destroy)
+                win.close_button.pack(side="right", padx=2)
+
+                def press(event):
+                    win._drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+                def drag(event):
+                    win.geometry("+%d+%d" % (event.x_root - win._drag[0], event.y_root - win._drag[1]))
+                for widget in (bar, label):
+                    widget.bind("<ButtonPress-1>", press)
+                    widget.bind("<B1-Motion>", drag)
+                return win
+
+            def show(self, win):
+                root = self.root_scr
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                # (the old dialog called winfo_root_scrx(), which does not exist: New and Edit always failed)
+                win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                         root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+                win.lift()
+                win.focus_force()
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+
+            def message(self, title, text, icon="info", buttons=("OK",), default=0):
+                win = self.window(title)
+                result = {"value": buttons[-1]}
+
+                def answer(value):
+                    result["value"] = value
+                    win.destroy()
+                win.close_button.config(command=lambda: answer(buttons[-1]))
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                picture = tk.Canvas(body, width=32, height=32, bg=FACE, highlightthickness=0)
+                if icon == "error":
+                    picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                    picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                    picture.create_line(22, 10, 10, 22, fill="white", width=3)
+                elif icon == "warning":
+                    picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=BLACK)
+                    picture.create_text(16, 19, text="!", fill=BLACK, font=("Times New Roman", 15, "bold"))
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=LIGHT, outline=BLACK)
+                    picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                        font=("Times New Roman", 16, "bold"))
+                picture.pack(side="left", anchor="n", padx=(0, 12))
+                tk.Label(body, text=text, bg=FACE, font=FONT, justify="left", wraplength=380).pack(side="left")
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                for index, label in enumerate(buttons):
+                    self.button(row, label, lambda v=label: answer(v), width=9, default=index == default).pack(
+                        side="left", padx=4)
+                win.bind("<Return>", lambda e: answer(buttons[default]))
+                win.bind("<Escape>", lambda e: answer(buttons[-1]))
+                self.show(win)
+                return result["value"]
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def setup_gui(self):
+                root = self.root_scr
+                bar = tk.Frame(root, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                m = menubutton("File")
+                m.add_command(label="New Script...", accelerator="Ctrl+N", command=self.add_script)
+                m.add_command(label="Edit Script...", accelerator="F2", command=self.edit_script)
+                m.add_command(label="Duplicate Script", command=self.duplicate_script)
+                m.add_command(label="Delete Script", accelerator="Del", command=self.delete_script)
+                m.add_separator()
+                m.add_command(label="Save Output As...", accelerator="Ctrl+S", command=self.save_output)
+                m.add_separator()
+                m.add_command(label="Exit", command=self.close)
+                m = menubutton("Run")
+                m.add_command(label="Run Script", accelerator="F5", command=self.run_selected_script)
+                m.add_command(label="Stop", accelerator="Esc", command=self.stop_script)
+                m = menubutton("Output")
+                m.add_command(label="Copy All", command=self.copy_output)
+                m.add_command(label="Clear", command=self.clear_output)
+                m = menubutton("Help")
+                m.add_command(label="About Script Runner", command=lambda: self.message(
+                    "About Script Runner", "Script Runner\n\nRuns saved commands (cmd / shell lines) and shows what they "
+                    "print. Stop ends the command and everything it started.\n\nThe scripts are kept in the Bitpack "
+                    "database; the old scripts.json was imported."))
+
+                toolbar = tk.Frame(root, bg=FACE, bd=1, relief="raised")
+                toolbar.pack(side="top", fill="x")
+                for text, command in (("New Script", self.add_script), ("Edit", self.edit_script),
+                                      ("Delete", self.delete_script), ("Refresh", self.refresh_scripts)):
+                    self.button(toolbar, text, command).pack(side="left", padx=1, pady=3)
+                tk.Frame(toolbar, bg=FACE, width=2, height=22, bd=1, relief="sunken").pack(side="left", padx=5)
+                self.run_button = self.button(toolbar, "Run Script", self.run_selected_script, default=True, fg="#006000")
+                self.run_button.pack(side="left", padx=1, pady=3)
+                self.stop_button = self.button(toolbar, "Stop", self.stop_script, state="disabled", fg="#c00000")
+                self.stop_button.pack(side="left", padx=1, pady=3)
+
+                status = tk.Frame(root, bg=FACE)
+                status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(status, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=LIGHT)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                self.elapsed_label = tk.Label(status, text="", font=FONT, bg=FACE, relief="sunken", bd=1, width=16,
+                                              anchor="w", padx=4)
+                self.elapsed_label.pack(side="right", padx=1)
+                self.status_label = tk.Label(status, text="Ready", font=FONT, bg=FACE, relief="sunken", bd=1, anchor="w",
+                                             padx=4)
+                self.status_label.pack(side="left", fill="x", expand=True, padx=1)
+
+                paned = tk.PanedWindow(root, orient="horizontal", sashwidth=4, sashrelief="raised", bg=FACE, bd=0)
+                paned.pack(fill="both", expand=True, padx=4, pady=4)
+                left = tk.LabelFrame(paned, text=" Available Scripts ", font=FONT, bg=FACE, bd=2, relief="groove")
+                holder = tk.Frame(left, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=6, pady=6)
+                scroll = tk.Scrollbar(holder, orient="vertical")
+                scroll.pack(side="right", fill="y")
+                self.script_listbox = tk.Listbox(holder, font=FONT, bg=LIGHT, bd=0, highlightthickness=0,
+                                                 activestyle="none", selectbackground=NAVY, selectforeground=LIGHT,
+                                                 exportselection=False, yscrollcommand=scroll.set, width=30)
+                self.script_listbox.pack(fill="both", expand=True)
+                scroll.config(command=self.script_listbox.yview)
+                self.script_listbox.bind("<<ListboxSelect>>", lambda e: self.show_details())
+                self.script_listbox.bind("<Double-Button-1>", lambda e: self.run_selected_script())
+                self.script_listbox.bind("<Return>", lambda e: self.run_selected_script())
+                self.script_listbox.bind("<Delete>", lambda e: self.delete_script())
+                self.script_listbox.bind("<Button-3>", self._context_menu)
+                paned.add(left, minsize=200, width=260)
+
+                right = tk.Frame(paned, bg=FACE)
+                details = tk.LabelFrame(right, text=" Script ", font=FONT, bg=FACE, bd=2, relief="groove")
+                details.pack(fill="x")
+                self.detail_name = tk.Label(details, text="", font=FONT_B, bg=FACE, anchor="w")
+                self.detail_name.pack(fill="x", padx=8, pady=(4, 0))
+                self.detail_desc = tk.Label(details, text="Select a script.", font=FONT, bg=FACE, anchor="w", justify="left")
+                self.detail_desc.pack(fill="x", padx=8)
+                self.detail_cmd = tk.Label(details, text="", font=("Courier New", 9), bg=LIGHT, anchor="w", justify="left",
+                                           relief="sunken", bd=1, padx=4, wraplength=520)
+                self.detail_cmd.pack(fill="x", padx=8, pady=4)
+                self.detail_last = tk.Label(details, text="", font=FONT, bg=FACE, fg=SHADOW, anchor="w")
+                self.detail_last.pack(fill="x", padx=8, pady=(0, 4))
+                details.bind("<Configure>", lambda e: self.detail_cmd.config(wraplength=max(200, e.width - 40)))
+                out = tk.LabelFrame(right, text=" Output Console ", font=FONT, bg=FACE, bd=2, relief="groove")
+                out.pack(fill="both", expand=True, pady=(6, 0))
+                holder = tk.Frame(out, bg=BLACK, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=6, pady=6)
+                ys = tk.Scrollbar(holder, orient="vertical")
+                ys.pack(side="right", fill="y")
+                self.output_text = tk.Text(holder, font=("Courier New", 9), bg=BLACK, fg="#00ff00", bd=0,
+                                           highlightthickness=0, insertbackground="#00ff00", wrap="char",
+                                           yscrollcommand=ys.set, selectbackground=NAVY, selectforeground=LIGHT)
+                self.output_text.pack(fill="both", expand=True)
+                ys.config(command=self.output_text.yview)
+                self.output_text.tag_configure("info", foreground="#c0c0c0")
+                self.output_text.tag_configure("error", foreground="#ff6060")
+                self.output_text.bind("<Key>", lambda e: None if (e.state & 4 and e.keysym.lower() in ("c", "a")) or
+                                      e.keysym in ("Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End") else "break")
+                paned.add(right, minsize=320)
+                for key, action in (("<F5>", self.run_selected_script), ("<Escape>", self.stop_script),
+                                    ("<Control-n>", self.add_script), ("<F2>", self.edit_script),
+                                    ("<Control-s>", self.save_output)):
+                    root.bind(key, lambda e, a=action: (a(), "break")[1])
+
+            # ----- the list ----------------------------------------------------------------------------------
+            def refresh_script_list(self, select_id=None):
+                keep = select_id or (self.selected()["id"] if self.selected() else None)
+                try:
+                    self.scripts = self.store.all()
+                except sqlite3.Error as exc:
+                    self.scripts = []
+                    self.update_status("The scripts could not be read: %s" % exc)
+                box = self.script_listbox
+                box.delete(0, "end")
+                self.rows = []                          # list line -> script (None for a category title)
+                category = None
+                for script in self.scripts:
+                    cat = script["category"] or "General"
+                    if cat != category:
+                        category = cat
+                        box.insert("end", cat)
+                        box.itemconfig("end", fg=NAVY, selectbackground=FACE, selectforeground=NAVY)
+                        self.rows.append(None)
+                    mark = "  " if script["last_exit"] in (None, 0) else "! "
+                    box.insert("end", "   " + mark + script["name"])
+                    if script["last_exit"] not in (None, 0):
+                        box.itemconfig("end", fg="#c00000")
+                    self.rows.append(script)
+                for index, script in enumerate(self.rows):
+                    if script and script["id"] == keep:
+                        box.selection_set(index)
+                        box.see(index)
+                self.show_details()
+
+            def selected(self):
+                """The chosen script, by its row (the name was cut from the text at '] ' before)."""
+                picked = self.script_listbox.curselection() if hasattr(self, "script_listbox") else ()
+                if picked and picked[0] < len(self.rows):
+                    return self.rows[picked[0]]
+                return None
+
+            def show_details(self):
+                script = self.selected()
+                if not script:
+                    self.detail_name.config(text="")
+                    self.detail_desc.config(text="Select a script.")
+                    self.detail_cmd.config(text="")
+                    self.detail_last.config(text="")
+                    return
+                self.detail_name.config(text=script["name"])
+                self.detail_desc.config(text=script["description"] or "(no description)")
+                self.detail_cmd.config(text=script["command"])
+                last = "Never run" if not script["last_run"] else "Last run %s - exit code %s" % (
+                    datetime.strptime(script["last_run"], "%Y-%m-%d %H:%M:%S").strftime("%d.%m.%Y %H:%M"),
+                    script["last_exit"])
+                if script["workdir"]:
+                    last += "   |   runs in %s" % script["workdir"]
+                self.detail_last.config(text=last)
+
+            def _context_menu(self, event):
+                index = self.script_listbox.nearest(event.y)
+                if index >= 0:
+                    self.script_listbox.selection_clear(0, "end")
+                    self.script_listbox.selection_set(index)
+                    self.show_details()
+                menu = tk.Menu(self.root_scr, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                menu.add_command(label="Run", command=self.run_selected_script, font=FONT_B)
+                menu.add_separator()
+                menu.add_command(label="Edit...", command=self.edit_script)
+                menu.add_command(label="Duplicate", command=self.duplicate_script)
+                menu.add_command(label="Delete", command=self.delete_script)
+                menu.add_separator()
+                menu.add_command(label="Copy Command", command=lambda: self.selected() and (
+                    self.root_scr.clipboard_clear(), self.root_scr.clipboard_append(self.selected()["command"])))
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
                 finally:
-                    self.run_button.config(state='normal')
-                    self.stop_button.config(state='disabled')
-                    self.running_process = None
-        
-        def update_status(self, message):
-            """Update status bar"""
-            self.status_label.config(text=f"{datetime.now().strftime('%H:%M:%S')} - {message}")
-        
-        def run(self):
-            """Start the application"""
-            self.root_scr.mainloop()
+                    menu.grab_release()
 
+            # ----- editing scripts ---------------------------------------------------------------------------
+            def script_dialog(self, title, script=None):
+                script = script or {"name": "", "command": "", "category": "General", "description": "", "workdir": ""}
+                win = self.window(title)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(padx=12, pady=8, fill="both", expand=True)
 
-    class ScriptDialog:
-        def __init__(self, parent, title, name="", command="", category="General", description=""):
-            self.result = None
-            self.dialog = tk.Toplevel(parent)
-            self.dialog.title(title)
-            self.dialog.geometry("500x400")
-            self.dialog.configure(bg='#c0c0c0')
-            self.dialog.resizable(False, False)
-            self.dialog.transient(parent)
-            self.dialog.grab_set()
-            
-            # Center the dialog
-            self.dialog.geometry("+%d+%d" % (parent.winfo_root_scrx() + 50, parent.winfo_root_scry() + 50))
-            
-            self.setup_dialog(name, command, category, description)
-        
-        def setup_dialog(self, name, command, category, description):
-            # Main frame
-            main_frame = tk.Frame(self.dialog, bg='#c0c0c0', relief='raised', bd=2)
-            main_frame.pack(fill='both', expand=True, padx=10, pady=10)
-            
-            # Name field
-            tk.Label(main_frame, text="Script Name:", bg='#c0c0c0', font=('MS Sans Serif', 8)).pack(anchor='w', pady=5)
-            self.name_entry = tk.Entry(main_frame, font=('MS Sans Serif', 8), relief='sunken', bd=2)
-            self.name_entry.pack(fill='x', pady=(0, 10))
-            self.name_entry.insert(0, name)
-            
-            # Category field
-            tk.Label(main_frame, text="Category:", bg='#c0c0c0', font=('MS Sans Serif', 8)).pack(anchor='w', pady=5)
-            self.category_entry = tk.Entry(main_frame, font=('MS Sans Serif', 8), relief='sunken', bd=2)
-            self.category_entry.pack(fill='x', pady=(0, 10))
-            self.category_entry.insert(0, category)
-            
-            # Command field
-            tk.Label(main_frame, text="Command:", bg='#c0c0c0', font=('MS Sans Serif', 8)).pack(anchor='w', pady=5)
-            self.command_text = scrolledtext.ScrolledText(main_frame, height=8, font=('Courier New', 8),
-                                                         relief='sunken', bd=2)
-            self.command_text.pack(fill='both', expand=True, pady=(0, 10))
-            self.command_text.insert(1.0, command)
-            
-            # Description field
-            tk.Label(main_frame, text="Description:", bg='#c0c0c0', font=('MS Sans Serif', 8)).pack(anchor='w', pady=5)
-            self.desc_entry = tk.Entry(main_frame, font=('MS Sans Serif', 8), relief='sunken', bd=2)
-            self.desc_entry.pack(fill='x', pady=(0, 15))
-            self.desc_entry.insert(0, description)
-            
-            # Buttons
-            button_frame = tk.Frame(main_frame, bg='#c0c0c0')
-            button_frame.pack(fill='x')
-            
-            tk.Button(button_frame, text="OK", command=self.ok_clicked, 
-                     relief='raised', bd=2, bg='#c0c0c0', font=('MS Sans Serif', 8), width=10).pack(side='right', padx=5)
-            tk.Button(button_frame, text="Cancel", command=self.cancel_clicked,
-                     relief='raised', bd=2, bg='#c0c0c0', font=('MS Sans Serif', 8), width=10).pack(side='right')
-            
-            # Focus on name entry
-            self.name_entry.focus()
-        
-        def ok_clicked(self):
-            name = self.name_entry.get().strip()
-            command = self.command_text.get(1.0, tk.END).strip()
-            category = self.category_entry.get().strip()
-            description = self.desc_entry.get().strip()
-            
-            if not name or not command:
-                messagebox.showerror("Error", "Name and Command are required!")
-                return
-                
-            self.result = (name, command, category, description)
-            self.dialog.destroy()
-        
-        def cancel_clicked(self):
-            self.dialog.destroy()
-        
-        def show(self):
-            self.dialog.wait_window()
-            return self.result
+                def field(row, label, value, width=56):
+                    tk.Label(body, text=label, font=FONT, bg=FACE).grid(row=row, column=0, sticky="w", pady=3)
+                    entry = tk.Entry(body, font=FONT, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0, width=width)
+                    entry.insert(0, value or "")
+                    entry.grid(row=row, column=1, sticky="ew", padx=(8, 0), pady=3)
+                    return entry
+                name = field(0, "Script Name:", script["name"])
+                category = field(1, "Category:", script["category"])
+                description = field(2, "Description:", script["description"])
+                tk.Label(body, text="Command:", font=FONT, bg=FACE).grid(row=3, column=0, sticky="nw", pady=3)
+                holder = tk.Frame(body, bg=LIGHT, bd=2, relief="sunken")
+                holder.grid(row=3, column=1, sticky="nsew", padx=(8, 0), pady=3)
+                command = tk.Text(holder, font=("Courier New", 9), height=6, width=60, bd=0, highlightthickness=0,
+                                  wrap="word", undo=True)
+                command.pack(fill="both", expand=True)
+                command.insert("1.0", script["command"])
+                tk.Label(body, text="Run in folder:", font=FONT, bg=FACE).grid(row=4, column=0, sticky="w", pady=3)
+                row = tk.Frame(body, bg=FACE)
+                row.grid(row=4, column=1, sticky="ew", padx=(8, 0), pady=3)
+                workdir = tk.Entry(row, font=FONT, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0)
+                workdir.pack(side="left", fill="x", expand=True)
+                workdir.insert(0, script.get("workdir") or "")
+                self.button(row, "...", lambda: (lambda d: d and (workdir.delete(0, "end"), workdir.insert(0, d)))(
+                    filedialog.askdirectory(parent=win)), width=3).pack(side="left", padx=(4, 0))
+                tk.Label(body, text="(empty = the Bitpack folder)", font=FONT, bg=FACE, fg=SHADOW).grid(
+                    row=5, column=1, sticky="w", padx=(8, 0))
+                error = tk.Label(win, text="", font=FONT, bg=FACE, fg="#c00000")
+                error.pack()
+                result = {}
 
+                def ok():
+                    values = {"name": name.get().strip(), "command": command.get("1.0", "end-1c").strip(),
+                              "category": category.get().strip() or "General", "description": description.get().strip(),
+                              "workdir": workdir.get().strip()}
+                    if not values["name"] or not values["command"]:
+                        error.config(text="Name and Command are required!")
+                        return
+                    if self.store.name_taken(values["name"], script.get("id")):
+                        # fix: another script with that name was overwritten without a word before
+                        error.config(text="A script named '%s' already exists." % values["name"])
+                        return
+                    if values["workdir"] and not os.path.isdir(values["workdir"]):
+                        error.config(text="The folder does not exist.")
+                        return
+                    result.update(values)
+                    win.destroy()
+                buttons = tk.Frame(win, bg=FACE)
+                buttons.pack(pady=(4, 12))
+                self.button(buttons, "OK", ok, width=10, default=True).pack(side="left", padx=4)
+                self.button(buttons, "Cancel", win.destroy, width=10).pack(side="left", padx=4)
+                win.bind("<Escape>", lambda e: win.destroy())
+                name.focus_set()
+                self.show(win)
+                return result or None
 
-    if __name__ == "__main__":
+            def add_script(self):
+                data = self.script_dialog("Add New Script")
+                if data:
+                    new_id = self.store.save(data)
+                    self.refresh_script_list(select_id=new_id)
+                    self.update_status("Added script: %s" % data["name"])
+
+            def edit_script(self):
+                script = self.selected()
+                if not script:
+                    self.message("Warning", "Please select a script to edit", "warning")
+                    return
+                data = self.script_dialog("Edit Script", script)
+                if data:
+                    self.store.save(data, script["id"])
+                    self.refresh_script_list(select_id=script["id"])
+                    self.update_status("Updated script: %s" % data["name"])
+
+            def duplicate_script(self):
+                script = self.selected()
+                if not script:
+                    return
+                name, number = script["name"] + " (copy)", 2
+                while self.store.name_taken(name):
+                    name, number = "%s (copy %d)" % (script["name"], number), number + 1
+                data = dict(script, name=name)
+                new_id = self.store.save(data)
+                self.refresh_script_list(select_id=new_id)
+
+            def delete_script(self):
+                script = self.selected()
+                if not script:
+                    self.message("Warning", "Please select a script to delete", "warning")
+                    return
+                if self.running and self.running["script"]["id"] == script["id"]:
+                    self.message("Delete", "This script is running. Stop it first.", "warning")
+                    return
+                if self.message("Confirm Delete", "Delete script '%s'?" % script["name"], "question", ("Yes", "No"),
+                                default=1) == "Yes":
+                    self.store.delete(script["id"])
+                    self.refresh_script_list()
+                    self.update_status("Deleted script: %s" % script["name"])
+
+            def refresh_scripts(self):
+                self.refresh_script_list()
+                self.update_status("Scripts refreshed")
+
+            # ----- running ---------------------------------------------------------------------------------
+            def write(self, text, tag=None):
+                self.output_text.insert("end", text, (tag,) if tag else ())
+                self.output_lines += text.count("\n")
+                if self.output_lines > MAX_OUTPUT_LINES:              # a script that prints forever stays usable
+                    self.output_text.delete("1.0", "%d.0" % (self.output_lines - MAX_OUTPUT_LINES + 1))
+                    self.output_lines = MAX_OUTPUT_LINES
+                self.output_text.see("end")
+
+            def run_selected_script(self):
+                script = self.selected()
+                if not script:
+                    self.message("Warning", "Please select a script to run", "warning")
+                    return
+                self.run_script(script)
+
+            def run_script(self, script):
+                if self.running:                       # set at once (two quick clicks started two scripts before)
+                    self.message("Warning", "A script is already running!", "warning")
+                    return
+                workdir = script["workdir"] or os.getcwd()
+                self.running = {"script": script, "process": None, "started": time.time(), "stopped": False}
+                self.clear_output()
+                self.write(">>> Running: %s\n>>> Command: %s\n>>> Folder: %s\n>>> Started at: %s\n\n" % (
+                    script["name"], script["command"], workdir, datetime.now().strftime("%H:%M:%S")), "info")
+                self.run_button.config(state="disabled")
+                self.stop_button.config(state="normal")
+                self.update_status("Running: %s" % script["name"])
+                threading.Thread(target=self._execute_script, args=(self.running, workdir), daemon=True).start()
+
+            def _execute_script(self, job, workdir):
+                """In a thread: the output goes through a queue to the window."""
+                try:
+                    extra = {"creationflags": CREATE_NO_WINDOW} if IS_WINDOWS else {"start_new_session": True}
+                    process = subprocess.Popen(job["script"]["command"], shell=True, cwd=workdir, stdout=subprocess.PIPE,
+                                               stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **extra)
+                    job["process"] = process
+                    if job["stopped"]:
+                        self._kill_tree(process)
+                    for raw in iter(process.stdout.readline, b""):
+                        self.events.put(("line", job, decode(raw.rstrip(b"\r\n")) + "\n"))
+                    process.wait()
+                    self.events.put(("finished", job, process.returncode))
+                except Exception as exc:
+                    self.events.put(("error", job, str(exc)))
+
+            @staticmethod
+            def _kill_tree(process):
+                """The command AND what it started (Stop ended only cmd.exe before)."""
+                try:
+                    if IS_WINDOWS:
+                        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, creationflags=CREATE_NO_WINDOW, timeout=10)
+                    else:
+                        os.killpg(process.pid, signal.SIGTERM)
+                except (OSError, subprocess.SubprocessError):
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+
+            def stop_script(self):
+                job = self.running
+                if not job or job["stopped"]:
+                    return
+                job["stopped"] = True
+                if job["process"] is not None:
+                    self._kill_tree(job["process"])
+                self.update_status("Stopping...")
+
+            def poll(self):
+                try:
+                    for _ in range(500):
+                        kind, job, data = self.events.get_nowait()
+                        if job is not self.running:
+                            continue
+                        if kind == "line":
+                            self.write(data)
+                        elif kind == "finished":
+                            self._script_finished(job, data)
+                        else:
+                            self._script_error(job, data)
+                except queue.Empty:
+                    pass
+                self.poll_job = self.root_scr.after(50, self.poll)
+
+            def tick(self):
+                if self.running:
+                    seconds = int(time.time() - self.running["started"])
+                    self.elapsed_label.config(text="Running %d:%02d" % (seconds // 60, seconds % 60))
+                self.tick_job = self.root_scr.after(500, self.tick)
+
+            def _done(self):
+                self.running = None
+                self.run_button.config(state="normal")
+                self.stop_button.config(state="disabled")
+
+            def _script_finished(self, job, return_code):
+                script = job["script"]
+                seconds = time.time() - job["started"]
+                if job["stopped"]:
+                    self.write("\n>>> Script terminated by user\n", "error")
+                self.write("\n>>> Finished: %s\n>>> Exit code: %s\n>>> Ended at: %s (%.1f s)\n" % (
+                    script["name"], return_code, datetime.now().strftime("%H:%M:%S"), seconds),
+                    "info" if return_code == 0 else "error")
+                try:
+                    self.store.finished(script["id"], return_code)
+                except sqlite3.Error:
+                    pass
+                self._done()
+                self.elapsed_label.config(text="%.1f s" % seconds)
+                self.update_status("%s: %s%s" % ("Stopped" if job["stopped"] else ("Completed" if return_code == 0 else
+                                                                                    "Failed"), script["name"],
+                                                "" if return_code == 0 else " (exit code: %s)" % return_code))
+                self.refresh_script_list(select_id=script["id"])
+
+            def _script_error(self, job, error):
+                self.write("\n>>> ERROR running %s: %s\n" % (job["script"]["name"], error), "error")
+                self._done()
+                self.update_status("Error: %s" % job["script"]["name"])
+
+            # ----- output ----------------------------------------------------------------------------------
+            def clear_output(self):
+                self.output_text.delete("1.0", "end")
+                self.output_lines = 0
+
+            def copy_output(self):
+                self.root_scr.clipboard_clear()
+                self.root_scr.clipboard_append(self.output_text.get("1.0", "end-1c"))
+                self.update_status("Output copied to the clipboard")
+
+            def save_output(self):
+                path = filedialog.asksaveasfilename(parent=self.root_scr, defaultextension=".txt",
+                                                    initialfile="output_%s.txt" % datetime.now().strftime("%Y%m%d_%H%M%S"),
+                                                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+                if path:
+                    try:
+                        with open(path, "w", encoding="utf-8") as fh:
+                            fh.write(self.output_text.get("1.0", "end-1c"))
+                        self.update_status("Output saved: %s" % path)
+                    except OSError as exc:
+                        self.message("Error", "Could not save:\n%s" % exc, "error")
+
+            def update_status(self, message):
+                self.status_label.config(text="%s - %s" % (datetime.now().strftime("%H:%M:%S"), message))
+
+            def close(self):
+                if self.running:
+                    if self.message("Exit", "'%s' is running. Stop it and exit?" % self.running["script"]["name"],
+                                    "question", ("Yes", "No"), default=1) != "Yes":
+                        return
+                    self.stop_script()
+                for job in ("poll_job", "tick_job"):
+                    try:
+                        self.root_scr.after_cancel(getattr(self, job))
+                    except (AttributeError, tk.TclError):
+                        pass
+                self.root_scr.destroy()
+
+            def run(self):
+                self.root_scr.mainloop()
+
         app = Win95ScriptRunner()
         app.run()
+        return app
+
+    script_runner_95()
         
 if recoveryVarr == 777666090:
     import tkinter.font as tkFont
@@ -153610,585 +155173,937 @@ if convcalcvar == 11100011100011100011100023:
             # Rularea buclei principale
             validation.mainloop()
 
-    class RetroConverterEcosystem:
-        def __init__(self, rootconvcalc1convcalc1):
-            self.rootconvcalc1convcalc1 = rootconvcalc1convcalc1
-            self.rootconvcalc1convcalc1.title("Universal Converter Suite")
-            self.rootconvcalc1convcalc1.geometry("900x750")
-            self.rootconvcalc1convcalc1.resizable(False, False)
-            
-            # Windows 95 colors
-            self.bg_color = "#c0c0c0"
-            self.highlight = "#dfdfdf"
-            self.shadow = "#808080"
-            self.dark_shadow = "#000000"
-            self.text_bg = "#ffffff"
-            self.text_fg = "#000000"
-            self.blue_title = "#000080"
-            self.blue_active = "#0000aa"
-            
-            self.rootconvcalc1convcalc1.configure(bg=self.bg_color)
-            
-            # History storage
-            self.history = []
-            self.current_tab = "numbers"
-            
-            self.setup_ui()
-        
-        def setup_ui(self):
-            # Main container
-            main_frame = tk.Frame(self.rootconvcalc1convcalc1, bg=self.bg_color)
-            main_frame.pack(fill=tk.BOTH, expand=True, padx=3, pady=3)
-            
-            # Title bar
-            title_frame = tk.Frame(main_frame, bg=self.blue_title, height=20)
-            title_frame.pack(fill=tk.X, side=tk.TOP)
-            title_label = tk.Label(title_frame, text="Universal Converter Suite v2.0", 
-                                  bg=self.blue_title, fg="#ffffff", font=("MS Sans Serif", 9, "bold"),
-                                  anchor="w", padx=2)
-            title_label.pack(fill=tk.X)
-            
-            # Tab selector
-            tab_frame = tk.Frame(main_frame, bg=self.bg_color, height=30)
-            tab_frame.pack(fill=tk.X, padx=2, pady=(2, 0))
-            
-            tab_label = tk.Label(tab_frame, text="Select Tool:", bg=self.bg_color, 
-                                fg=self.text_fg, font=("MS Sans Serif", 8))
-            tab_label.pack(anchor="w", padx=5, pady=2)
-            
-            button_frame = tk.Frame(tab_frame, bg=self.bg_color)
-            button_frame.pack(anchor="w", padx=5, pady=2)
-            
-            self.tab_buttons = {}
-            tabs = [("numbers", "Number Systems"), ("text", "Text Tools"), 
-                    ("hash", "Hash/Encode"), ("analyze", "Analysis")]
-            
-            for tab_id, tab_name in tabs:
-                btn = tk.Button(button_frame, text=tab_name, command=lambda t=tab_id: self.switch_tab(t),
-                               bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8),
-                               relief=tk.RAISED, borderwidth=2, padx=8, pady=2,
-                               activebackground=self.highlight, activeforeground=self.text_fg)
-                btn.pack(side=tk.LEFT, padx=2)
-                self.tab_buttons[tab_id] = btn
-            
-            # Content area
-            self.content_frame = tk.Frame(main_frame, bg=self.bg_color)
-            self.content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-            
-            # Initialize tabs
-            self.tabs = {}
-            self.create_number_tab()
-            self.create_text_tab()
-            self.create_hash_tab()
-            self.create_analysis_tab()
-            
-            self.switch_tab("numbers")
-        
-        def create_button(self, parent, text, command):
-            btn = tk.Button(parent, text=text, command=command, 
-                           bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8),
-                           relief=tk.RAISED, borderwidth=2, padx=10, pady=2,
-                           activebackground=self.highlight, activeforeground=self.text_fg)
-            return btn
-        
-        def switch_tab(self, tab_id):
-            for tab_content in self.tabs.values():
-                tab_content.pack_forget()
-            self.tabs[tab_id].pack(fill=tk.BOTH, expand=True)
-            self.current_tab = tab_id
-        
-        # ==================== NUMBER SYSTEMS TAB ====================
-        def create_number_tab(self):
-            tab = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.tabs["numbers"] = tab
-            
-            input_label = tk.Label(tab, text="Input Value:", 
-                                  bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8))
-            input_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.num_input_var = tk.StringVar()
-            self.num_input_entry = tk.Entry(tab, textvariable=self.num_input_var, 
-                                            bg=self.text_bg, fg=self.text_fg, font=("MS Sans Serif", 9),
-                                            width=50)
-            self.num_input_entry.pack(padx=5, pady=2, fill=tk.X)
-            self.num_input_entry.bind("<KeyRelease>", lambda e: self.convert_numbers())
-            
-            format_label = tk.Label(tab, text="Input Format:", 
-                                   bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8))
-            format_label.pack(anchor="w", padx=5, pady=(10, 0))
-            
-            button_frame = tk.Frame(tab, bg=self.bg_color)
-            button_frame.pack(anchor="w", padx=5, pady=2)
-            
-            self.num_format = tk.StringVar(value="decimal")
-            for fmt in ["decimal", "binary", "hexadecimal", "octal"]:
-                rb = tk.Radiobutton(button_frame, text=fmt.capitalize(), variable=self.num_format,
-                                   value=fmt, bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8),
-                                   command=self.convert_numbers, activebackground=self.bg_color)
-                rb.pack(anchor="w", pady=1)
-            
-            sep = tk.Frame(tab, bg=self.shadow, height=1)
-            sep.pack(fill=tk.X, padx=5, pady=8)
-            
-            output_label = tk.Label(tab, text="Conversion Results:", 
-                                   bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8, "bold"))
-            output_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.num_output_text = scrolledtext.ScrolledText(tab, height=12, width=60,
-                                                             bg=self.text_bg, fg=self.text_fg,
-                                                             font=("Courier New", 9),
-                                                             wrap=tk.WORD, relief=tk.SUNKEN,
-                                                             borderwidth=1)
-            self.num_output_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            self.num_output_text.config(state=tk.DISABLED)
-            
-            sep2 = tk.Frame(tab, bg=self.shadow, height=1)
-            sep2.pack(fill=tk.X, padx=5, pady=8)
-            
-            btn_frame = tk.Frame(tab, bg=self.bg_color)
-            btn_frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            self.create_button(btn_frame, "Convert", self.convert_numbers).pack(side=tk.LEFT, padx=2)
-            self.create_button(btn_frame, "Clear", self.clear_numbers).pack(side=tk.LEFT, padx=2)
-        
-        def convert_numbers(self):
-            input_value = self.num_input_var.get().strip()
-            if not input_value:
-                self.display_num_output("")
-                return
-            
-            input_format = self.num_format.get()
-            
-            try:
-                if input_format == "decimal":
-                    if not re.match(r'^-?\d+$', input_value):
-                        raise ValueError("Invalid decimal format")
-                    decimal_val = int(input_value)
-                elif input_format == "binary":
-                    if not re.match(r'^-?[01]+$', input_value):
-                        raise ValueError("Invalid binary format")
-                    decimal_val = int(input_value, 2)
-                elif input_format == "hexadecimal":
-                    if not re.match(r'^-?[0-9a-fA-F]+$', input_value):
-                        raise ValueError("Invalid hexadecimal format")
-                    decimal_val = int(input_value, 16)
-                elif input_format == "octal":
-                    if not re.match(r'^-?[0-7]+$', input_value):
-                        raise ValueError("Invalid octal format")
-                    decimal_val = int(input_value, 8)
-                
-                output = "[NUMBER CONVERSION]\n" + "-" * 40 + "\n\n"
-                output += f"DECIMAL:\n  {decimal_val}\n\n"
-                
-                if decimal_val >= 0:
-                    output += f"BINARY:\n  {bin(decimal_val)[2:]}\n"
-                    output += f"  ({len(bin(decimal_val)[2:])} bits)\n\n"
-                    output += f"HEXADECIMAL:\n  {hex(decimal_val)[2:].upper()}\n\n"
-                    output += f"OCTAL:\n  {oct(decimal_val)[2:]}\n\n"
-                    output += "-" * 40 + "\n"
-                    output += f"Bits needed: {decimal_val.bit_length()}\n"
-                    output += f"Power of 2: {decimal_val > 0 and (decimal_val & (decimal_val - 1)) == 0}\n"
-                else:
-                    output += f"BINARY:\n  -{bin(decimal_val)[3:]}\n\n"
-                    output += f"HEXADECIMAL:\n  -{hex(decimal_val)[3:].upper()}\n\n"
-                    output += f"OCTAL:\n  -{oct(decimal_val)[3:]}\n"
-                
-                self.display_num_output(output)
-                self.add_history(f"Number: {input_value} ({input_format})")
-                
-            except ValueError as e:
-                self.display_num_output(f"ERROR: {str(e)}")
-        
-        def display_num_output(self, text):
-            self.num_output_text.config(state=tk.NORMAL)
-            self.num_output_text.delete(1.0, tk.END)
-            self.num_output_text.insert(tk.END, text)
-            self.num_output_text.config(state=tk.DISABLED)
-        
-        def clear_numbers(self):
-            self.num_input_var.set("")
-            self.display_num_output("")
-        
-        # ==================== TEXT TOOLS TAB ====================
-        def create_text_tab(self):
-            tab = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.tabs["text"] = tab
-            
-            input_label = tk.Label(tab, text="Input Text:", 
-                                  bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8))
-            input_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.text_input_var = tk.StringVar()
-            self.text_input_entry = tk.Entry(tab, textvariable=self.text_input_var, 
-                                            bg=self.text_bg, fg=self.text_fg, font=("MS Sans Serif", 9),
-                                            width=80)
-            self.text_input_entry.pack(padx=5, pady=2, fill=tk.X)
-            self.text_input_entry.bind("<KeyRelease>", lambda e: self.convert_text())
-            
-            tools_label = tk.Label(tab, text="Text Tools:", 
-                                  bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8))
-            tools_label.pack(anchor="w", padx=5, pady=(10, 0))
-            
-            tools_frame = tk.Frame(tab, bg=self.bg_color)
-            tools_frame.pack(anchor="w", padx=5, pady=2)
-            
-            self.text_tool = tk.StringVar(value="ascii")
-            for tool in ["ascii", "reverse", "uppercase", "lowercase", "title", "count", 
-                         "text2binary", "text2hex", "text2octal", "binary2text", "hex2text"]:
-                rb = tk.Radiobutton(tools_frame, text=self.get_tool_display_name(tool), 
-                                   variable=self.text_tool,
-                                   value=tool, bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8),
-                                   command=self.convert_text, activebackground=self.bg_color)
-                rb.pack(anchor="w", pady=1)
-            
-            sep = tk.Frame(tab, bg=self.shadow, height=1)
-            sep.pack(fill=tk.X, padx=5, pady=8)
-            
-            output_label = tk.Label(tab, text="Output / Analysis:", 
-                                   bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8, "bold"))
-            output_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.text_output_text = scrolledtext.ScrolledText(tab, height=12, width=80,
-                                                             bg=self.text_bg, fg=self.text_fg,
-                                                             font=("Courier New", 9),
-                                                             wrap=tk.WORD, relief=tk.SUNKEN,
-                                                             borderwidth=1)
-            self.text_output_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            self.text_output_text.config(state=tk.DISABLED)
-            
-            sep2 = tk.Frame(tab, bg=self.shadow, height=1)
-            sep2.pack(fill=tk.X, padx=5, pady=8)
-            
-            btn_frame = tk.Frame(tab, bg=self.bg_color)
-            btn_frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            self.create_button(btn_frame, "Process", self.convert_text).pack(side=tk.LEFT, padx=2)
-            self.create_button(btn_frame, "Clear", self.clear_text).pack(side=tk.LEFT, padx=2)
-        
-        def get_tool_display_name(self, tool):
-            names = {
-                "ascii": "ASCII Values",
-                "reverse": "Reverse Text",
-                "uppercase": "Uppercase",
-                "lowercase": "Lowercase",
-                "title": "Title Case",
-                "count": "Count Stats",
-                "text2binary": "Text to Binary",
-                "text2hex": "Text to Hex",
-                "text2octal": "Text to Octal",
-                "binary2text": "Binary to Text",
-                "hex2text": "Hex to Text"
-            }
-            return names.get(tool, tool.capitalize())
-        
-        def convert_text(self):
-            input_text = self.text_input_var.get()
-            if not input_text:
-                self.display_text_output("")
-                return
-            
-            tool = self.text_tool.get()
-            output = ""
-            
-            if tool == "ascii":
-                output = "[ASCII VALUES]\n" + "-" * 60 + "\n\n"
-                for i, char in enumerate(input_text):
-                    output += f"'{char}' -> {ord(char):3d} (0x{ord(char):02X}) ({bin(ord(char))[2:]:>8s})\n"
-                    if (i + 1) % 4 == 0:
-                        output += "\n"
-            
-            elif tool == "reverse":
-                reversed_text = input_text[::-1]
-                output = "[TEXT REVERSED]\n" + "-" * 60 + "\n"
-                output += f"Original:  {input_text}\n\n"
-                output += f"Reversed:  {reversed_text}\n"
-            
-            elif tool == "uppercase":
-                upper = input_text.upper()
-                output = "[UPPERCASE]\n" + "-" * 60 + "\n"
-                output += f"{upper}\n"
-            
-            elif tool == "lowercase":
-                lower = input_text.lower()
-                output = "[LOWERCASE]\n" + "-" * 60 + "\n"
-                output += f"{lower}\n"
-            
-            elif tool == "title":
-                title = input_text.title()
-                output = "[TITLE CASE]\n" + "-" * 60 + "\n"
-                output += f"{title}\n"
-            
-            elif tool == "count":
-                output = "[TEXT STATISTICS]\n" + "-" * 60 + "\n\n"
-                output += f"Total characters: {len(input_text)}\n"
-                output += f"Letters: {sum(1 for c in input_text if c.isalpha())}\n"
-                output += f"Digits: {sum(1 for c in input_text if c.isdigit())}\n"
-                output += f"Spaces: {sum(1 for c in input_text if c.isspace())}\n"
-                output += f"Words: {len(input_text.split())}\n"
-                output += f"Lines: {len(input_text.splitlines())}\n"
-                output += f"Uppercase: {sum(1 for c in input_text if c.isupper())}\n"
-                output += f"Lowercase: {sum(1 for c in input_text if c.islower())}\n"
-            
-            elif tool == "text2binary":
-                output = "[TEXT TO BINARY]\n" + "-" * 60 + "\n\n"
-                output += "Character breakdown:\n"
-                for char in input_text:
-                    binary = bin(ord(char))[2:].zfill(8)
-                    output += f"'{char}' (ASCII {ord(char):3d}) -> {binary}\n"
-                output += "\nCombined binary:\n"
-                combined = "".join(bin(ord(c))[2:].zfill(8) for c in input_text)
-                output += f"{combined}\n\n"
-                output += f"Total bits: {len(combined)}\n"
-            
-            elif tool == "text2hex":
-                output = "[TEXT TO HEXADECIMAL]\n" + "-" * 60 + "\n\n"
-                output += "Character breakdown:\n"
-                for char in input_text:
-                    hexval = hex(ord(char))[2:].upper().zfill(2)
-                    output += f"'{char}' (ASCII {ord(char):3d}) -> {hexval}\n"
-                output += "\nCombined hexadecimal:\n"
-                combined = "".join(hex(ord(c))[2:].upper().zfill(2) for c in input_text)
-                output += f"{combined}\n\n"
-                output += f"Total bytes: {len(combined) // 2}\n"
-            
-            elif tool == "text2octal":
-                output = "[TEXT TO OCTAL]\n" + "-" * 60 + "\n\n"
-                output += "Character breakdown:\n"
-                for char in input_text:
-                    octal = oct(ord(char))[2:].zfill(3)
-                    output += f"'{char}' (ASCII {ord(char):3d}) -> {octal}\n"
-                output += "\nCombined octal:\n"
-                combined = "".join(oct(ord(c))[2:].zfill(3) for c in input_text)
-                output += f"{combined}\n"
-            
-            elif tool == "binary2text":
-                try:
-                    # Remove spaces and try to convert
-                    binary_clean = input_text.replace(" ", "").replace("\n", "").replace("\t", "")
-                    if not re.match(r'^[01]+$', binary_clean):
-                        raise ValueError("Invalid binary format (only 0 and 1 allowed)")
-                    
-                    if len(binary_clean) % 8 != 0:
-                        raise ValueError(f"Binary length ({len(binary_clean)}) must be multiple of 8")
-                    
-                    output = "[BINARY TO TEXT]\n" + "-" * 60 + "\n\n"
-                    result_text = ""
-                    for i in range(0, len(binary_clean), 8):
-                        byte = binary_clean[i:i+8]
-                        ascii_val = int(byte, 2)
-                        char = chr(ascii_val)
-                        result_text += char
-                        output += f"{byte} -> {ascii_val:3d} ('{char}')\n"
-                    
-                    output += f"\nDecoded text:\n{result_text}\n"
-                except Exception as e:
-                    output = f"ERROR: {str(e)}"
-            
-            elif tool == "hex2text":
-                try:
-                    # Remove spaces and try to convert
-                    hex_clean = input_text.replace(" ", "").replace("\n", "").replace("\t", "")
-                    if not re.match(r'^[0-9a-fA-F]*$', hex_clean):
-                        raise ValueError("Invalid hexadecimal format")
-                    
-                    if len(hex_clean) % 2 != 0:
-                        raise ValueError(f"Hex length ({len(hex_clean)}) must be even")
-                    
-                    output = "[HEX TO TEXT]\n" + "-" * 60 + "\n\n"
-                    result_text = ""
-                    for i in range(0, len(hex_clean), 2):
-                        byte = hex_clean[i:i+2]
-                        ascii_val = int(byte, 16)
-                        char = chr(ascii_val)
-                        result_text += char
-                        output += f"{byte} -> {ascii_val:3d} ('{char}')\n"
-                    
-                    output += f"\nDecoded text:\n{result_text}\n"
-                except Exception as e:
-                    output = f"ERROR: {str(e)}"
-            
-            self.display_text_output(output)
-            self.add_history(f"Text: {input_text[:30]}... ({tool})")
-        
-        def display_text_output(self, text):
-            self.text_output_text.config(state=tk.NORMAL)
-            self.text_output_text.delete(1.0, tk.END)
-            self.text_output_text.insert(tk.END, text)
-            self.text_output_text.config(state=tk.DISABLED)
-        
-        def clear_text(self):
-            self.text_input_var.set("")
-            self.display_text_output("")
-        
-        # ==================== HASH/ENCODE TAB ====================
-        def create_hash_tab(self):
-            tab = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.tabs["hash"] = tab
-            
-            input_label = tk.Label(tab, text="Input String:", 
-                                  bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8))
-            input_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.hash_input_var = tk.StringVar()
-            self.hash_input_entry = tk.Entry(tab, textvariable=self.hash_input_var, 
-                                            bg=self.text_bg, fg=self.text_fg, font=("MS Sans Serif", 9),
-                                            width=80)
-            self.hash_input_entry.pack(padx=5, pady=2, fill=tk.X)
-            self.hash_input_entry.bind("<KeyRelease>", lambda e: self.convert_hash())
-            
-            methods_label = tk.Label(tab, text="Hash/Encode Method:", 
-                                    bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8))
-            methods_label.pack(anchor="w", padx=5, pady=(10, 0))
-            
-            methods_frame = tk.Frame(tab, bg=self.bg_color)
-            methods_frame.pack(anchor="w", padx=5, pady=2)
-            
-            self.hash_method = tk.StringVar(value="md5")
-            for method in ["md5", "sha1", "sha256", "base64", "rot13"]:
-                rb = tk.Radiobutton(methods_frame, text=method.upper(), variable=self.hash_method,
-                                   value=method, bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8),
-                                   command=self.convert_hash, activebackground=self.bg_color)
-                rb.pack(anchor="w", pady=1)
-            
-            sep = tk.Frame(tab, bg=self.shadow, height=1)
-            sep.pack(fill=tk.X, padx=5, pady=8)
-            
-            output_label = tk.Label(tab, text="Output:", 
-                                   bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 8, "bold"))
-            output_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.hash_output_text = scrolledtext.ScrolledText(tab, height=12, width=80,
-                                                             bg=self.text_bg, fg=self.text_fg,
-                                                             font=("Courier New", 9),
-                                                             wrap=tk.WORD, relief=tk.SUNKEN,
-                                                             borderwidth=1)
-            self.hash_output_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            self.hash_output_text.config(state=tk.DISABLED)
-            
-            sep2 = tk.Frame(tab, bg=self.shadow, height=1)
-            sep2.pack(fill=tk.X, padx=5, pady=8)
-            
-            btn_frame = tk.Frame(tab, bg=self.bg_color)
-            btn_frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            self.create_button(btn_frame, "Encode/Hash", self.convert_hash).pack(side=tk.LEFT, padx=2)
-            self.create_button(btn_frame, "Clear", self.clear_hash).pack(side=tk.LEFT, padx=2)
-        
-        def rot13(self, text):
-            result = []
-            for char in text:
-                if 'a' <= char <= 'z':
-                    result.append(chr((ord(char) - ord('a') + 13) % 26 + ord('a')))
-                elif 'A' <= char <= 'Z':
-                    result.append(chr((ord(char) - ord('A') + 13) % 26 + ord('A')))
-                else:
-                    result.append(char)
-            return ''.join(result)
-        
-        def convert_hash(self):
-            input_str = self.hash_input_var.get()
-            if not input_str:
-                self.display_hash_output("")
-                return
-            
-            method = self.hash_method.get()
-            output = ""
-            
-            try:
-                if method == "md5":
-                    result = hashlib.md5(input_str.encode()).hexdigest()
-                    output = f"[MD5 HASH]\n{'-'*40}\n\n{result}\n"
-                
-                elif method == "sha1":
-                    result = hashlib.sha1(input_str.encode()).hexdigest()
-                    output = f"[SHA-1 HASH]\n{'-'*40}\n\n{result}\n"
-                
-                elif method == "sha256":
-                    result = hashlib.sha256(input_str.encode()).hexdigest()
-                    output = f"[SHA-256 HASH]\n{'-'*40}\n\n{result}\n"
-                
-                elif method == "base64":
-                    encoded = base64.b64encode(input_str.encode()).decode()
-                    decoded = base64.b64decode(encoded.encode()).decode()
-                    output = f"[BASE64 ENCODING]\n{'-'*40}\n\n"
-                    output += f"Encoded:\n{encoded}\n\n"
-                    output += f"(Can be decoded back to original)\n"
-                
-                elif method == "rot13":
-                    result = self.rot13(input_str)
-                    output = f"[ROT-13 CIPHER]\n{'-'*40}\n\n"
-                    output += f"Original:  {input_str}\n\n"
-                    output += f"Encoded:   {result}\n"
-                
-                self.display_hash_output(output)
-                self.add_history(f"Hash: {input_str[:20]}... ({method})")
-            
-            except Exception as e:
-                self.display_hash_output(f"ERROR: {str(e)}")
-        
-        def display_hash_output(self, text):
-            self.hash_output_text.config(state=tk.NORMAL)
-            self.hash_output_text.delete(1.0, tk.END)
-            self.hash_output_text.insert(tk.END, text)
-            self.hash_output_text.config(state=tk.DISABLED)
-        
-        def clear_hash(self):
-            self.hash_input_var.set("")
-            self.display_hash_output("")
-        
-        # ==================== ANALYSIS TAB ====================
-        def create_analysis_tab(self):
-            tab = tk.Frame(self.content_frame, bg=self.bg_color)
-            self.tabs["analyze"] = tab
-            
-            history_label = tk.Label(tab, text="Conversion History & Statistics:", 
-                                    bg=self.bg_color, fg=self.text_fg, font=("MS Sans Serif", 9, "bold"))
-            history_label.pack(anchor="w", padx=5, pady=(5, 0))
-            
-            self.analysis_text = scrolledtext.ScrolledText(tab, height=20, width=80,
-                                                          bg=self.text_bg, fg=self.text_fg,
-                                                          font=("Courier New", 8),
-                                                          wrap=tk.WORD, relief=tk.SUNKEN,
-                                                          borderwidth=1)
-            self.analysis_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-            self.analysis_text.config(state=tk.DISABLED)
-            
-            btn_frame = tk.Frame(tab, bg=self.bg_color)
-            btn_frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            self.create_button(btn_frame, "Refresh", self.update_analysis).pack(side=tk.LEFT, padx=2)
-            self.create_button(btn_frame, "Clear History", self.clear_history).pack(side=tk.LEFT, padx=2)
-        
-        def add_history(self, entry):
-            self.history.append(entry)
-            if len(self.history) > 100:
-                self.history.pop(0)
-            self.update_analysis()
-        
-        def update_analysis(self):
-            output = "[CONVERSION HISTORY]\n" + "=" * 60 + "\n\n"
-            
-            if not self.history:
-                output += "No conversions yet.\n"
-            else:
-                output += f"Total conversions: {len(self.history)}\n\n"
-                output += "Recent entries (last 30):\n" + "-" * 60 + "\n"
-                for i, entry in enumerate(self.history[-30:], 1):
-                    output += f"{i:2d}. {entry}\n"
-            
-            self.analysis_text.config(state=tk.NORMAL)
-            self.analysis_text.delete(1.0, tk.END)
-            self.analysis_text.insert(tk.END, output)
-            self.analysis_text.config(state=tk.DISABLED)
-        
-        def clear_history(self):
-            self.history = []
-            self.update_analysis()
+    def universal_converter_95():
+        """Universal Converter Suite (Windows 95 look): number systems, text tools, hashes / encodings, history.
+        The history is kept in Config/dbo_bitpack.db, table universal_converter_history. For the Hash tab only the
+        method and the length are kept, never the text (it is often a password)."""
+        import os
+        import re
+        import time
+        import sqlite3
+        import zlib
+        import queue
+        import base64
+        import hashlib
+        import threading
+        import urllib.parse
+        import html
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from tkinter import filedialog
 
-    if __name__ == "__main__":
-        rootconvcalc1convcalc1 = tk.Tk()
-        app = RetroConverterEcosystem(rootconvcalc1convcalc1)
-        rootconvcalc1convcalc1.mainloop()
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        MONO = ("Courier New", 9)
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Universal Converter Suite"
+        DB_PATH = "Config/dbo_bitpack.db"
+        HISTORY_LIMIT = 200
+        HISTORY_DELAY_MS = 1500              # a conversion goes to History after a pause (it was every key before)
+        SEP = "-" * 60
+
+        def group(text, size, sep=" "):
+            """'11010110' -> '1101 0110' (from the right)."""
+            sign = "-" if text.startswith("-") else ""
+            text = text.lstrip("-")
+            head = len(text) % size
+            parts = ([text[:head]] if head else []) + [text[i:i + size] for i in range(head, len(text), size)]
+            return sign + sep.join(parts)
+
+        def show_char(ch):
+            if ch == " ":
+                return "space"
+            if ch == "\n":
+                return "\\n"
+            if ch == "\t":
+                return "\\t"
+            if ord(ch) < 32 or 0x7f <= ord(ch) < 0xa0:
+                return "\\x%02x" % ord(ch)
+            return ch
+
+        # ══════════════════════════════════════════════════════════════
+        # CONVERSIONS (no window here; they return (report, main result, history label))
+        # ══════════════════════════════════════════════════════════════
+
+        def parse_number(text, fmt):
+            """'0xFF', '0b1010', '0o17', '1 000 000', '-42', 'FFh' -> int. fmt: auto / decimal / binary / ..."""
+            t = text.strip().replace(" ", "").replace("_", "").replace("\u00a0", "")
+            if not t:
+                return None
+            sign = -1 if t.startswith("-") else 1
+            t = t.lstrip("+-")
+            radix = {"decimal": 10, "binary": 2, "hexadecimal": 16, "octal": 8}.get(fmt)
+            low = t.lower()
+            prefixed = {"0x": 16, "0b": 2, "0o": 8, "&h": 16}
+            for prefix, base in prefixed.items():
+                if low.startswith(prefix) and (radix in (None, base)):
+                    radix, t = base, t[2:]
+                    break
+            else:
+                if low.endswith("h") and radix in (None, 16) and re.match(r"^[0-9a-f]+h$", low):
+                    radix, t = 16, t[:-1]
+            if radix is None:                    # auto: digits only -> decimal, otherwise hexadecimal
+                radix = 10 if t.isdigit() else 16
+            names = {10: "decimal", 2: "binary", 16: "hexadecimal", 8: "octal"}
+            allowed = {10: "0123456789", 2: "01", 8: "01234567", 16: "0123456789abcdefABCDEF"}[radix]
+            if not t or any(c not in allowed for c in t):
+                bad = next((c for c in t if c not in allowed), "")
+                raise ValueError("Invalid %s number%s" % (names[radix], (": '%s' is not a %s digit" % (bad, names[radix]))
+                                                           if bad else ""))
+            return sign * int(t, radix), names[radix]
+
+        def convert_number(text, fmt):
+            parsed = parse_number(text, fmt)
+            if parsed is None:
+                return "", "", None
+            value, read_as = parsed
+            lines = ["[NUMBER CONVERSION]", SEP, "", "Read as: %s" % read_as, ""]
+            lines += ["DECIMAL:", "  " + group(str(value), 3, ","), ""]
+            magnitude = abs(value)
+            sign = "-" if value < 0 else ""
+            lines += ["HEXADECIMAL:", "  " + sign + group("%X" % magnitude, 4), ""]
+            lines += ["OCTAL:", "  " + sign + "%o" % magnitude, ""]
+            lines += ["BINARY:", "  " + sign + group(bin(magnitude)[2:], 4), "  (%d bits)" % magnitude.bit_length(), ""]
+            if value < 0:
+                lines.append("TWO'S COMPLEMENT (how a computer stores it):")
+                for bits in (8, 16, 32, 64):
+                    if -(1 << (bits - 1)) <= value:
+                        pattern = value & ((1 << bits) - 1)
+                        lines.append("  %2d-bit: %s   (hex %s)" % (bits, group(format(pattern, "0%db" % bits), 4),
+                                                                 format(pattern, "0%dX" % (bits // 4))))
+                lines.append("")
+            lines += [SEP, "Bits needed: %d" % magnitude.bit_length(),
+                      "Power of 2: %s" % ("yes" if magnitude > 0 and magnitude & (magnitude - 1) == 0 else "no"),
+                      "Even: %s" % ("yes" if value % 2 == 0 else "no")]
+            if 32 <= value <= 0x10FFFF and value not in range(0xD800, 0xE000):
+                lines.append("As a character: '%s' (U+%04X)" % (chr(value), value))
+            if 0 <= value <= 0xFFFFFFFF:
+                lines.append("Fits in: %s" % ("8-bit" if value < 256 else "16-bit" if value < 65536 else "32-bit"))
+            return "\n".join(lines) + "\n", str(value), "%s (%s) = %s" % (text.strip()[:30], read_as, value)
+
+        def utf8_rows(text, fmt, width):
+            """Each character with its UTF-8 bytes (diacritics take 2 bytes: they were cut to one 'byte' before)."""
+            rows = []
+            for ch in text:
+                data = ch.encode("utf-8")
+                rows.append("'%s' (U+%04X) -> %s" % (show_char(ch), ord(ch), " ".join(format(b, fmt).zfill(width)
+                                                                                        for b in data)))
+            return rows
+
+        def decode_bytes(data, title, groups):
+            lines = ["[%s]" % title, SEP, ""]
+            for raw, value in groups:
+                lines.append("%s -> %3d (0x%02X)" % (raw, value, value))
+            text = data.decode("utf-8", errors="replace")
+            lines += ["", "Decoded text (UTF-8):", text]
+            if "\ufffd" in text:
+                lines += ["", "(Some bytes are not valid UTF-8; as Windows-1250: %s)" % data.decode("cp1250", errors="replace")]
+            return lines, text
+
+        TEXT_TOOLS = [("ascii", "Character Codes"), ("reverse", "Reverse Text"), ("uppercase", "Uppercase"),
+                      ("lowercase", "Lowercase"), ("title", "Title Case"), ("sentence", "Sentence case"),
+                      ("count", "Count Stats"), ("text2binary", "Text to Binary"), ("text2hex", "Text to Hex"),
+                      ("text2octal", "Text to Octal"), ("binary2text", "Binary to Text"), ("hex2text", "Hex to Text"),
+                      ("nodiacritics", "Remove Diacritics"), ("sortlines", "Sort Lines"), ("dedupe", "Remove Duplicate Lines")]
+
+        def convert_text(text, tool):
+            name = dict(TEXT_TOOLS)[tool]
+            if not text:
+                return "", "", None
+            result = ""
+            if tool == "ascii":
+                lines = ["[CHARACTER CODES]", SEP, ""] + ["'%s' -> %5d  U+%04X  UTF-8: %s" % (
+                    show_char(ch), ord(ch), ord(ch), " ".join("%02X" % b for b in ch.encode("utf-8"))) for ch in text]
+                result = " ".join(str(ord(ch)) for ch in text)
+            elif tool in ("reverse", "uppercase", "lowercase", "title", "sentence", "nodiacritics", "sortlines", "dedupe"):
+                if tool == "reverse":
+                    result = text[::-1]
+                elif tool == "uppercase":
+                    result = text.upper()
+                elif tool == "lowercase":
+                    result = text.lower()
+                elif tool == "title":
+                    result = re.sub(r"[^\W\d_]+(?:[-'\u2019][^\W\d_]+)*", lambda m: m.group(0)[:1].upper() + m.group(0)[1:].lower(), text)
+                elif tool == "sentence":
+                    result = re.sub(r"(^\s*|[.!?]\s+)([^\W\d_])", lambda m: m.group(1) + m.group(2).upper(), text.lower())
+                elif tool == "nodiacritics":
+                    import unicodedata
+                    table = {"ș": "s", "ş": "s", "ț": "t", "ţ": "t", "Ș": "S", "Ş": "S", "Ț": "T", "Ţ": "T"}
+                    result = "".join(table.get(c, c) for c in text)
+                    result = "".join(c for c in unicodedata.normalize("NFKD", result) if not unicodedata.combining(c))
+                elif tool == "sortlines":
+                    result = "\n".join(sorted(text.splitlines(), key=lambda s: s.lower()))
+                else:
+                    seen, keep = set(), []
+                    for line in text.splitlines():
+                        if line not in seen:
+                            seen.add(line)
+                            keep.append(line)
+                    result = "\n".join(keep)
+                lines = ["[%s]" % name.upper(), SEP, "", result]
+            elif tool == "count":
+                words = re.findall(r"\S+", text)
+                lines = ["[TEXT STATISTICS]", SEP, "",
+                         "Total characters: %d" % len(text),
+                         "Characters without spaces: %d" % sum(1 for c in text if not c.isspace()),
+                         "Letters: %d" % sum(1 for c in text if c.isalpha()),
+                         "Digits: %d" % sum(1 for c in text if c.isdigit()),
+                         "Spaces: %d" % text.count(" "),
+                         "Words: %d" % len(words),
+                         "Lines: %d" % len(text.splitlines()),
+                         "Paragraphs: %d" % len([p for p in re.split(r"\n\s*\n", text) if p.strip()]),
+                         "Uppercase: %d" % sum(1 for c in text if c.isupper()),
+                         "Lowercase: %d" % sum(1 for c in text if c.islower()),
+                         "UTF-8 bytes: %d" % len(text.encode("utf-8"))]
+                result = str(len(words))
+            elif tool in ("text2binary", "text2hex", "text2octal"):
+                fmt, width, label = {"text2binary": ("b", 8, "BINARY"), "text2hex": ("X", 2, "HEXADECIMAL"),
+                                     "text2octal": ("o", 3, "OCTAL")}[tool]
+                data = text.encode("utf-8")
+                result = " ".join(format(b, fmt).zfill(width) for b in data)
+                lines = ["[TEXT TO %s]  (UTF-8)" % label, SEP, "", "Character breakdown:"] + utf8_rows(text, fmt, width)
+                lines += ["", "Combined:", result, "", "Total bytes: %d" % len(data)]
+            elif tool == "binary2text":
+                clean = re.sub(r"\s", "", text)
+                if not re.match(r"^[01]+$", clean):
+                    raise ValueError("Invalid binary format (only 0 and 1 allowed)")
+                if len(clean) % 8:
+                    raise ValueError("Binary length (%d) must be a multiple of 8" % len(clean))
+                pieces = [clean[i:i + 8] for i in range(0, len(clean), 8)]
+                data = bytes(int(p, 2) for p in pieces)
+                lines, result = decode_bytes(data, "BINARY TO TEXT", [(p, int(p, 2)) for p in pieces])
+            else:                                                   # hex2text
+                clean = re.sub(r"\s|0x|,|:", "", text, flags=re.I)
+                if not re.match(r"^[0-9a-fA-F]*$", clean):
+                    raise ValueError("Invalid hexadecimal format")
+                if len(clean) % 2:
+                    raise ValueError("Hex length (%d) must be even" % len(clean))
+                pieces = [clean[i:i + 2] for i in range(0, len(clean), 2)]
+                data = bytes(int(p, 16) for p in pieces)
+                lines, result = decode_bytes(data, "HEX TO TEXT", [(p.upper(), int(p, 16)) for p in pieces])
+            preview = text.replace("\n", " ")[:30]
+            return "\n".join(lines) + "\n", result, "%s: %s%s" % (name, preview, "..." if len(text) > 30 else "")
+
+        HASH_METHODS = [("md5", "MD5"), ("sha1", "SHA-1"), ("sha256", "SHA-256"), ("sha512", "SHA-512"),
+                        ("crc32", "CRC32"), ("b64e", "Base64 Encode"), ("b64d", "Base64 Decode"),
+                        ("urle", "URL Encode"), ("urld", "URL Decode"), ("htmle", "HTML Escape"),
+                        ("htmld", "HTML Unescape"), ("rot13", "ROT-13")]
+
+        def rot13(text):
+            out = []
+            for ch in text:
+                if "a" <= ch <= "z":
+                    out.append(chr((ord(ch) - 97 + 13) % 26 + 97))
+                elif "A" <= ch <= "Z":
+                    out.append(chr((ord(ch) - 65 + 13) % 26 + 65))
+                else:
+                    out.append(ch)
+            return "".join(out)
+
+        def convert_hash(text, method, upper):
+            name = dict(HASH_METHODS)[method]
+            if text == "":
+                return "", "", None
+            data = text.encode("utf-8")
+            if method in ("md5", "sha1", "sha256", "sha512"):
+                result = hashlib.new(method, data).hexdigest()
+            elif method == "crc32":
+                result = "%08x" % (zlib.crc32(data) & 0xFFFFFFFF)
+            elif method == "b64e":
+                result = base64.b64encode(data).decode("ascii")
+            elif method == "b64d":
+                clean = re.sub(r"\s", "", text)
+                clean += "=" * (-len(clean) % 4)
+                try:
+                    raw = base64.b64decode(clean, validate=True)
+                except Exception:
+                    try:
+                        raw = base64.urlsafe_b64decode(clean)
+                    except Exception:
+                        raise ValueError("This is not valid Base64.")
+                result = raw.decode("utf-8", errors="replace")
+            elif method == "urle":
+                result = urllib.parse.quote(text, safe="")
+            elif method == "urld":
+                result = urllib.parse.unquote(text)
+            elif method == "htmle":
+                result = html.escape(text)
+            elif method == "htmld":
+                result = html.unescape(text)
+            else:
+                result = rot13(text)
+            if upper and method in ("md5", "sha1", "sha256", "sha512", "crc32"):
+                result = result.upper()
+            lines = ["[%s]" % name.upper(), SEP, "", result, "",
+                     "Input: %d characters, %d UTF-8 bytes" % (len(text), len(data))]
+            # history: the method and the length only (the text may be a password; it was shown before)
+            return "\n".join(lines) + "\n", result, "%s of %d characters" % (name, len(text))
+
+        class HistoryStore:
+            """The history in the Bitpack database (it was lost when the window closed)."""
+
+            def __init__(self, path):
+                self.path = path
+                try:
+                    folder = os.path.dirname(path)
+                    if folder and not os.path.isdir(folder):
+                        os.makedirs(folder)
+                    with sqlite3.connect(path) as conn:          # the same table setup_database_ALL() makes
+                        conn.execute("CREATE TABLE IF NOT EXISTS universal_converter_history (id INTEGER PRIMARY KEY "
+                                     "AUTOINCREMENT, created_at TEXT NOT NULL, tab TEXT NOT NULL, label TEXT NOT NULL)")
+                    self.ok = True
+                except (OSError, sqlite3.Error):
+                    self.ok = False                              # no database: the history works for this session only
+
+            def load(self):
+                if not self.ok:
+                    return []
+                try:
+                    with sqlite3.connect(self.path, timeout=5) as conn:
+                        rows = conn.execute("SELECT created_at, tab, label FROM universal_converter_history "
+                                            "ORDER BY id DESC LIMIT ?", (HISTORY_LIMIT,)).fetchall()
+                    return list(reversed(rows))
+                except sqlite3.Error:
+                    return []
+
+            def add(self, created_at, tab, label):
+                if not self.ok:
+                    return
+                try:
+                    with sqlite3.connect(self.path, timeout=5) as conn:
+                        conn.execute("INSERT INTO universal_converter_history (created_at, tab, label) VALUES (?, ?, ?)",
+                                     (created_at, tab, label))
+                        conn.execute("DELETE FROM universal_converter_history WHERE id NOT IN (SELECT id FROM "
+                                     "universal_converter_history ORDER BY id DESC LIMIT ?)", (HISTORY_LIMIT,))
+                except sqlite3.Error:
+                    pass
+
+            def clear(self):
+                if not self.ok:
+                    return
+                try:
+                    with sqlite3.connect(self.path, timeout=5) as conn:
+                        conn.execute("DELETE FROM universal_converter_history")
+                except sqlite3.Error:
+                    pass
+
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
+
+        class RetroConverterEcosystem:
+            def __init__(self):
+                self.rootconvcalc1convcalc1 = root = tk.Tk()
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.store = HistoryStore(DB_PATH)
+                self.history = self.store.load()  # [(date time, tab, label)], from the database
+                self.results = {}
+                self.jobs = {}
+                self.pending_history = {}
+                self.events = queue.Queue()
+                root.title(TITLE)
+                width = min(880, root.winfo_screenwidth() - 40)
+                height = min(680, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(620, 460)          # resizable now (fixed 900 x 750 before)
+                root.configure(bg=FACE)
+                root.protocol("WM_DELETE_WINDOW", self.close)
+                self._make_icon()
+                self.create_title_bar()
+                self.create_menu()
+                self.create_widgets()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+                self.switch_tab("numbers")
+                self.poll()
+
+            # ----- frame -----------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((1, 1, 15, 15, BLACK), (2, 2, 14, 14, LIGHT), (3, 4, 7, 5, NAVY),
+                                               (3, 6, 6, 7, NAVY), (3, 8, 7, 9, NAVY), (9, 7, 13, 8, "#c00000"),
+                                               (11, 5, 12, 10, "#c00000"), (3, 11, 13, 12, SHADOW)):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+
+            def create_title_bar(self):
+                root = self.rootconvcalc1convcalc1
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                title = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                title.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, title, icon)
+                self.caption_button(bar, "close", self.close).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.rootconvcalc1convcalc1.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                root = self.rootconvcalc1convcalc1
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+            def _on_map(self, event):
+                root = self.rootconvcalc1convcalc1
+                if event.widget is root and self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.rootconvcalc1convcalc1.overrideredirect(False)
+                self.rootconvcalc1convcalc1.iconify()
+
+            def toggle_maximize(self):
+                root = self.rootconvcalc1convcalc1
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                root = self.rootconvcalc1convcalc1
+                self._drag = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+
+            def _caption_drag(self, event):
+                if self.custom_frame and not self.maximized:
+                    self.rootconvcalc1convcalc1.geometry("+%d+%d" % (event.x_root - self._drag[0],
+                                                                    event.y_root - self._drag[1]))
+
+            def _grip_press(self, event):
+                root = self.rootconvcalc1convcalc1
+                self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.rootconvcalc1convcalc1.geometry("%dx%d" % (max(620, width + event.x_root - x0),
+                                                                    max(460, height + event.y_root - y0)))
+
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it. A click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            # ----- Windows 95 dialogs ---------------------------------------------------------------------
+            def button(self, parent, text, command, width=None, default=False):
+                widget = tk.Button(parent, text=text, command=command, font=FONT_B if default else FONT, bg=FACE,
+                                   fg=BLACK, activebackground=FACE, relief="raised", bd=2, padx=8, pady=1,
+                                   highlightthickness=1 if default else 0, highlightbackground=BLACK, takefocus=0)
+                if width:
+                    widget.config(width=width)
+                return widget
+
+            def message(self, title, text, icon="info"):
+                root = self.rootconvcalc1convcalc1
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B).pack(side="left", padx=4)
+                self.caption_button(bar, "close", win.destroy).pack(side="right", padx=2)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                picture = tk.Canvas(body, width=32, height=32, bg=FACE, highlightthickness=0)
+                if icon == "error":
+                    picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                    picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                    picture.create_line(22, 10, 10, 22, fill="white", width=3)
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=LIGHT, outline=BLACK)
+                    picture.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+                picture.pack(side="left", anchor="n", padx=(0, 12))
+                tk.Label(body, text=text, bg=FACE, font=FONT, justify="left", wraplength=440).pack(side="left")
+                self.button(win, "OK", win.destroy, width=9, default=True).pack(pady=(4, 12))
+                win.bind("<Return>", lambda e: win.destroy())
+                win.bind("<Escape>", lambda e: win.destroy())
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                         root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+                win.lift()
+                win.focus_force()
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+
+            def from_menu(self, action):
+                """Menu commands run after the menu has closed (a box opened inside the menu's click could keep
+                the clicks captured on Windows)."""
+                return lambda: self.rootconvcalc1convcalc1.after(10, action)
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def create_menu(self):
+                bar = tk.Frame(self.rootconvcalc1convcalc1, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                m = menubutton("File")
+                m.add_command(label="Hash a File...", command=self.from_menu(self.hash_file))
+                m.add_command(label="Save Output As...", accelerator="Ctrl+S", command=self.from_menu(self.save_output))
+                m.add_separator()
+                m.add_command(label="Exit", command=self.from_menu(self.close))
+                m = menubutton("Edit")
+                m.add_command(label="Copy Result", accelerator="Ctrl+Shift+C", command=self.from_menu(self.copy_result))
+                m.add_command(label="Copy Output", command=self.from_menu(self.copy_output))
+                m.add_command(label="Paste into Input", accelerator="Ctrl+V", command=self.from_menu(self.paste_input))
+                m.add_command(label="Use Result as Input", command=self.from_menu(self.result_to_input))
+                m.add_separator()
+                m.add_command(label="Clear", accelerator="Esc", command=self.from_menu(self.clear_current))
+                m = menubutton("View")
+                for key, text in (("numbers", "Number Systems"), ("text", "Text Tools"), ("hash", "Hash / Encode"),
+                                  ("analyze", "History")):
+                    m.add_command(label=text, command=self.from_menu(lambda k=key: self.switch_tab(k)))
+                m = menubutton("Help")
+                m.add_command(label="About", command=self.from_menu(lambda: self.message(
+                    "About Universal Converter Suite", "Universal Converter Suite v3.0\n\nNumbers: decimal, binary, hex, "
+                    "octal (0x, 0b, 0o prefixes accepted), two's complement.\nText: UTF-8 safe conversions (diacritics "
+                    "included), case, statistics, lines.\nHash / Encode: MD5, SHA, CRC32, Base64, URL, HTML, ROT-13, and "
+                    "a file's hashes.\n\nThe history is kept between sessions (the last %d). For hashes only the method and "
+                    "the length are kept, never the text." % HISTORY_LIMIT)))
+
+            def create_widgets(self):
+                root = self.rootconvcalc1convcalc1
+                status = tk.Frame(root, bg=FACE)
+                status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(status, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=LIGHT)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                self.count_label = tk.Label(status, text="", font=FONT, bg=FACE, relief="sunken", bd=1, width=22,
+                                            anchor="w", padx=4)
+                self.count_label.pack(side="right", padx=1)
+                self.status_label = tk.Label(status, text="Ready", font=FONT, bg=FACE, relief="sunken", bd=1, anchor="w",
+                                             padx=4)
+                self.status_label.pack(side="left", fill="x", expand=True, padx=1)
+
+                tabs = tk.Frame(root, bg=FACE)
+                tabs.pack(side="top", fill="x", padx=6, pady=(6, 0))
+                self.tab_labels = {}
+                for key, text in (("numbers", "Number Systems"), ("text", "Text Tools"), ("hash", "Hash / Encode"),
+                                  ("analyze", "History")):
+                    label = tk.Label(tabs, text="  %s  " % text, font=FONT, bg=FACE, bd=2, relief="raised", pady=2,
+                                     cursor="hand2")
+                    label.pack(side="left")
+                    label.bind("<Button-1>", lambda e, k=key: self.switch_tab(k))
+                    self.tab_labels[key] = label
+                self.sheet = tk.Frame(root, bg=FACE, bd=2, relief="raised")
+                self.sheet.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+                self.tabs, self.inputs, self.outputs = {}, {}, {}
+                self.num_format = tk.StringVar(value="auto")
+                self.text_tool = tk.StringVar(value="ascii")
+                self.hash_method = tk.StringVar(value="md5")
+                self.hash_upper = tk.BooleanVar(value=False)
+                self.build_tab("numbers", "Input Value:", single=True, options=(
+                    "Input Format", self.num_format, [("auto", "Auto (0x, 0b, 0o)"), ("decimal", "Decimal"),
+                                                      ("binary", "Binary"), ("hexadecimal", "Hexadecimal"),
+                                                      ("octal", "Octal")], 5))
+                self.build_tab("text", "Input Text:", single=False, options=("Text Tools", self.text_tool, TEXT_TOOLS, 5))
+                self.build_tab("hash", "Input String:", single=False, options=(
+                    "Hash / Encode Method", self.hash_method, HASH_METHODS, 6), extra=self._hash_extra)
+                self.build_history_tab()
+                root.bind("<Control-s>", lambda e: (self.save_output(), "break")[1])
+                root.bind("<Control-Shift-C>", lambda e: (self.copy_result(), "break")[1])
+                root.bind("<Escape>", lambda e: (self.clear_current(), "break")[1])
+
+            def build_tab(self, key, label, single, options, extra=None):
+                page = tk.Frame(self.sheet, bg=FACE)
+                self.tabs[key] = page
+                tk.Label(page, text=label, font=FONT, bg=FACE).pack(anchor="w", padx=8, pady=(8, 2))
+                if single:
+                    entry = tk.Entry(page, font=("Courier New", 10), bg=LIGHT, relief="sunken", bd=2, highlightthickness=0)
+                    entry.pack(fill="x", padx=8)
+                    entry.bind("<KeyRelease>", lambda e: self.schedule(key))
+                    entry.bind("<Return>", lambda e: self.run(key, record=True))
+                    self.inputs[key] = entry
+                else:
+                    holder = tk.Frame(page, bg=LIGHT, bd=2, relief="sunken")
+                    holder.pack(fill="x", padx=8)
+                    scroll = tk.Scrollbar(holder, orient="vertical")
+                    scroll.pack(side="right", fill="y")
+                    text = tk.Text(holder, font=("Courier New", 10), height=5, bd=0, highlightthickness=0, wrap="word",
+                                   undo=True, yscrollcommand=scroll.set)
+                    text.pack(fill="both", expand=True)
+                    scroll.config(command=text.yview)
+                    text.bind("<<Modified>>", lambda e: (text.edit_modified(False), self.schedule(key)))
+                    text.bind("<Control-Return>", lambda e: (self.run(key, record=True), "break")[1])
+                    self.inputs[key] = text
+                title, var, choices, per_row = options
+                box = tk.LabelFrame(page, text=" %s " % title, font=FONT, bg=FACE, bd=2, relief="groove")
+                box.pack(fill="x", padx=8, pady=6)
+                for index, (value, text_) in enumerate(choices):
+                    tk.Radiobutton(box, text=text_, variable=var, value=value, font=FONT, bg=FACE, activebackground=FACE,
+                                   selectcolor=LIGHT, highlightthickness=0, anchor="w",
+                                   command=lambda k=key: self.run(k, record=True)).grid(
+                        row=index // per_row, column=index % per_row, sticky="w", padx=4)
+                if extra:
+                    extra(page)
+                buttons = tk.Frame(page, bg=FACE)
+                buttons.pack(side="bottom", fill="x", padx=8, pady=(0, 8))
+                self.button(buttons, "Convert", lambda: self.run(key, record=True), default=True).pack(side="left", padx=2)
+                self.button(buttons, "Copy Result", self.copy_result).pack(side="left", padx=2)
+                self.button(buttons, "Copy Output", self.copy_output).pack(side="left", padx=2)
+                self.button(buttons, "Clear", self.clear_current).pack(side="left", padx=2)
+                if key != "numbers":
+                    self.button(buttons, "Use Result as Input", self.result_to_input).pack(side="left", padx=2)
+                out_box = tk.LabelFrame(page, text=" Output ", font=FONT, bg=FACE, bd=2, relief="groove")
+                out_box.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+                holder = tk.Frame(out_box, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=6, pady=6)
+                scroll = tk.Scrollbar(holder, orient="vertical")
+                scroll.pack(side="right", fill="y")
+                output = tk.Text(holder, font=MONO, bd=0, highlightthickness=0, wrap="word", yscrollcommand=scroll.set,
+                                 state="disabled", bg=LIGHT, fg=BLACK, height=8, selectbackground=NAVY,
+                                 selectforeground=LIGHT)
+                output.pack(fill="both", expand=True)
+                scroll.config(command=output.yview)
+                output.tag_configure("error", foreground="#c00000")
+                self.outputs[key] = output
+
+            def _hash_extra(self, page):
+                row = tk.Frame(page, bg=FACE)
+                row.pack(fill="x", padx=8, pady=(0, 4))
+                tk.Checkbutton(row, text="Uppercase hex", variable=self.hash_upper, font=FONT, bg=FACE,
+                               activebackground=FACE, selectcolor=LIGHT, highlightthickness=0,
+                               command=lambda: self.run("hash", record=False)).pack(side="left")
+                self.button(row, "Hash a File...", self.hash_file).pack(side="right")
+
+            def build_history_tab(self):
+                page = tk.Frame(self.sheet, bg=FACE)
+                self.tabs["analyze"] = page
+                tk.Label(page, text="Conversion History (the last %d):" % HISTORY_LIMIT, font=FONT_B, bg=FACE).pack(anchor="w", padx=8,
+                                                                                                     pady=(8, 2))
+                holder = tk.Frame(page, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=8)
+                scroll = tk.Scrollbar(holder, orient="vertical")
+                scroll.pack(side="right", fill="y")
+                self.history_box = tk.Listbox(holder, font=MONO, bd=0, highlightthickness=0, bg=LIGHT,
+                                              selectbackground=NAVY, selectforeground=LIGHT, activestyle="none",
+                                              yscrollcommand=scroll.set)
+                self.history_box.pack(fill="both", expand=True)
+                scroll.config(command=self.history_box.yview)
+                buttons = tk.Frame(page, bg=FACE)
+                buttons.pack(side="bottom", fill="x", padx=8, pady=(0, 8))
+                self.stats_label = tk.Label(page, text="", font=FONT, bg=FACE, anchor="w", justify="left")
+                self.stats_label.pack(side="bottom", fill="x", padx=8, pady=4)
+                self.button(buttons, "Copy History", lambda: self._copy("\n".join(self._history_lines()),
+                                                                        "History")).pack(side="left", padx=2)
+                self.button(buttons, "Clear History", self.clear_history).pack(side="left", padx=2)
+                self.update_analysis()
+
+            # ----- tabs ------------------------------------------------------------------------------------
+            def switch_tab(self, key):
+                self.current = key
+                for name, label in self.tab_labels.items():
+                    label.config(relief="sunken" if name == key else "raised", font=FONT_B if name == key else FONT)
+                for page in self.tabs.values():
+                    page.pack_forget()
+                self.tabs[key].pack(fill="both", expand=True)
+                if key in self.inputs:
+                    self.inputs[key].focus_set()
+                else:
+                    self.update_analysis()
+
+            def get_input(self, key):
+                widget = self.inputs[key]
+                return widget.get() if isinstance(widget, tk.Entry) else widget.get("1.0", "end-1c")
+
+            def set_input(self, key, text):
+                widget = self.inputs[key]
+                if isinstance(widget, tk.Entry):
+                    widget.delete(0, "end")
+                    widget.insert(0, text)
+                else:
+                    widget.delete("1.0", "end")
+                    widget.insert("1.0", text)
+                self.run(key, record=False)
+
+            def show(self, key, text, error=False):
+                output = self.outputs[key]
+                output.config(state="normal")
+                output.delete("1.0", "end")
+                output.insert("1.0", text, ("error",) if error else ())
+                output.config(state="disabled")
+
+            # ----- converting --------------------------------------------------------------------------------
+            def schedule(self, key):
+                """Live result while typing; History gets it only after a pause."""
+                if self.jobs.get(key):
+                    self.rootconvcalc1convcalc1.after_cancel(self.jobs[key])
+                self.jobs[key] = self.rootconvcalc1convcalc1.after(150, lambda: self.run(key, record=False))
+
+            def run(self, key, record):
+                self.jobs[key] = None
+                text = self.get_input(key)
+                try:
+                    if key == "numbers":
+                        report, result, label = convert_number(text, self.num_format.get())
+                    elif key == "text":
+                        report, result, label = convert_text(text, self.text_tool.get())
+                    else:
+                        report, result, label = convert_hash(text, self.hash_method.get(), self.hash_upper.get())
+                except ValueError as exc:
+                    self.show(key, "ERROR: %s" % exc, error=True)
+                    self.results[key] = ""
+                    self.status_label.config(text=str(exc))
+                    return
+                self.show(key, report)
+                self.results[key] = result
+                self.count_label.config(text="Input: %d characters" % len(text))
+                self.status_label.config(text="Ready" if text else "Type or paste something to convert")
+                if label:
+                    if self.pending_history.get(key):
+                        self.rootconvcalc1convcalc1.after_cancel(self.pending_history[key])
+                    if record:
+                        self.add_history(key, label)
+                    else:
+                        self.pending_history[key] = self.rootconvcalc1convcalc1.after(
+                            HISTORY_DELAY_MS, lambda: self.add_history(key, label))
+
+            def add_history(self, key, label):
+                self.pending_history[key] = None
+                entry = (time.strftime("%Y-%m-%d %H:%M:%S"), key, label)
+                if self.history and tuple(self.history[-1][1:]) == entry[1:]:
+                    return                                 # the same conversion twice in a row is kept once
+                self.history.append(entry)
+                del self.history[:-HISTORY_LIMIT]
+                self.store.add(*entry)
+                if self.current == "analyze":
+                    self.update_analysis()
+
+            def _history_lines(self):
+                names = {"numbers": "Number", "text": "Text", "hash": "Hash"}
+                today = time.strftime("%Y-%m-%d")
+                return ["%s  %-6s  %s" % (t[11:] if t.startswith(today) else "%s.%s %s" % (t[8:10], t[5:7], t[11:16]),
+                                          names.get(k, k), label) for t, k, label in self.history]
+
+            def update_analysis(self):
+                box = self.history_box
+                box.delete(0, "end")
+                lines = self._history_lines()
+                for line in reversed(lines):
+                    box.insert("end", line)
+                if not lines:
+                    box.insert("end", "No conversions yet.")
+                counts = {}
+                for _t, key, _l in self.history:
+                    counts[key] = counts.get(key, 0) + 1
+                self.stats_label.config(text="Total conversions: %d     Numbers: %d     Text: %d     Hash / Encode: %d" % (
+                    len(self.history), counts.get("numbers", 0), counts.get("text", 0), counts.get("hash", 0)))
+
+            def clear_history(self):
+                self.history = []
+                self.store.clear()
+                self.update_analysis()
+
+            # ----- clipboard and files -------------------------------------------------------------------
+            def _copy(self, text, what):
+                root = self.rootconvcalc1convcalc1
+                root.clipboard_clear()
+                root.clipboard_append(text)
+                self.status_label.config(text="%s copied to the clipboard" % what)
+
+            def copy_result(self):
+                if self.current in self.results and self.results[self.current]:
+                    self._copy(self.results[self.current], "Result")
+
+            def copy_output(self):
+                if self.current in self.outputs:
+                    self._copy(self.outputs[self.current].get("1.0", "end-1c"), "Output")
+
+            def paste_input(self):
+                if self.current not in self.inputs:
+                    return
+                try:
+                    text = self.rootconvcalc1convcalc1.clipboard_get()
+                except tk.TclError:
+                    return
+                self.set_input(self.current, text)
+
+            def result_to_input(self):
+                """For example: Text to Hex, then Use Result as Input and Hex to Text gives the text back."""
+                if self.current in self.results and self.results[self.current]:
+                    self.set_input(self.current, self.results[self.current])
+
+            def clear_current(self):
+                if self.current in self.inputs:
+                    self.set_input(self.current, "")
+                    self.show(self.current, "")
+                    self.results[self.current] = ""
+
+            def save_output(self):
+                if self.current not in self.outputs:
+                    return
+                path = filedialog.asksaveasfilename(parent=self.rootconvcalc1convcalc1, defaultextension=".txt",
+                                                    filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+                if path:
+                    try:
+                        with open(path, "w", encoding="utf-8") as fh:
+                            fh.write(self.outputs[self.current].get("1.0", "end-1c"))
+                        self.status_label.config(text="Saved: %s" % path)
+                    except OSError as exc:
+                        self.message("Save", "Could not save:\n%s" % exc, "error")
+
+            def hash_file(self):
+                """MD5, SHA-1, SHA-256 and CRC32 of a file, in a thread (to check a download, for example)."""
+                path = filedialog.askopenfilename(parent=self.rootconvcalc1convcalc1, title="Hash a File")
+                if not path:
+                    return
+                self.switch_tab("hash")
+                self.show("hash", "Reading %s ..." % path)
+                size = os.path.getsize(path)
+
+                def work():
+                    hashes = [hashlib.md5(), hashlib.sha1(), hashlib.sha256()]
+                    crc, done = 0, 0
+                    try:
+                        with open(path, "rb") as fh:
+                            while True:
+                                chunk = fh.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                for h in hashes:
+                                    h.update(chunk)
+                                crc = zlib.crc32(chunk, crc)
+                                done += len(chunk)
+                                self.events.put(("progress", done, size))
+                    except OSError as exc:
+                        self.events.put(("file_error", str(exc)))
+                        return
+                    self.events.put(("file_done", path, size, [h.hexdigest() for h in hashes], "%08x" % (crc & 0xFFFFFFFF)))
+                threading.Thread(target=work, daemon=True).start()
+
+            def poll(self):
+                try:
+                    for _ in range(20):
+                        event = self.events.get_nowait()
+                        if event[0] == "progress":
+                            _k, done, size = event
+                            self.status_label.config(text="Hashing... %d%%" % (done * 100 // max(1, size)))
+                        elif event[0] == "file_error":
+                            self.show("hash", "ERROR: %s" % event[1], error=True)
+                        else:
+                            _k, path, size, (md5, sha1, sha256), crc = event
+                            upper = self.hash_upper.get()
+                            fix = (lambda s: s.upper()) if upper else (lambda s: s)
+                            report = "\n".join(["[FILE HASHES]", SEP, "", "File: %s" % path, "Size: {:,} bytes".format(size),
+                                                "", "MD5:     %s" % fix(md5), "SHA-1:   %s" % fix(sha1),
+                                                "SHA-256: %s" % fix(sha256), "CRC32:   %s" % fix(crc)])
+                            self.show("hash", report + "\n")
+                            self.results["hash"] = fix(sha256)
+                            self.status_label.config(text="Hashed %s (Copy Result copies the SHA-256)" %
+                                                     os.path.basename(path))
+                            self.add_history("hash", "File hashes of %s" % os.path.basename(path))
+                except queue.Empty:
+                    pass
+                self.poll_job = self.rootconvcalc1convcalc1.after(100, self.poll)
+
+            def close(self):
+                try:
+                    self.rootconvcalc1convcalc1.after_cancel(self.poll_job)
+                except (AttributeError, tk.TclError):
+                    pass
+                self.rootconvcalc1convcalc1.destroy()
+
+        app = RetroConverterEcosystem()
+        app.rootconvcalc1convcalc1.mainloop()
+        return app
+
+    universal_converter_95()
         
 if programmercalcvar == 1110001110001110001110002322:
     import sqlite3, os as _os
@@ -154321,490 +156236,685 @@ if programmercalcvar == 1110001110001110001110002322:
             # Rularea buclei principale
             validation.mainloop()
 
-    class ProgrammerCalculator:
-        def __init__(self, rootprgrmcalc2):
-            self.rootprgrmcalc2 = rootprgrmcalc2
-            self.rootprgrmcalc2.title("Programmer Calculator")
-            self.rootprgrmcalc2.configure(bg='#c0c0c0')
-            self.rootprgrmcalc2.resizable(False, False)
-            
-            # Variables
-            self.current_value = "0"
-            self.previous_value = ""
-            self.operation = ""
-            self.current_base = "DEC"
-            self.bit_width = 32
-            self.shift_mode = "DEC"  # DEC or BIN
-            self.new_number = True
-            self.buttons_dict = {}
-            self.in_shift_operation = False
-            
-            # Color scheme for button states
-            self.colors = {
-                'enabled': '#009aa2',   # Light navy blue
-                'disabled': '#c0c0c0'   # Gray (same as window bg)
-            }
-            
-            # Create main frame with 3D border
-            main_frame = tk.Frame(rootprgrmcalc2, bg='#c0c0c0', relief='raised', bd=2)
-            main_frame.pack(padx=5, pady=5)
-            
-            # Display frame
-            display_frame = tk.Frame(main_frame, bg='#c0c0c0', relief='sunken', bd=2)
-            display_frame.pack(padx=5, pady=5, fill='x')
-            
-            # Operation display
-            self.operation_display = tk.Entry(display_frame, font=('MS Sans Serif', 10),
-                                             justify='right', bg='white', fg='#666666',
-                                             relief='flat', bd=0, state='readonly')
-            self.operation_display.pack(ipady=4, padx=2, pady=1, fill='x')
-            
-            # Main display
-            self.display = tk.Entry(display_frame, font=('MS Sans Serif', 16, 'bold'),
-                                   justify='right', bg='white', fg='black',
-                                   relief='flat', bd=0, state='readonly')
-            self.display.pack(ipady=8, padx=2, pady=2, fill='x')
-            self.update_display()
-            
-            # Base and Bit selection frame
-            options_frame = tk.Frame(main_frame, bg='#c0c0c0')
-            options_frame.pack(padx=5, pady=5, fill='x')
-            
-            # Left side - Base selection
-            base_frame = tk.Frame(options_frame, bg='#c0c0c0')
-            base_frame.pack(side='left', padx=10)
-            
-            tk.Label(base_frame, text="Base:", bg='#c0c0c0', 
-                    font=('MS Sans Serif', 8)).grid(row=0, column=0, sticky='w', pady=2)
-            
-            self.base_var = tk.StringVar(value="DEC")
-            bases = ["HEX", "DEC", "OCT", "BIN"]
-            for i, base in enumerate(bases):
-                row = (i // 2) + 1  # 0,1 -> row 1; 2,3 -> row 2
-                col = i % 2          # 0,2 -> col 0; 1,3 -> col 1
-                rb = tk.Radiobutton(base_frame, text=base, variable=self.base_var,
-                                   value=base, bg='#c0c0c0', 
-                                   font=('MS Sans Serif', 8),
-                                   command=self.change_base,
-                                   activebackground='#c0c0c0')
-                rb.grid(row=row, column=col, sticky='w', pady=1, padx=5)
-            
-            # Right side - Bit width selection
-            bit_frame = tk.Frame(options_frame, bg='#c0c0c0')
-            bit_frame.pack(side='right', padx=10)
-            
-            tk.Label(bit_frame, text="Bits:", bg='#c0c0c0', 
-                    font=('MS Sans Serif', 8)).grid(row=0, column=0, sticky='w', pady=2)
-            
-            self.bit_var = tk.StringVar(value="32")
-            bits_list = ["8", "16", "32", "64"]
-            for i, bits in enumerate(bits_list):
-                row = (i // 2) + 1  # 0,1 -> row 1; 2,3 -> row 2
-                col = i % 2          # 0,2 -> col 0; 1,3 -> col 1
-                rb = tk.Radiobutton(bit_frame, text=bits, variable=self.bit_var,
-                                   value=bits, bg='#c0c0c0', 
-                                   font=('MS Sans Serif', 8),
-                                   command=self.change_bit_width,
-                                   activebackground='#c0c0c0')
-                rb.grid(row=row, column=col, sticky='w', pady=1, padx=5)
-            
-            # Shift mode selection frame - initially hidden
-            self.shift_frame = tk.Frame(main_frame, bg='#c0c0c0')
-            
-            tk.Label(self.shift_frame, text="Shift Mode:", bg='#c0c0c0', 
-                    font=('MS Sans Serif', 8)).pack(side='left', padx=5)
-            
-            self.shift_var = tk.StringVar(value="DEC")
-            for mode in ["DEC", "BIN"]:
-                rb = tk.Radiobutton(self.shift_frame, text=mode, variable=self.shift_var,
-                                   value=mode, bg='#c0c0c0', 
-                                   font=('MS Sans Serif', 8),
-                                   command=self.change_shift_mode,
-                                   activebackground='#c0c0c0')
-                rb.pack(side='left', padx=5)
-            
-            # Buttons frame
-            buttons_frame = tk.Frame(main_frame, bg='#c0c0c0')
-            buttons_frame.pack(padx=5, pady=5)
-            
-            # Button layout with corrected groups
-            # any: 0-1 (valide în toate bazele)
-            # oct_plus: 2-7 (valide în OCT și superior)
-            # dec_plus: 8-9 (valide doar în DEC și HEX)
-            buttons = [
-                [('A', 'hex'), ('B', 'hex'), ('C', 'hex'), ('D', 'hex'), ('E', 'hex'), ('F', 'hex')],
-                [('7', 'oct_plus'), ('8', 'dec_plus'), ('9', 'dec_plus'), ('/', 'operator'), ('MOD', 'bitwise'), ('AND', 'bitwise')],
-                [('4', 'oct_plus'), ('5', 'oct_plus'), ('6', 'oct_plus'), ('*', 'operator'), ('XOR', 'bitwise'), ('OR', 'bitwise')],
-                [('1', 'any'), ('2', 'oct_plus'), ('3', 'oct_plus'), ('-', 'operator'), ('<<', 'bitwise'), ('>>', 'bitwise')],
-                [('0', 'any'), ('+', 'operator'), ('=', 'operator'), ('NOT', 'bitwise'), ('~', 'bitwise'), ('^', 'bitwise')],
-                [('CLR', 'operator'), ('DEL', 'operator'), ('~', 'bitwise'), ('^', 'bitwise'), ('NAND', 'bitwise'), ('CE', 'operator')]
-            ]
-            
-            for i, row in enumerate(buttons):
-                for j, (btn_text, btn_group) in enumerate(row):
-                    btn = tk.Button(buttons_frame, text=btn_text,
-                                  width=6, height=2,
-                                  font=('MS Sans Serif', 9),
-                                  bg=self.colors['enabled'], fg='white',
-                                  relief='raised', bd=2,
-                                  activebackground=self.colors['enabled'],
-                                  command=lambda x=btn_text: self.button_click(x))
-                    btn.grid(row=i, column=j, padx=2, pady=2, sticky='nsew')
-                    self.buttons_dict[(i, j)] = (btn, btn_text, btn_group)
-            
-            # Initial button state update
-            self.update_button_states()
-        
-        def show_shift_mode(self, show=True):
-            """Show or hide shift mode selection"""
-            if show:
-                self.shift_frame.pack(padx=5, pady=5, fill='x')
-            else:
-                self.shift_frame.pack_forget()
-        
-        def update_button_states(self):
-            """Enable/disable buttons based on current base and shift mode"""
-            valid_groups = self.get_valid_groups()
-            
-            for (row, col), (btn, text, group) in self.buttons_dict.items():
-                if group in valid_groups or group == 'operator' or group == 'bitwise':
-                    btn.config(state='normal', bg=self.colors['enabled'], fg='white')
-                else:
-                    btn.config(state='disabled', bg=self.colors['disabled'], fg='gray')
-        
-        def get_valid_groups(self):
-            """Return valid button groups for current base and shift mode"""
-            # If in shift operation with BIN mode, allow only binary digits (0-1)
-            if self.in_shift_operation and self.shift_mode == "BIN":
-                return ['any']  # 0-1
-            
-            # If in shift operation with DEC mode, allow decimal digits (0-9)
-            if self.in_shift_operation and self.shift_mode == "DEC":
-                return ['any', 'oct_plus', 'dec_plus']  # 0-9
-            
-            # Normal mode - base selection
-            if self.current_base == "HEX":
-                return ['hex', 'dec_plus', 'oct_plus', 'any']
-            elif self.current_base == "DEC":
-                return ['dec_plus', 'oct_plus', 'any']
-            elif self.current_base == "OCT":
-                return ['oct_plus', 'any']
-            elif self.current_base == "BIN":
-                return ['any']
-            return []
-        
-        def change_shift_mode(self):
-            """Change shift mode (DEC or BIN)"""
-            self.shift_mode = self.shift_var.get()
-            self.update_button_states()
-        
-        def update_display(self):
-            self.display.configure(state='normal')
-            self.display.delete(0, tk.END)
-            self.display.insert(0, self.current_value)
-            self.display.configure(state='readonly')
-            
-            self.operation_display.configure(state='normal')
-            self.operation_display.delete(0, tk.END)
-            if self.previous_value and self.operation:
-                op_text = f"{self.previous_value} {self.operation}"
-                self.operation_display.insert(0, op_text)
-            self.operation_display.configure(state='readonly')
-        
-        def change_bit_width(self):
-            self.bit_width = int(self.bit_var.get())
-        
-        def change_base(self):
-            try:
-                if self.current_value == "0":
-                    self.current_base = self.base_var.get()
-                    self.update_button_states()
-                    return
-                
-                # Convert current value to decimal first
-                if self.current_base == "HEX":
-                    dec_val = int(self.current_value, 16)
-                elif self.current_base == "DEC":
-                    dec_val = int(self.current_value)
-                elif self.current_base == "OCT":
-                    dec_val = int(self.current_value, 8)
-                elif self.current_base == "BIN":
-                    dec_val = int(self.current_value, 2)
-                
-                # Convert to new base
-                new_base = self.base_var.get()
-                self.current_value = self.convert_to_base(dec_val, new_base)
-                self.current_base = new_base
-                self.update_display()
-                self.update_button_states()
-            except:
-                messagebox.showerror("Error", "Invalid value for selected base")
-                self.current_value = "0"
-                self.current_base = self.base_var.get()
-                self.update_display()
-                self.update_button_states()
-        
-        def convert_to_base(self, value, base):
-            if base == "HEX":
-                return hex(value)[2:].upper()
-            elif base == "DEC":
-                return str(value)
-            elif base == "OCT":
-                return oct(value)[2:]
-            elif base == "BIN":
-                return bin(value)[2:]
-        
-        def to_decimal(self, value):
-            try:
-                if self.current_base == "HEX":
-                    return int(value, 16)
-                elif self.current_base == "DEC":
-                    return int(value)
-                elif self.current_base == "OCT":
-                    return int(value, 8)
-                elif self.current_base == "BIN":
-                    return int(value, 2)
-            except:
-                return 0
-        
-        def from_decimal(self, value):
-            if value < 0:
-                if self.bit_width == 8:
-                    value = value & 0xFF
-                elif self.bit_width == 16:
-                    value = value & 0xFFFF
-                elif self.bit_width == 32:
-                    value = value & 0xFFFFFFFF
-                elif self.bit_width == 64:
-                    value = value & 0xFFFFFFFFFFFFFFFF
-            
-            return self.convert_to_base(value, self.current_base)
-        
-        def apply_bit_mask(self, value):
-            mask = (1 << self.bit_width) - 1
-            return value & mask
-        
-        def is_valid_digit(self, key):
-            """Check if digit is valid for current base or shift mode"""
-            try:
-                digit = int(key)
-                
-                # In shift operation with BIN mode - only 0, 1
-                if self.in_shift_operation and self.shift_mode == "BIN":
-                    return digit <= 1
-                
-                # In shift operation with DEC mode - 0-9
-                if self.in_shift_operation and self.shift_mode == "DEC":
-                    return digit <= 9
-                
-                # Normal operation
-                if self.current_base == "BIN":
-                    return digit <= 1
-                elif self.current_base == "OCT":
-                    return digit <= 7
-                return True
-            except:
-                return False
-        
-        def button_click(self, key):
-            # Number input
-            if key in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
-                if not self.is_valid_digit(key):
-                    mode_info = f"{self.shift_mode} mode" if self.in_shift_operation else f"{self.current_base} base"
-                    messagebox.showwarning("Invalid", f"Invalid digit '{key}' for {mode_info}")
-                    return
-                
-                if self.new_number:
-                    self.current_value = key
-                    self.new_number = False
-                else:
-                    if self.current_value == "0":
-                        self.current_value = key
-                    else:
-                        self.current_value += key
-                self.update_display()
-            
-            # Hex letters
-            elif key in ['A', 'B', 'C', 'D', 'E', 'F']:
-                if self.current_base != "HEX":
-                    messagebox.showwarning("Invalid", "Hex digits only in HEX mode")
-                    return
-                
-                if self.new_number:
-                    self.current_value = key
-                    self.new_number = False
-                else:
-                    if self.current_value == "0":
-                        self.current_value = key
-                    else:
-                        self.current_value += key
-                self.update_display()
-            
-            # Clear current
-            elif key == 'CLR':
-                self.current_value = "0"
-                self.new_number = True
-                self.in_shift_operation = False
-                self.show_shift_mode(False)
-                self.update_button_states()
-                self.update_display()
-            
-            # Clear all
-            elif key == 'CE':
-                self.current_value = "0"
-                self.previous_value = ""
-                self.operation = ""
-                self.new_number = True
-                self.in_shift_operation = False
-                self.show_shift_mode(False)
-                self.update_button_states()
-                self.update_display()
-            
-            # Backspace
-            elif key == 'DEL':
-                if len(self.current_value) > 1:
-                    self.current_value = self.current_value[:-1]
-                else:
-                    self.current_value = "0"
-                self.update_display()
-            
-            # Parentheses handling
-            elif key in ['(', ')']:
-                if self.new_number:
-                    self.current_value = key
-                    self.new_number = False
-                else:
-                    self.current_value += key
-                self.update_display()
-            
-            # Binary operations
-            elif key in ['+', '-', '*', '/', 'MOD', 'AND', 'OR', 'XOR', '<<', '>>']:
-                if self.operation and self.previous_value and not self.new_number:
-                    self.calculate()
-                
-                self.previous_value = self.current_value
-                self.operation = key
-                self.new_number = True
-                
-                # Set shift operation flag and show/hide shift mode selection
-                if key in ['<<', '>>']:
-                    self.in_shift_operation = True
-                    self.show_shift_mode(True)
-                else:
-                    self.in_shift_operation = False
-                    self.show_shift_mode(False)
-                
-                self.update_display()
-                self.update_button_states()
-            
-            # Unary bitwise operations
-            elif key in ['NOT', '~', '^']:
-                try:
-                    dec_val = self.to_decimal(self.current_value)
-                    
-                    if key == 'NOT':
-                        result = ~dec_val & ((1 << self.bit_width) - 1)
-                    elif key == '~':
-                        result = ~dec_val & ((1 << self.bit_width) - 1)
-                    elif key == '^':
-                        result = dec_val ^ ((1 << self.bit_width) - 1)
-                    
-                    self.current_value = self.from_decimal(result)
-                    self.new_number = True
-                    self.update_display()
-                except:
-                    messagebox.showerror("Error", "Invalid operation")
-            
-            # NAND operation
-            elif key == 'NAND':
-                if self.operation and self.previous_value and not self.new_number:
-                    self.calculate()
-                
-                self.previous_value = self.current_value
-                self.operation = 'NAND'
-                self.new_number = True
-                self.in_shift_operation = False
-                self.show_shift_mode(False)
-                self.update_display()
-                self.update_button_states()
-            
-            # Equals
-            elif key == '=':
-                if self.previous_value and self.operation:
-                    self.calculate()
-                self.new_number = True
-                self.in_shift_operation = False
-                self.show_shift_mode(False)
-                self.update_button_states()
-        
-        def calculate(self):
-            try:
-                val1 = self.to_decimal(self.previous_value)
-                
-                # For shift operations, interpret shift amount according to shift mode
-                if self.operation in ['<<', '>>']:
-                    if self.shift_mode == "BIN":
-                        val2 = int(self.current_value, 2)
-                    else:  # DEC mode
-                        val2 = int(self.current_value)
-                else:
-                    val2 = self.to_decimal(self.current_value)
-                
-                result = 0
-                
-                if self.operation == '+':
-                    result = val1 + val2
-                elif self.operation == '-':
-                    result = val1 - val2
-                elif self.operation == '*':
-                    result = val1 * val2
-                elif self.operation == '/':
-                    if val2 == 0:
-                        messagebox.showerror("Error", "Division by zero")
-                        return
-                    result = val1 // val2
-                elif self.operation == 'MOD':
-                    if val2 == 0:
-                        messagebox.showerror("Error", "Modulo by zero")
-                        return
-                    result = val1 % val2
-                elif self.operation == 'AND':
-                    result = val1 & val2
-                elif self.operation == 'OR':
-                    result = val1 | val2
-                elif self.operation == 'XOR':
-                    result = val1 ^ val2
-                elif self.operation == '<<':
-                    if val2 < 0:
-                        messagebox.showerror("Error", "Shift amount must be non-negative")
-                        return
-                    result = (val1 << val2) & ((1 << self.bit_width) - 1)
-                elif self.operation == '>>':
-                    if val2 < 0:
-                        messagebox.showerror("Error", "Shift amount must be non-negative")
-                        return
-                    result = val1 >> val2
-                elif self.operation == 'NAND':
-                    result = ~(val1 & val2) & ((1 << self.bit_width) - 1)
-                
-                result = self.apply_bit_mask(result)
-                self.current_value = self.from_decimal(result)
-                self.previous_value = ""
-                self.operation = ""
-                self.in_shift_operation = False
-                self.update_display()
-            except Exception as e:
-                messagebox.showerror("Error", f"Calculation failed: {str(e)}")
-                self.current_value = "0"
-                self.in_shift_operation = False
-                self.update_display()
-            finally:
-                self.update_button_states()
+    def programmer_calculator_95():
+        """Programmer Calculator (Windows 95 look): HEX / DEC / OCT / BIN, 8-64 bits, bitwise operations."""
+        import os
+        import re
+        import tkinter as tk
+        import tkinter.font as tkfont
 
-    if __name__ == "__main__":
-        rootprgrmcalc2 = tk.Tk()
-        app = ProgrammerCalculator(rootprgrmcalc2)
-        rootprgrmcalc2.mainloop()
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        BLUE, RED, PURPLE = "#0000ff", "#ff0000", "#800080"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Programmer Calculator"
+        BASES = {"HEX": 16, "DEC": 10, "OCT": 8, "BIN": 2}
+        DIGITS = "0123456789ABCDEF"
+
+        # ══════════════════════════════════════════════════════════════
+        # THE ENGINE (values are kept as unsigned bit patterns of the chosen width)
+        # ══════════════════════════════════════════════════════════════
+
+        class Engine:
+            def __init__(self):
+                self.bits = 32
+                self.base = "DEC"
+                self.signed = True                 # DEC shows two's complement (0 - 1 = -1, as Windows)
+                self.shift_mode = "DEC"
+                self.clear_all()
+
+            @property
+            def mask(self):
+                return (1 << self.bits) - 1
+
+            def clear_all(self):
+                self.value = 0                     # the pattern being shown
+                self.entry = ""                    # the digits typed so far ("" = the value is a result)
+                self.pending = None                # (left value, operator)
+                self.error = None
+                self.fresh = True
+
+            def clear_entry(self):
+                self.value, self.entry, self.error, self.fresh = 0, "", None, True
+
+            # ----- display -----------------------------------------------------------------------------------
+            def to_signed(self, value):
+                return value - (1 << self.bits) if value >> (self.bits - 1) & 1 else value
+
+            def text(self, base=None, value=None):
+                base = base or self.base
+                value = self.value if value is None else value
+                if base == "DEC" and self.signed:
+                    return str(self.to_signed(value))
+                n, radix = value, BASES[base]
+                if n == 0:
+                    return "0"
+                out = ""
+                while n:
+                    n, r = divmod(n, radix)
+                    out = DIGITS[r] + out
+                return out
+
+            def display(self):
+                if self.error:
+                    return self.error
+                if self.in_shift_amount():
+                    return self.entry or "0"
+                if self.entry and not self.fresh:
+                    return self.entry
+                return self.text()
+
+            def in_shift_amount(self):
+                return self.pending is not None and self.pending[1] in ("<<", ">>") and self.shift_mode != "BASE"
+
+            def entry_radix(self):
+                if self.in_shift_amount():
+                    return 2 if self.shift_mode == "BIN" else 10
+                return BASES[self.base]
+
+            def valid_digits(self):
+                return DIGITS[:self.entry_radix()]
+
+            # ----- typing ------------------------------------------------------------------------------------
+            def digit(self, ch):
+                """A digit of the current base; it is refused if the number would not fit (it overflowed before)."""
+                ch = ch.upper()
+                if self.error:
+                    self.clear_all()
+                if ch not in self.valid_digits():
+                    return False
+                text = (ch if self.fresh or self.entry in ("", "0") else self.entry + ch)
+                if self.entry.startswith("-") and not self.fresh:
+                    text = self.entry + ch
+                radix = self.entry_radix()
+                try:
+                    number = int(text, radix)
+                except ValueError:
+                    return False
+                if self.in_shift_amount():
+                    if number > 255:
+                        return False
+                elif self.base == "DEC" and self.signed:
+                    if number > (1 << (self.bits - 1)) - 1:          # 127 for a signed byte, as Windows
+                        return False
+                elif number > self.mask:
+                    return False
+                self.entry, self.fresh = text, False
+                if not self.in_shift_amount():
+                    self.value = number & self.mask
+                return True
+
+            def backspace(self):
+                if self.error or self.fresh or not self.entry:
+                    return
+                self.entry = self.entry[:-1]
+                if self.entry in ("", "-"):
+                    self.entry, self.fresh = "", True
+                    if not self.in_shift_amount():
+                        self.value = 0
+                    return
+                if not self.in_shift_amount():
+                    self.value = int(self.entry, self.entry_radix()) & self.mask
+
+            def negate(self):
+                if self.error or self.in_shift_amount():
+                    return
+                self.value = (-self.value) & self.mask
+                self.entry, self.fresh = "", True
+
+            def set_value(self, value):
+                self.value = value & self.mask
+                self.entry, self.fresh = "", True
+
+            # ----- settings ----------------------------------------------------------------------------------
+            def set_bits(self, bits):
+                """The value is cut to the new width at once (it kept the old value before)."""
+                self.bits = bits
+                self.value &= self.mask
+                if self.pending:
+                    self.pending = (self.pending[0] & self.mask, self.pending[1])
+                self.entry, self.fresh = "", True
+
+            def set_base(self, base):
+                self.base = base
+                if not self.in_shift_amount():
+                    self.entry, self.fresh = "", True
+
+            # ----- operations ------------------------------------------------------------------------------
+            def operand(self):
+                if self.in_shift_amount():
+                    return int(self.entry or "0", self.entry_radix())
+                return self.value
+
+            def _apply(self, a, op, b):
+                m = self.mask
+                if op == "+":
+                    return (a + b) & m
+                if op == "-":
+                    return (a - b) & m
+                if op == "*":
+                    return (a * b) & m
+                if op in ("/", "MOD"):
+                    if b == 0:
+                        raise ZeroDivisionError("Cannot divide by zero")
+                    if self.signed and self.base == "DEC":                 # signed, as Windows in DEC
+                        sa, sb = self.to_signed(a), self.to_signed(b)
+                        q = abs(sa) // abs(sb) * (1 if (sa < 0) == (sb < 0) else -1)
+                        return (q if op == "/" else sa - q * sb) & m
+                    return (a // b if op == "/" else a % b) & m
+                if op == "AND":
+                    return a & b
+                if op == "OR":
+                    return a | b
+                if op == "XOR":
+                    return a ^ b
+                if op == "NAND":
+                    return ~(a & b) & m
+                if op == "NOR":
+                    return ~(a | b) & m
+                if op == "<<":
+                    return (a << b) & m if b < self.bits else 0
+                if op == ">>":
+                    return a >> b if b < self.bits else 0
+                raise ValueError(op)
+
+            def operator(self, op):
+                if self.error:
+                    return
+                try:
+                    if self.pending and not self.fresh:
+                        left, pending_op = self.pending
+                        self.value = self._apply(left, pending_op, self.operand())
+                    self.pending = (self.value, op)
+                    self.entry, self.fresh = "", True
+                except ZeroDivisionError as exc:
+                    self.error, self.pending = str(exc), None
+
+            def equals(self):
+                if self.error or not self.pending:
+                    self.fresh = True
+                    return
+                left, op = self.pending
+                try:
+                    right = self.operand() if not self.fresh else (0 if op in ("<<", ">>") else self.value)
+                    self.pending = None
+                    self.value = self._apply(left, op, right)
+                    self.entry, self.fresh = "", True
+                except ZeroDivisionError as exc:
+                    self.error, self.pending = str(exc), None
+
+            def unary(self, op):
+                if self.error or self.in_shift_amount():
+                    return
+                v, m, n = self.value, self.mask, self.bits
+                if op == "NOT":
+                    v = ~v & m
+                elif op == "RoL":
+                    v = ((v << 1) | (v >> (n - 1))) & m
+                elif op == "RoR":
+                    v = ((v >> 1) | ((v & 1) << (n - 1))) & m
+                elif op == "SAR":                                   # arithmetic shift right by 1 (keeps the sign)
+                    v = (self.to_signed(v) >> 1) & m
+                self.set_value(v)
+
+            def toggle_bit(self, index):
+                if self.error or self.in_shift_amount():
+                    return
+                self.set_value(self.value ^ (1 << index))
+
+            def paste(self, text):
+                """'0x1F', '1Fh', '0b101', '0o17', '-5', '1 024' -> the value (in the current width)."""
+                t = text.strip().replace(" ", "").replace("_", "").replace("\u00a0", "")
+                radix = BASES[self.base]
+                m = re.match(r"^(-?)(0x|0b|0o|&h)?([0-9A-Fa-f]+)(h)?$", t, re.I)
+                if not m:
+                    return False
+                sign, prefix, body, suffix = m.groups()
+                if prefix:
+                    radix = {"0x": 16, "&h": 16, "0b": 2, "0o": 8}[prefix.lower()]
+                elif suffix:
+                    radix = 16
+                try:
+                    number = int(body, radix)
+                except ValueError:
+                    return False
+                if self.error:
+                    self.clear_all()
+                self.set_value(-number if sign else number)
+                return True
+
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
+
+        class ProgrammerCalculator:
+            def __init__(self):
+                self.rootprgrmcalc2 = root = tk.Tk()
+                self.engine = Engine()
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.minimizing = False
+                self.base_var = tk.StringVar(value="DEC")
+                self.bit_var = tk.IntVar(value=32)
+                self.shift_var = tk.StringVar(value="DEC")
+                self.signed_var = tk.BooleanVar(value=True)
+                self.buttons = {}
+                root.title(TITLE)
+                root.configure(bg=FACE)
+                root.resizable(False, False)
+                root.protocol("WM_DELETE_WINDOW", root.destroy)
+                self.btn_font = tkfont.Font(root=root, family="MS Sans Serif", size=8)
+                self.mono = tkfont.Font(root=root, family="Courier New", size=9)
+                self._make_icon()
+                self.create_title_bar()
+                self.create_widgets()
+                self.bind_keys()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.update_idletasks()
+                w, h = root.winfo_reqwidth(), root.winfo_reqheight()
+                root.geometry("+%d+%d" % ((root.winfo_screenwidth() - w) // 2, max(0, (root.winfo_screenheight() - h) // 3)))
+                self.refresh()
+
+            # ----- frame -------------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((2, 0, 14, 1, BLACK), (2, 15, 14, 16, BLACK), (2, 0, 3, 16, BLACK),
+                                               (13, 0, 14, 16, BLACK), (3, 1, 13, 15, FACE), (4, 2, 12, 5, LIGHT),
+                                               (5, 3, 6, 4, BLACK), (8, 3, 9, 4, BLACK), (10, 3, 11, 4, BLACK),
+                                               (4, 7, 6, 9, PURPLE), (7, 7, 9, 9, BLUE), (10, 7, 12, 9, RED),
+                                               (4, 10, 6, 12, PURPLE), (7, 10, 9, 12, BLUE), (10, 10, 12, 12, RED)):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+
+            def create_title_bar(self):
+                root = self.rootprgrmcalc2
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "close": "r"} if marlett else {"min": "_", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                title = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                title.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, title, icon)
+                for key, command in (("close", root.destroy), ("min", self.minimize)):
+                    tk.Button(bar, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                              compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                              activebackground=FACE, relief="raised", bd=2, highlightthickness=0,
+                              takefocus=0).pack(side="right", padx=(0, 2))
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.rootprgrmcalc2.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                root = self.rootprgrmcalc2
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+            def _on_map(self, event):
+                root = self.rootprgrmcalc2
+                if event.widget is root and self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.rootprgrmcalc2.overrideredirect(False)
+                self.rootprgrmcalc2.iconify()
+
+            def _caption_press(self, event):
+                root = self.rootprgrmcalc2
+                self._drag = (event.x_root - root.winfo_x(), event.y_root - root.winfo_y())
+
+            def _caption_drag(self, event):
+                if self.custom_frame:
+                    self.rootprgrmcalc2.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def create_widgets(self):
+                root = self.rootprgrmcalc2
+                bar = tk.Frame(root, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                m = menubutton("Edit")
+                m.add_command(label="Copy", accelerator="Ctrl+C", command=self.from_menu(self.copy))
+                m.add_command(label="Paste", accelerator="Ctrl+V", command=self.from_menu(self.paste))
+                m = menubutton("View")
+                m.add_checkbutton(label="Signed (DEC)", variable=self.signed_var, command=self.set_signed)
+                m = menubutton("Help")
+                m.add_command(label="Keyboard", command=self.from_menu(lambda: self.info(
+                    "Keys", "0-9, A-F   digits of the current base\n+ - * /   operators,  %  MOD\n"
+                    "&  AND    |  OR    ^  XOR    ~  NOT\n<  and  >   shift left / right\nEnter or =   equals\n"
+                    "Esc   C (all)    Del   CE (entry)    Backspace   last digit\nF5 HEX   F6 DEC   F7 OCT   F8 BIN\n"
+                    "Ctrl+C / Ctrl+V   copy / paste (0x1F, 1Fh, 0b101 also work)")))
+
+                body = tk.Frame(root, bg=FACE)
+                body.pack(padx=8, pady=(4, 8))
+                disp = tk.Frame(body, bg=LIGHT, bd=2, relief="sunken")
+                disp.pack(fill="x")
+                self.op_label = tk.Label(disp, text="", font=FONT, bg=LIGHT, fg=SHADOW, anchor="e", padx=4)
+                self.op_label.pack(fill="x")
+                self.display_var = tk.StringVar()
+                tk.Label(disp, textvariable=self.display_var, font=("MS Sans Serif", 14, "bold"), bg=LIGHT, fg=BLACK,
+                         anchor="e", padx=4).pack(fill="x")
+                # the value in every base at once; a click picks the base
+                all_bases = tk.Frame(body, bg=FACE, bd=2, relief="groove")
+                all_bases.pack(fill="x", pady=(6, 0))
+                self.base_rows = {}
+                for base in ("HEX", "DEC", "OCT", "BIN"):
+                    row = tk.Frame(all_bases, bg=FACE)
+                    row.pack(fill="x", padx=4, pady=1)
+                    tk.Radiobutton(row, text=base, variable=self.base_var, value=base, font=FONT_B, bg=FACE,
+                                   activebackground=FACE, selectcolor=LIGHT, highlightthickness=0, width=4, anchor="w",
+                                   command=self.change_base).pack(side="left")
+                    label = tk.Label(row, text="", font=self.mono, bg=FACE, anchor="e")
+                    label.pack(side="left", fill="x", expand=True)
+                    label.bind("<Button-1>", lambda e, b=base: (self.base_var.set(b), self.change_base()))
+                    self.base_rows[base] = label
+                options = tk.Frame(body, bg=FACE)
+                options.pack(fill="x", pady=(6, 0))
+                bits_box = tk.Frame(options, bg=FACE, bd=2, relief="groove")
+                bits_box.pack(side="left")
+                for bits, label in ((64, "Qword"), (32, "Dword"), (16, "Word"), (8, "Byte")):
+                    tk.Radiobutton(bits_box, text="%s %d" % (label, bits), variable=self.bit_var, value=bits, font=FONT,
+                                   bg=FACE, activebackground=FACE, selectcolor=LIGHT, highlightthickness=0,
+                                   command=self.change_bit_width).pack(side="left", padx=2)
+                tk.Checkbutton(options, text="Signed", variable=self.signed_var, font=FONT, bg=FACE, activebackground=FACE,
+                               selectcolor=LIGHT, highlightthickness=0, command=self.set_signed).pack(side="left", padx=8)
+                # the shift amount: as the original (DEC or BIN), or in the current base
+                self.shift_frame = tk.Frame(body, bg=FACE, bd=2, relief="groove")
+                tk.Label(self.shift_frame, text="Shift amount in:", font=FONT, bg=FACE).pack(side="left", padx=4)
+                for value, text in (("DEC", "DEC"), ("BIN", "BIN"), ("BASE", "Current base")):
+                    tk.Radiobutton(self.shift_frame, text=text, variable=self.shift_var, value=value, font=FONT, bg=FACE,
+                                   activebackground=FACE, selectcolor=LIGHT, highlightthickness=0,
+                                   command=self.change_shift_mode).pack(side="left", padx=2)
+                self.bits_canvas = tk.Canvas(body, height=58, bg=FACE, highlightthickness=0)
+                self.bits_canvas.pack(fill="x", pady=(6, 0))
+                self.bits_canvas.bind("<Button-1>", self.bit_click)
+                self.keys_frame = tk.Frame(body, bg=FACE)
+                self.keys_frame.pack(pady=(6, 0))
+                layout = [
+                    [("C", "CLR", RED), ("CE", "CE", RED), ("Back", "BS", RED), ("+/-", "NEG", BLUE), ("AND", "AND", PURPLE),
+                     ("OR", "OR", PURPLE)],
+                    [("A", "A", BLUE), ("B", "B", BLUE), ("7", "7", BLUE), ("8", "8", BLUE), ("9", "9", BLUE),
+                     ("/", "/", RED), ("XOR", "XOR", PURPLE), ("NOT", "NOT", PURPLE)],
+                    [("C", "C", BLUE), ("D", "D", BLUE), ("4", "4", BLUE), ("5", "5", BLUE), ("6", "6", BLUE),
+                     ("*", "*", RED), ("NAND", "NAND", PURPLE), ("NOR", "NOR", PURPLE)],
+                    [("E", "E", BLUE), ("F", "F", BLUE), ("1", "1", BLUE), ("2", "2", BLUE), ("3", "3", BLUE),
+                     ("-", "-", RED), ("<<", "<<", PURPLE), (">>", ">>", PURPLE)],
+                    [("RoL", "RoL", PURPLE), ("RoR", "RoR", PURPLE), ("0", "0", BLUE), ("SAR", "SAR", PURPLE),
+                     ("MOD", "MOD", RED), ("+", "+", RED), ("=", "=", RED), ("", None, BLACK)],
+                ]
+                first_row = tk.Frame(self.keys_frame, bg=FACE)
+                first_row.grid(row=0, column=0, columnspan=8, sticky="ew", pady=(0, 4))
+                for label, action, colour in layout[0]:
+                    b = self.key(first_row, label, action, colour, width=6 if label != "Back" else 7)
+                    b.pack(side="left", padx=2)
+                for r, row in enumerate(layout[1:], start=1):
+                    for c, (label, action, colour) in enumerate(row):
+                        if action is None:
+                            continue
+                        self.key(self.keys_frame, label, action, colour).grid(row=r, column=c, padx=2, pady=2)
+
+            def key(self, parent, label, action, colour, width=5):
+                b = tk.Button(parent, text=label, width=width, font=self.btn_font, fg=colour, bg=FACE,
+                              activebackground=FACE, activeforeground=colour, disabledforeground=SHADOW, relief="raised",
+                              bd=2, pady=2, highlightthickness=0, takefocus=0, command=lambda: self.press(action))
+                self.buttons[action] = b
+                return b
+
+            def info(self, title, text):
+                """The same modal Windows 95 box as in the other tools: it waits until it is closed, then the
+                keyboard goes back to the calculator (it took the clicks without waiting before: Help froze)."""
+                root = self.rootprgrmcalc2
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                label = tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B)
+                label.pack(side="left", padx=4)
+                tk.Button(bar, text=self.glyphs["close"], command=win.destroy, font=self.glyph_font, image=self._pixel,
+                          compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                          activebackground=FACE, relief="raised", bd=2, highlightthickness=0,
+                          takefocus=0).pack(side="right", padx=2)
+
+                def press(event):
+                    win._drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+                def drag(event):
+                    win.geometry("+%d+%d" % (event.x_root - win._drag[0], event.y_root - win._drag[1]))
+                for widget in (bar, label):
+                    widget.bind("<ButtonPress-1>", press)
+                    widget.bind("<B1-Motion>", drag)
+                tk.Label(win, text=text, font=FONT, bg=FACE, justify="left").pack(padx=14, pady=10)
+                tk.Button(win, text="OK", width=9, font=FONT_B, bg=FACE, relief="raised", bd=2, highlightthickness=1,
+                          highlightbackground=BLACK, command=win.destroy).pack(pady=(0, 10))
+                win.bind("<Return>", lambda e: win.destroy())
+                win.bind("<Escape>", lambda e: win.destroy())
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                         root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+                win.lift()
+                win.focus_force()
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+                try:
+                    root.focus_force()
+                except tk.TclError:
+                    pass
+
+            def from_menu(self, action):
+                """Menu commands run after the menu has closed (a box opened inside the menu's own click could
+                keep the clicks captured on Windows)."""
+                return lambda: self.rootprgrmcalc2.after(10, action)
+
+            # ----- actions -----------------------------------------------------------------------------------
+            def press(self, action):
+                e = self.engine
+                if action is None:
+                    return
+                # "CLR" is the C (Clear) key; "C" is the hex digit (the same action cleared nothing before)
+                if len(action) == 1 and action.upper() in DIGITS:
+                    ok = e.digit(action)
+                else:
+                    ok = True
+                    if action == "CLR":
+                        e.clear_all()
+                    elif action == "CE":
+                        e.clear_entry()
+                    elif action == "BS":
+                        e.backspace()
+                    elif action == "NEG":
+                        e.negate()
+                    elif action in ("+", "-", "*", "/", "MOD", "AND", "OR", "XOR", "NAND", "NOR", "<<", ">>"):
+                        e.operator(action)
+                    elif action == "=":
+                        e.equals()
+                    elif action in ("NOT", "RoL", "RoR", "SAR"):
+                        e.unary(action)
+                if not ok:
+                    self.rootprgrmcalc2.bell()          # a digit that does not fit or is not of this base
+                self.refresh()
+
+            def change_base(self):
+                self.engine.set_base(self.base_var.get())
+                self.refresh()
+
+            def change_bit_width(self):
+                self.engine.set_bits(self.bit_var.get())
+                self.refresh()
+
+            def change_shift_mode(self):
+                self.engine.shift_mode = self.shift_var.get()
+                self.refresh()
+
+            def set_signed(self):
+                self.engine.signed = self.signed_var.get()
+                self.engine.entry, self.engine.fresh = "", True
+                self.refresh()
+
+            def refresh(self):
+                e = self.engine
+                self.display_var.set(e.display())
+                if e.pending:
+                    left, op = e.pending
+                    self.op_label.config(text="%s %s" % (e.text(value=left), op))
+                else:
+                    self.op_label.config(text="")
+                for base, label in self.base_rows.items():
+                    text = e.text(base) if not e.error else ""
+                    if base == "BIN":
+                        text = " ".join(text.zfill((len(text) + 3) // 4 * 4)[i:i + 4]
+                                        for i in range(0, (len(text) + 3) // 4 * 4, 4)) if text != "0" else "0"
+                    elif base == "HEX":
+                        text = " ".join(text.zfill((len(text) + 3) // 4 * 4)[i:i + 4]
+                                        for i in range(0, (len(text) + 3) // 4 * 4, 4)) if text != "0" else "0"
+                    label.config(text=text, fg=NAVY if base == e.base else BLACK)
+                # the shift row is shown while a shift waits for its amount (as before)
+                if e.pending and e.pending[1] in ("<<", ">>"):
+                    if not self.shift_frame.winfo_manager():
+                        self.shift_frame.pack(fill="x", pady=(6, 0), before=self.bits_canvas)
+                elif self.shift_frame.winfo_manager():
+                    self.shift_frame.pack_forget()
+                # only the digits of the current base (or of the shift amount) are active
+                valid = e.valid_digits()
+                for action, button in self.buttons.items():
+                    if len(action) == 1 and action in DIGITS:
+                        button.config(state="normal" if action in valid else "disabled")
+                self.draw_bits()
+
+            def draw_bits(self):
+                """The bits of the value, 16 per row, nibbles apart; a click flips one."""
+                c, e = self.bits_canvas, self.engine
+                c.delete("all")
+                width = int(c.winfo_width()) if c.winfo_width() > 10 else 420
+                cell = 6
+                group = 5 * cell + 6
+                rows = max(1, e.bits // 32) if e.bits > 16 else 1
+                per_row = e.bits // rows
+                c.config(height=rows * 26 + 4)
+                self.bit_cells = []
+                start_x = max(0, (width - (per_row // 4) * group) // 2)
+                for r in range(rows):
+                    for i in range(per_row):
+                        bit = e.bits - 1 - (r * per_row + i)
+                        x = start_x + (i // 4) * group + (i % 4) * (cell + 1)
+                        y = 4 + r * 26
+                        on = (e.value >> bit) & 1
+                        c.create_text(x + cell // 2 + 1, y + 6, text="1" if on else "0", font=self.mono,
+                                      fill=NAVY if on else SHADOW)
+                        self.bit_cells.append((x - 1, y - 1, x + cell + 2, y + 13, bit))
+                        if i % 4 == 0:
+                            c.create_text(x, y + 18, text=str(bit), font=("MS Sans Serif", 6), fill=SHADOW, anchor="w")
+
+            def bit_click(self, event):
+                for x0, y0, x1, y1, bit in getattr(self, "bit_cells", []):
+                    if x0 <= event.x <= x1 and y0 <= event.y <= y1:
+                        self.engine.toggle_bit(bit)
+                        self.refresh()
+                        return
+
+            def copy(self):
+                root = self.rootprgrmcalc2
+                root.clipboard_clear()
+                root.clipboard_append(self.engine.display())
+
+            def paste(self):
+                try:
+                    text = self.rootprgrmcalc2.clipboard_get()
+                except tk.TclError:
+                    return
+                if not self.engine.paste(text):
+                    self.rootprgrmcalc2.bell()
+                self.refresh()
+
+            def bind_keys(self):
+                simple = {"plus": "+", "minus": "-", "asterisk": "*", "slash": "/", "KP_Add": "+", "KP_Subtract": "-",
+                          "KP_Multiply": "*", "KP_Divide": "/", "percent": "MOD", "ampersand": "AND", "bar": "OR",
+                          "asciicircum": "XOR", "asciitilde": "NOT", "less": "<<", "greater": ">>", "Return": "=",
+                          "KP_Enter": "=", "equal": "=", "Escape": "CLR", "Delete": "CE", "BackSpace": "BS"}
+
+                def on_key(event):
+                    if event.state & 0x0004:
+                        if event.keysym.lower() == "c":
+                            self.copy()
+                        elif event.keysym.lower() == "v":
+                            self.paste()
+                        return "break"
+                    key = event.keysym
+                    if key in ("F5", "F6", "F7", "F8"):
+                        self.base_var.set({"F5": "HEX", "F6": "DEC", "F7": "OCT", "F8": "BIN"}[key])
+                        self.change_base()
+                        return "break"
+                    if key.startswith("KP_") and key[3:].isdigit():
+                        key = key[3:]
+                    if len(key) == 1 and key.upper() in DIGITS:
+                        self.press(key.upper())
+                    elif key in simple:
+                        self.press(simple[key])
+                    return "break"
+                self.rootprgrmcalc2.bind("<Key>", on_key)
+
+        app = ProgrammerCalculator()
+        app.rootprgrmcalc2.mainloop()
+        return app
+
+    programmer_calculator_95()
         
 if projmanvar == 111000111000111000111000232222:
     from tkinter import simpledialog
@@ -156137,1050 +158247,1356 @@ if graphcalcvar == 1110001110001110001110002322220099:
             # Rularea buclei principale
             validation.mainloop()
 
-    class GraphingCalculator:
-        def __init__(self, rootgraphcalc):
-            self.rootgraphcalc = rootgraphcalc
-            self.rootgraphcalc.title("Graphing Calculator")
-            self.rootgraphcalc.geometry("700x600")
-            self.rootgraphcalc.configure(bg="#c0c0c0")
-            
-            # Variables
-            self.expression = ""
-            self.x_min = -10
-            self.x_max = 10
-            self.y_min = -10
-            self.y_max = 10
-            self.plot_color = "blue"
-            self.line_width = 2
-            self.show_grid = True
-            self.history = []
-            self.current_expression = None
-            self.marked_points = []  # Pentru puncte speciale (maxime, minime, roots)
-            
-            # Create menu bar
-            self.create_menu()
-            
-            # Create UI
-            self.create_widgets()
-            
-            # Bind resize event
-            self.rootgraphcalc.bind('<Configure>', self.on_resize)
-            self.resize_pending = False
-            
-        def create_menu(self):
-            menubar = tk.Menu(self.rootgraphcalc)
-            self.rootgraphcalc.config(menu=menubar)
-            
-            # File Menu
-            file_menu = tk.Menu(menubar, tearoff=0)
-            menubar.add_cascade(label="File", menu=file_menu)
-            file_menu.add_command(label="New Graph", command=self.clear_graph)
-            file_menu.add_command(label="Save Expression", command=self.save_expression)
-            file_menu.add_separator()
-            file_menu.add_command(label="Exit", command=self.rootgraphcalc.quit)
-            
-            # Edit Menu
-            edit_menu = tk.Menu(menubar, tearoff=0)
-            menubar.add_cascade(label="Edit", menu=edit_menu)
-            edit_menu.add_command(label="Settings", command=self.open_settings)
-            edit_menu.add_command(label="Plot Options", command=self.plot_options)
-            edit_menu.add_command(label="Toggle Grid", command=self.toggle_grid)
-            
-            # View Menu
-            view_menu = tk.Menu(menubar, tearoff=0)
-            menubar.add_cascade(label="View", menu=view_menu)
-            view_menu.add_command(label="Zoom In", command=self.zoom_in)
-            view_menu.add_command(label="Zoom Out", command=self.zoom_out)
-            view_menu.add_command(label="Reset View", command=self.reset_view)
-            view_menu.add_separator()
-            view_menu.add_command(label="History", command=self.show_history)
-            
-            # Tools Menu
-            tools_menu = tk.Menu(menubar, tearoff=0)
-            menubar.add_cascade(label="Tools", menu=tools_menu)
-            tools_menu.add_command(label="Find Roots", command=self.find_roots)
-            tools_menu.add_command(label="Find Maximum", command=self.find_maximum)
-            tools_menu.add_command(label="Find Minimum", command=self.find_minimum)
-            
-            # Help Menu
-            help_menu = tk.Menu(menubar, tearoff=0)
-            menubar.add_cascade(label="Help", menu=help_menu)
-            help_menu.add_command(label="Help Topics", command=self.show_help)
-            help_menu.add_command(label="Function Reference", command=self.show_functions)
-            help_menu.add_command(label="Examples", command=self.show_examples)
-            help_menu.add_separator()
-            help_menu.add_command(label="About", command=self.show_about)
-            
-        def create_widgets(self):
-            # Top frame for expression input
-            top_frame = tk.Frame(self.rootgraphcalc, bg="#c0c0c0", relief=tk.RAISED, bd=2)
-            top_frame.pack(pady=5, padx=5, fill=tk.X)
-            
-            tk.Label(top_frame, text="f(x) =", bg="#c0c0c0", font=("MS Sans Serif", 10, "bold")).pack(side=tk.LEFT, padx=5)
-            
-            self.expr_entry = tk.Entry(top_frame, font=("Courier New", 11), relief=tk.SUNKEN, bd=2)
-            self.expr_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-            self.expr_entry.bind('<Return>', lambda e: self.plot_graph())
-            
-            # Canvas frame
-            self.canvas_frame = tk.Frame(self.rootgraphcalc, bg="#c0c0c0", relief=tk.SUNKEN, bd=2)
-            self.canvas_frame.pack(pady=5, padx=5, fill=tk.BOTH, expand=True)
-            
-            self.canvas = tk.Canvas(self.canvas_frame, bg="white")
-            self.canvas.pack(fill=tk.BOTH, expand=True)
-            
-            # Info label
-            self.info_label = tk.Label(self.rootgraphcalc, text="Range: X[-10, 10] Y[-10, 10]", 
-                                       bg="#c0c0c0", font=("MS Sans Serif", 8), 
-                                       relief=tk.SUNKEN, bd=1, anchor=tk.W)
-            self.info_label.pack(fill=tk.X, padx=5, pady=2)
-            
-            # Control buttons frame
-            control_frame = tk.Frame(self.rootgraphcalc, bg="#c0c0c0")
-            control_frame.pack(pady=5, padx=5, fill=tk.X)
-            
-            tk.Button(control_frame, text="Plot Graph", command=self.plot_graph, 
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", font=("MS Sans Serif", 9),
-                     width=12, height=1).pack(side=tk.LEFT, padx=3)
-            
-            tk.Button(control_frame, text="Clear", command=self.clear_graph,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", font=("MS Sans Serif", 9),
-                     width=12, height=1).pack(side=tk.LEFT, padx=3)
-            
-            tk.Button(control_frame, text="Settings", command=self.open_settings,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", font=("MS Sans Serif", 9),
-                     width=12, height=1).pack(side=tk.LEFT, padx=3)
-            
-            tk.Button(control_frame, text="Zoom In", command=self.zoom_in,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", font=("MS Sans Serif", 9),
-                     width=12, height=1).pack(side=tk.LEFT, padx=3)
-            
-            tk.Button(control_frame, text="Zoom Out", command=self.zoom_out,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", font=("MS Sans Serif", 9),
-                     width=12, height=1).pack(side=tk.LEFT, padx=3)
-            
-            # Function buttons frame
-            func_frame = tk.Frame(self.rootgraphcalc, bg="#c0c0c0", relief=tk.RAISED, bd=2)
-            func_frame.pack(pady=5, padx=5, fill=tk.X)
-            
-            tk.Label(func_frame, text="Quick Functions:", bg="#c0c0c0", 
-                    font=("MS Sans Serif", 8, "bold")).grid(row=0, column=0, columnspan=6, pady=3)
-            
-            functions = [
-                ("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"),
-                ("x^2", "x**2"), ("x^3", "x**3"), ("sqrt(x)", "sqrt(x)"),
-                ("log(x)", "log(x)"), ("exp(x)", "exp(x)"), ("abs(x)", "abs(x)"),
-                ("1/x", "1/x"), ("x^n", "x**"), ("pi", "pi")
-            ]
-            
-            for i, (label, func) in enumerate(functions):
-                tk.Button(func_frame, text=label, 
-                         command=lambda f=func: self.insert_function(f),
-                         relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                         font=("MS Sans Serif", 8), width=8).grid(row=1+i//6, column=i%6, padx=2, pady=2)
-            
-            # Draw initial axes
-            self.rootgraphcalc.after(100, self.initial_draw)
-        
-        def initial_draw(self):
-            """Desenează axele inițiale după ce fereastra este complet construită"""
-            self.draw_axes()
-            self.update_info_label()
-        
-        def on_resize(self, event):
-            """Gestionează redimensionarea ferestrei"""
-            if event.widget == self.rootgraphcalc:
-                if not self.resize_pending:
-                    self.resize_pending = True
-                    self.rootgraphcalc.after(100, self.handle_resize)
-        
-        def handle_resize(self):
-            """Redessineză graful după redimensionare"""
-            self.resize_pending = False
-            width = self.canvas.winfo_width()
-            height = self.canvas.winfo_height()
-            
-            if width > 1 and height > 1:
-                self.draw_axes()
-                if self.current_expression:
-                    self.plot_graph_internal(self.current_expression)
-                self.draw_marked_points()
-            
-        def insert_function(self, func):
-            self.expr_entry.insert(tk.END, func)
-            
-        def update_info_label(self):
-            self.info_label.config(text=f"Range: X[{self.x_min}, {self.x_max}] Y[{self.y_min}, {self.y_max}]  Color: {self.plot_color}  Width: {self.line_width}")
-            
-        def draw_axes(self):
-            """Desenează axele și grila"""
-            self.canvas.delete("all")
-            width = self.canvas.winfo_width()
-            height = self.canvas.winfo_height()
-            
-            if width <= 1 or height <= 1:
-                return
-            
-            x_scale = width / (self.x_max - self.x_min)
-            y_scale = height / (self.y_max - self.y_min)
-            
-            origin_x = -self.x_min * x_scale
-            origin_y = self.y_max * y_scale
-            
-            # Draw grid
-            if self.show_grid:
-                for i in range(int(self.x_min), int(self.x_max) + 1):
-                    x = origin_x + i * x_scale
-                    if 0 <= x <= width:
-                        self.canvas.create_line(x, 0, x, height, fill="#e0e0e0", width=1, tags="grid")
-                
-                for i in range(int(self.y_min), int(self.y_max) + 1):
-                    y = origin_y - i * y_scale
-                    if 0 <= y <= height:
-                        self.canvas.create_line(0, y, width, y, fill="#e0e0e0", width=1, tags="grid")
-            
-            # Draw axes
-            if self.x_min <= 0 <= self.x_max:
-                self.canvas.create_line(origin_x, 0, origin_x, height, fill="black", width=2, tags="axes")
-                
-            if self.y_min <= 0 <= self.y_max:
-                self.canvas.create_line(0, origin_y, width, origin_y, fill="black", width=2, tags="axes")
-            
-            # Draw tick marks and labels
-            for i in range(int(self.x_min), int(self.x_max) + 1):
-                if i != 0:
-                    x = origin_x + i * x_scale
-                    if 0 <= x <= width and self.y_min <= 0 <= self.y_max:
-                        self.canvas.create_line(x, origin_y - 5, x, origin_y + 5, fill="black", width=2, tags="axes")
-                        self.canvas.create_text(x, origin_y + 15, text=str(i), 
-                                              font=("MS Sans Serif", 7), fill="black", tags="axes")
-            
-            for i in range(int(self.y_min), int(self.y_max) + 1):
-                if i != 0:
-                    y = origin_y - i * y_scale
-                    if 0 <= y <= height and self.x_min <= 0 <= self.x_max:
-                        self.canvas.create_line(origin_x - 5, y, origin_x + 5, y, fill="black", width=2, tags="axes")
-                        self.canvas.create_text(origin_x - 20, y, text=str(i),
-                                              font=("MS Sans Serif", 7), fill="black", tags="axes")
-        
-        def evaluate_expression(self, expr, x_val):
-            """Evaluează expresia pentru o valoare x dată"""
+    def graphing_calculator_95():
+        """Graphing Calculator (Windows 95 look): several functions, zoom and pan with the mouse, trace,
+        roots / maxima / minima, table of values. Expressions are kept in Config/dbo_bitpack.db."""
+        import os
+        import re
+        import math
+        import sqlite3
+        from datetime import datetime
+        import tkinter as tk
+        import tkinter.font as tkfont
+
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Graphing Calculator"
+        DB_PATH = "Config/dbo_bitpack.db"
+        COLOURS = [("blue", "#0000c0"), ("red", "#d00000"), ("green", "#008000"), ("purple", "#800080"),
+                   ("orange", "#e07000"), ("black", "#000000")]
+        MAX_FUNCTIONS = 6
+        HISTORY_LIMIT = 50
+
+        # ══════════════════════════════════════════════════════════════
+        # EXPRESSIONS: a small compiler instead of eval() on the typed text
+        # (the old replace("x", ...) also changed the x inside exp(), so exp(x) never worked)
+        # ══════════════════════════════════════════════════════════════
+
+        def _cbrt(v):
+            return math.copysign(abs(v) ** (1.0 / 3.0), v)
+
+        def _sign(v):
+            return (v > 0) - (v < 0)
+
+        FUNCTIONS = {"sin": math.sin, "cos": math.cos, "tan": math.tan, "asin": math.asin, "acos": math.acos,
+                     "atan": math.atan, "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh, "sqrt": math.sqrt,
+                     "cbrt": _cbrt, "log": math.log, "ln": math.log, "log10": math.log10, "log2": math.log2,
+                     "exp": math.exp, "abs": abs, "floor": math.floor, "ceil": math.ceil, "round": round, "sign": _sign,
+                     "sec": lambda v: 1 / math.cos(v), "csc": lambda v: 1 / math.sin(v), "cot": lambda v: 1 / math.tan(v)}
+        CONSTANTS = {"pi": math.pi, "e": math.e, "tau": math.tau}
+        TOKEN = re.compile(r"\s*(?:(\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?)|([A-Za-z_][A-Za-z_0-9]*)|"
+                           r"(\*\*|[-+*/^%(),]))")
+
+        class ExprError(Exception):
+            pass
+
+        def compile_expression(text):
+            """'2x^2 + sin(x)' -> a Python function of x. Only numbers, x, the known functions and constants and
+            + - * / ^ % ( ) are accepted, so nothing else can ever run."""
+            text = text.strip()
+            if not text:
+                raise ExprError("Enter a function of x.")
+            if text.lower().startswith(("y=", "f(x)=", "y =", "f(x) =")):
+                text = text.split("=", 1)[1]
+            tokens, pos = [], 0
+            while pos < len(text):
+                m = TOKEN.match(text, pos)
+                if not m or m.end() == pos:
+                    if text[pos:].strip() == "":
+                        break
+                    raise ExprError("Unexpected '%s' at position %d." % (text[pos:].strip()[:1], pos + 1))
+                pos = m.end()
+                number, name, op = m.groups()
+                if number:
+                    tokens.append(("num", number))
+                elif name:
+                    low = name.lower()
+                    if low == "x":
+                        tokens.append(("x", "x"))
+                    elif low in CONSTANTS:
+                        tokens.append(("num", repr(CONSTANTS[low])))
+                    elif low in FUNCTIONS:
+                        tokens.append(("fn", low))
+                    else:
+                        # "xsin" or "2xx": split letters that are x / known names (implicit multiplication)
+                        parts = re.findall(r"x|pi|tau|e", low)
+                        if "".join(parts) != low:
+                            raise ExprError("Unknown name '%s'. See Help > Function Reference." % name)
+                        for part in parts:
+                            tokens.append(("x", "x") if part == "x" else ("num", repr(CONSTANTS[part])))
+                else:
+                    tokens.append(("op", "**" if op in ("^", "**") else op))
+            out, depth, prev = [], 0, None
+            for kind, value in tokens:
+                starts_operand = kind in ("num", "x", "fn") or value == "("
+                if starts_operand and prev is not None and (prev[0] in ("num", "x") or prev[1] == ")"):
+                    out.append("*")                              # implicit multiplication: 2x, 2(x+1), (x)(x), 3sin(x)
+                if kind == "fn":
+                    out.append("F_" + value)
+                elif kind == "op":
+                    if value == "(":
+                        depth += 1
+                    elif value == ")":
+                        depth -= 1
+                        if depth < 0:
+                            raise ExprError("Too many ')'.")
+                    elif value == ",":
+                        raise ExprError("',' is not used here.")
+                    out.append(value)
+                else:
+                    out.append(value)
+                if kind == "fn":
+                    prev = ("fn", value)
+                else:
+                    prev = (kind, value)
+            if depth > 0:
+                out.append(")" * depth)                          # forgotten ')' at the end are closed
+            source = " ".join(out)
+            namespace = {"__builtins__": {}}
+            namespace.update({"F_" + k: v for k, v in FUNCTIONS.items()})
             try:
-                result = eval(expr.replace("x", f"({x_val})").replace("^", "**"),
-                        {"__builtins__": {}, "sin": math.sin, "cos": math.cos,
-                         "tan": math.tan, "sqrt": math.sqrt, "log": math.log,
-                         "exp": math.exp, "abs": abs, "pi": math.pi, "e": math.e})
-                
-                if isinstance(result, (int, float)) and not math.isnan(result) and not math.isinf(result):
-                    return result
-            except:
-                pass
-            return None
-        
-        def plot_graph(self):
-            """Plotează graful funcției introduse"""
-            expr = self.expr_entry.get()
-            if not expr:
-                messagebox.showwarning("Warning", "Please enter a function!")
-                return
-            
-            # Add to history
-            if expr not in self.history:
-                self.history.append(expr)
-            
-            self.current_expression = expr
-            self.marked_points = []  # Șterge punctele marcate anterioare
-            self.draw_axes()
-            self.plot_graph_internal(expr)
-        
-        def plot_graph_internal(self, expr):
-            """Metodă internă pentru plotare fără a șterge current_expression"""
-            width = self.canvas.winfo_width()
-            height = self.canvas.winfo_height()
-            
-            if width <= 1 or height <= 1:
-                return
-            
-            x_scale = width / (self.x_max - self.x_min)
-            y_scale = height / (self.y_max - self.y_min)
-            
-            origin_x = -self.x_min * x_scale
-            origin_y = self.y_max * y_scale
-            
-            # Șterge doar graful vechi, nu și axele
-            self.canvas.delete("graph")
-            
-            points = []
-            step = (self.x_max - self.x_min) / (width * 2)
-            
-            x = self.x_min
-            while x <= self.x_max:
-                y = self.evaluate_expression(expr, x)
-                
-                if y is not None:
-                    screen_x = origin_x + x * x_scale
-                    screen_y = origin_y - y * y_scale
-                    
-                    if -100 <= screen_y <= height + 100:
-                        points.append((screen_x, screen_y))
-                    else:
-                        if len(points) > 1:
-                            for j in range(len(points) - 1):
-                                self.canvas.create_line(points[j][0], points[j][1],
-                                                       points[j+1][0], points[j+1][1],
-                                                       fill=self.plot_color, width=self.line_width, 
-                                                       smooth=True, tags="graph")
-                            points = []
-                else:
-                    if len(points) > 1:
-                        for j in range(len(points) - 1):
-                            self.canvas.create_line(points[j][0], points[j][1],
-                                                   points[j+1][0], points[j+1][1],
-                                                   fill=self.plot_color, width=self.line_width,
-                                                   smooth=True, tags="graph")
-                        points = []
-                x += step
-            
-            if len(points) > 1:
-                for j in range(len(points) - 1):
-                    self.canvas.create_line(points[j][0], points[j][1],
-                                           points[j+1][0], points[j+1][1],
-                                           fill=self.plot_color, width=self.line_width,
-                                           smooth=True, tags="graph")
-        
-        def draw_marked_points(self):
-            """Desenează punctele marcate (maxime, minime, roots)"""
-            if not self.marked_points:
-                return
-            
-            width = self.canvas.winfo_width()
-            height = self.canvas.winfo_height()
-            
-            if width <= 1 or height <= 1:
-                return
-            
-            x_scale = width / (self.x_max - self.x_min)
-            y_scale = height / (self.y_max - self.y_min)
-            
-            origin_x = -self.x_min * x_scale
-            origin_y = self.y_max * y_scale
-            
-            # Șterge punctele marcate anterioare
-            self.canvas.delete("marked")
-            
-            for point_type, x, y in self.marked_points:
-                screen_x = origin_x + x * x_scale
-                screen_y = origin_y - y * y_scale
-                
-                # Alege culoarea în funcție de tip
-                if point_type == "root":
-                    color = "red"
-                    label = f"Root\n({x:.2f}, {y:.2f})"
-                elif point_type == "max":
-                    color = "green"
-                    label = f"Max\n({x:.2f}, {y:.2f})"
-                elif point_type == "min":
-                    color = "orange"
-                    label = f"Min\n({x:.2f}, {y:.2f})"
-                else:
-                    continue
-                
-                # Desenează punctul
-                r = 5
-                self.canvas.create_oval(screen_x - r, screen_y - r, screen_x + r, screen_y + r,
-                                       fill=color, outline="black", width=2, tags="marked")
-                
-                # Desenează eticheta
-                self.canvas.create_text(screen_x, screen_y - 20, text=label,
-                                       font=("MS Sans Serif", 7), fill=color, tags="marked")
-        
-        def clear_graph(self):
-            """Șterge graful și expresia"""
-            self.expr_entry.delete(0, tk.END)
-            self.current_expression = None
-            self.marked_points = []
-            self.draw_axes()
-            
-        def toggle_grid(self):
-            """Comută afișarea grilei"""
-            self.show_grid = not self.show_grid
-            self.draw_axes()
-            if self.current_expression:
-                self.plot_graph_internal(self.current_expression)
-            self.draw_marked_points()
-            
-        def zoom_in(self):
-            """Zoom in pe grafic"""
-            range_x = (self.x_max - self.x_min) / 4
-            range_y = (self.y_max - self.y_min) / 4
-            self.x_min += range_x
-            self.x_max -= range_x
-            self.y_min += range_y
-            self.y_max -= range_y
-            self.draw_axes()
-            self.update_info_label()
-            if self.current_expression:
-                self.plot_graph_internal(self.current_expression)
-            self.draw_marked_points()
-            
-        def zoom_out(self):
-            """Zoom out pe grafic"""
-            range_x = (self.x_max - self.x_min) / 2
-            range_y = (self.y_max - self.y_min) / 2
-            self.x_min -= range_x
-            self.x_max += range_x
-            self.y_min -= range_y
-            self.y_max += range_y
-            self.draw_axes()
-            self.update_info_label()
-            if self.current_expression:
-                self.plot_graph_internal(self.current_expression)
-            self.draw_marked_points()
-            
-        def reset_view(self):
-            """Resetează vizualizarea la valorile implicite"""
-            self.x_min = -10
-            self.x_max = 10
-            self.y_min = -10
-            self.y_max = 10
-            self.draw_axes()
-            self.update_info_label()
-            if self.current_expression:
-                self.plot_graph_internal(self.current_expression)
-            self.draw_marked_points()
-            
-        def open_settings(self):
-            """Deschide fereastra de setări"""
-            settings_win = tk.Toplevel(self.rootgraphcalc)
-            settings_win.title("Graph Settings")
-            settings_win.geometry("280x220")
-            settings_win.configure(bg="#c0c0c0")
-            settings_win.resizable(False, False)
-            
-            tk.Label(settings_win, text="X Min:", bg="#c0c0c0", font=("MS Sans Serif", 9)).grid(row=0, column=0, padx=10, pady=8, sticky="w")
-            x_min_entry = tk.Entry(settings_win, width=12, relief=tk.SUNKEN, bd=2)
-            x_min_entry.insert(0, str(self.x_min))
-            x_min_entry.grid(row=0, column=1, padx=10, pady=8)
-            
-            tk.Label(settings_win, text="X Max:", bg="#c0c0c0", font=("MS Sans Serif", 9)).grid(row=1, column=0, padx=10, pady=8, sticky="w")
-            x_max_entry = tk.Entry(settings_win, width=12, relief=tk.SUNKEN, bd=2)
-            x_max_entry.insert(0, str(self.x_max))
-            x_max_entry.grid(row=1, column=1, padx=10, pady=8)
-            
-            tk.Label(settings_win, text="Y Min:", bg="#c0c0c0", font=("MS Sans Serif", 9)).grid(row=2, column=0, padx=10, pady=8, sticky="w")
-            y_min_entry = tk.Entry(settings_win, width=12, relief=tk.SUNKEN, bd=2)
-            y_min_entry.insert(0, str(self.y_min))
-            y_min_entry.grid(row=2, column=1, padx=10, pady=8)
-            
-            tk.Label(settings_win, text="Y Max:", bg="#c0c0c0", font=("MS Sans Serif", 9)).grid(row=3, column=0, padx=10, pady=8, sticky="w")
-            y_max_entry = tk.Entry(settings_win, width=12, relief=tk.SUNKEN, bd=2)
-            y_max_entry.insert(0, str(self.y_max))
-            y_max_entry.grid(row=3, column=1, padx=10, pady=8)
-            
-            def apply_settings():
+                code = compile("lambda x: " + source, "<f(x)>", "eval")
+                func = eval(code, namespace)        # the source is made only from the checked tokens above
+                func(1.2345)                        # syntax-level errors (like "2*") show up now, not on the graph
+            except SyntaxError:
+                raise ExprError("The expression is not complete.")
+            except (ValueError, ZeroDivisionError, OverflowError, TypeError):
+                pass                                # only outside the domain at that point (fine: log(x - 5))
+
+            def safe(x):
                 try:
-                    self.x_min = float(x_min_entry.get())
-                    self.x_max = float(x_max_entry.get())
-                    self.y_min = float(y_min_entry.get())
-                    self.y_max = float(y_max_entry.get())
-                    self.draw_axes()
-                    self.update_info_label()
-                    if self.current_expression:
-                        self.plot_graph_internal(self.current_expression)
-                    self.draw_marked_points()
-                    settings_win.destroy()
-                except ValueError:
-                    messagebox.showerror("Error", "Invalid values!")
-            
-            btn_frame = tk.Frame(settings_win, bg="#c0c0c0")
-            btn_frame.grid(row=4, column=0, columnspan=2, pady=15)
-            
-            tk.Button(btn_frame, text="Apply", command=apply_settings,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=10).pack(side=tk.LEFT, padx=5)
-            
-            tk.Button(btn_frame, text="Cancel", command=settings_win.destroy,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=10).pack(side=tk.LEFT, padx=5)
-        
-        def plot_options(self):
-            """Deschide fereastra de opțiuni pentru plotare"""
-            opt_win = tk.Toplevel(self.rootgraphcalc)
-            opt_win.title("Plot Options")
-            opt_win.geometry("280x180")
-            opt_win.configure(bg="#c0c0c0")
-            opt_win.resizable(False, False)
-            
-            tk.Label(opt_win, text="Line Color:", bg="#c0c0c0", font=("MS Sans Serif", 9)).grid(row=0, column=0, padx=10, pady=10, sticky="w")
-            color_var = tk.StringVar(value=self.plot_color)
-            colors = ["blue", "red", "green", "purple", "orange", "black"]
-            color_menu = tk.OptionMenu(opt_win, color_var, *colors)
-            color_menu.config(bg="#c0c0c0", relief=tk.RAISED, bd=2)
-            color_menu.grid(row=0, column=1, padx=10, pady=10)
-            
-            tk.Label(opt_win, text="Line Width:", bg="#c0c0c0", font=("MS Sans Serif", 9)).grid(row=1, column=0, padx=10, pady=10, sticky="w")
-            width_var = tk.IntVar(value=self.line_width)
-            widths = [1, 2, 3, 4, 5]
-            width_menu = tk.OptionMenu(opt_win, width_var, *widths)
-            width_menu.config(bg="#c0c0c0", relief=tk.RAISED, bd=2)
-            width_menu.grid(row=1, column=1, padx=10, pady=10)
-            
-            def apply_options():
-                self.plot_color = color_var.get()
-                self.line_width = width_var.get()
-                self.update_info_label()
-                if self.current_expression:
-                    self.draw_axes()
-                    self.plot_graph_internal(self.current_expression)
-                    self.draw_marked_points()
-                opt_win.destroy()
-            
-            btn_frame = tk.Frame(opt_win, bg="#c0c0c0")
-            btn_frame.grid(row=2, column=0, columnspan=2, pady=15)
-            
-            tk.Button(btn_frame, text="Apply", command=apply_options,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=10).pack(side=tk.LEFT, padx=5)
-            
-            tk.Button(btn_frame, text="Cancel", command=opt_win.destroy,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=10).pack(side=tk.LEFT, padx=5)
-        
-        def show_history(self):
-            """Afișează istoricul expresiilor"""
-            hist_win = tk.Toplevel(self.rootgraphcalc)
-            hist_win.title("Expression History")
-            hist_win.geometry("400x300")
-            hist_win.configure(bg="#c0c0c0")
-            
-            frame = tk.Frame(hist_win, bg="white", relief=tk.SUNKEN, bd=2)
-            frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-            
-            scrollbar = tk.Scrollbar(frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=("Courier New", 10))
-            listbox.pack(fill=tk.BOTH, expand=True)
-            scrollbar.config(command=listbox.yview)
-            
-            for expr in self.history:
-                listbox.insert(tk.END, expr)
-            
-            def load_expression():
-                selection = listbox.curselection()
-                if selection:
-                    self.expr_entry.delete(0, tk.END)
-                    self.expr_entry.insert(0, listbox.get(selection[0]))
-                    hist_win.destroy()
-            
-            tk.Button(hist_win, text="Load", command=load_expression,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=12).pack(pady=5)
-        
-        def save_expression(self):
-            """Salvează expresia curentă"""
-            expr = self.expr_entry.get()
-            if expr:
-                messagebox.showinfo("Saved", f"Expression saved: {expr}")
-            else:
-                messagebox.showwarning("Warning", "No expression to save!")
-        
-        def bisection_method(self, a, b, expr, tolerance=0.0001):
-            """Metoda bisecției pentru găsirea rădăcinii"""
-            for _ in range(50):
-                c = (a + b) / 2
-                fc = self.evaluate_expression(expr, c)
-                
-                if fc is None or abs(fc) < tolerance:
-                    return c
-                
-                fa = self.evaluate_expression(expr, a)
-                if fa is None:
+                    y = func(x)
+                except (ValueError, ZeroDivisionError, OverflowError, TypeError):
                     return None
-                
-                if fa * fc < 0:
-                    b = c
+                if isinstance(y, complex) or y != y or y in (float("inf"), float("-inf")):
+                    return None
+                return float(y)
+            return safe
+
+        # ══════════════════════════════════════════════════════════════
+        # ANALYSIS (in the visible range; nothing is invented when nothing is found)
+        # ══════════════════════════════════════════════════════════════
+
+        def bisect(f, a, b, fa):
+            for _ in range(80):
+                m = (a + b) / 2.0
+                fm = f(m)
+                if fm is None:
+                    return None
+                if fm == 0 or abs(b - a) < 1e-12:
+                    return m
+                if (fa < 0) == (fm < 0):
+                    a, fa = m, fm
                 else:
-                    a = c
-            
-            return (a + b) / 2
-        
-        def find_roots(self):
-            """Găsește rădăcinile funcției (f(x) = 0) sau punctele cele mai apropiate de zero"""
-            if not self.current_expression:
-                messagebox.showwarning("Warning", "Please plot a function first!")
-                return
-            
+                    b = m
+            return (a + b) / 2.0
+
+        def golden(f, a, b, maximum):
+            g = (math.sqrt(5) - 1) / 2
+            sign = -1 if maximum else 1
+            c, d = b - g * (b - a), a + g * (b - a)
+            for _ in range(80):
+                fc, fd = f(c), f(d)
+                if fc is None or fd is None:
+                    break
+                if sign * fc < sign * fd:
+                    b, d = d, c
+                    c = b - g * (b - a)
+                else:
+                    a, c = c, d
+                    d = a + g * (b - a)
+            x = (a + b) / 2.0
+            y = f(x)
+            return (x, y) if y is not None else None
+
+        def find_roots(f, x0, x1, samples=4000):
+            """Sign changes that are real zeros (not asymptotes like tan), and zeros it only touches (x^2)."""
+            step = (x1 - x0) / samples
+            xs = [x0 + i * step for i in range(samples + 1)]
+            ys = [f(x) for x in xs]
+            span = max((abs(y) for y in ys if y is not None), default=1.0) or 1.0
             roots = []
-            closest_to_zero = []  # Pentru a stoca punctele cele mai apropiate de zero
-            step = (self.x_max - self.x_min) / 2000
-            x = self.x_min
-            prev_y = self.evaluate_expression(self.current_expression, x)
-            
-            while x <= self.x_max:
-                y = self.evaluate_expression(self.current_expression, x)
-                
-                if y is not None:
-                    closest_to_zero.append((x, y, abs(y)))
-                    
-                    if prev_y is not None and prev_y * y < 0:
-                        # Schimbare de semn - rădăcină reală
-                        root = self.bisection_method(x - step, x, self.current_expression, tolerance=0.00001)
-                        if root is not None:
-                            root_y = self.evaluate_expression(self.current_expression, root)
-                            if root_y is not None:
-                                is_duplicate = False
-                                for existing_root, _ in roots:
-                                    if abs(root - existing_root) < step * 3:
-                                        is_duplicate = True
-                                        break
-                                if not is_duplicate:
-                                    roots.append((root, root_y))
-                                    self.marked_points.append(("root", root, root_y))
-                
-                prev_y = y
-                x += step
-            
-            # Dacă nu am găsit rădăcini reale, găsim punctele cele mai apropiate de zero
-            if not roots and closest_to_zero:
-                # Sortăm după distanța de zero
-                closest_to_zero.sort(key=lambda item: item[2])
-                
-                # Luăm primele 3-5 puncte cele mai apropiate de zero (fără duplicate)
-                for x_val, y_val, dist in closest_to_zero[:10]:
-                    is_duplicate = False
-                    for existing_x, _ in roots:
-                        if abs(x_val - existing_x) < (self.x_max - self.x_min) / 20:
-                            is_duplicate = True
-                            break
-                    if not is_duplicate and len(roots) < 5:
-                        roots.append((x_val, y_val))
-                        self.marked_points.append(("root", x_val, y_val))
-            
-            if roots:
+            for i in range(samples):
+                ya, yb = ys[i], ys[i + 1]
+                if ya is None or yb is None:
+                    continue
+                if ya == 0:
+                    roots.append(xs[i])
+                elif (ya < 0) != (yb < 0) and yb != 0:
+                    r = bisect(f, xs[i], xs[i + 1], ya)
+                    if r is not None:
+                        fr = f(r)
+                        # a jump across an asymptote also changes sign: the value there is not close to zero
+                        if fr is not None and abs(fr) <= 1e-6 * max(1.0, span) + 1e-9:
+                            roots.append(r)
+            for i in range(1, samples):              # touching zeros: |f| has a local minimum that is ~0
+                y0, y, y2 = ys[i - 1], ys[i], ys[i + 1]
+                if None in (y0, y, y2) or not (abs(y) <= abs(y0) and abs(y) <= abs(y2)):
+                    continue
+                if (y0 < 0) != (y2 < 0):
+                    continue
+                best = golden(lambda t: abs(f(t)) if f(t) is not None else None, xs[i - 1], xs[i + 1], False)
+                if best and best[1] is not None and best[1] < 1e-7 * max(1.0, span):
+                    roots.append(best[0])
+            roots.sort()
+            merged = []
+            for r in roots:
+                if not merged or abs(r - merged[-1]) > step * 2:
+                    merged.append(r)
+            return [(r, f(r) or 0.0) for r in merged]
+
+        def find_extrema(f, x0, x1, maximum, samples=2000):
+            """Local maxima / minima inside the view (the ends of the range are not called a maximum)."""
+            step = (x1 - x0) / samples
+            xs = [x0 + i * step for i in range(samples + 1)]
+            ys = [f(x) for x in xs]
+            found = []
+            for i in range(1, samples):
+                y0, y, y2 = ys[i - 1], ys[i], ys[i + 1]
+                if None in (y0, y, y2):
+                    continue
+                if (maximum and y >= y0 and y >= y2 and (y > y0 or y > y2)) or \
+                        (not maximum and y <= y0 and y <= y2 and (y < y0 or y < y2)):
+                    point = golden(f, xs[i - 1], xs[i + 1], maximum)
+                    if point and (not found or abs(point[0] - found[-1][0]) > step * 2):
+                        found.append(point)
+            return found
+
+        def nice_step(span, target=10):
+            raw = span / float(target)
+            power = 10 ** math.floor(math.log10(raw)) if raw > 0 else 1
+            for m in (1, 2, 5, 10):
+                if raw <= m * power:
+                    return m * power
+            return 10 * power
+
+        def fmt(v):
+            if v is None:
+                return "undefined"
+            if v == 0:
+                return "0"
+            if abs(v) >= 1e6 or abs(v) < 1e-4:
+                return "%.4g" % v
+            return ("%.6f" % v).rstrip("0").rstrip(".")
+
+        # ══════════════════════════════════════════════════════════════
+        # STORAGE: saved expressions and history (Save Expression did nothing before)
+        # ══════════════════════════════════════════════════════════════
+
+        class Store:
+            def __init__(self, path):
+                self.path = path
+                try:
+                    folder = os.path.dirname(path)
+                    if folder and not os.path.isdir(folder):
+                        os.makedirs(folder)
+                    with sqlite3.connect(path) as conn:          # the same table setup_database_ALL() makes
+                        conn.execute("CREATE TABLE IF NOT EXISTS graph_calc_expressions (id INTEGER PRIMARY KEY "
+                                     "AUTOINCREMENT, expression TEXT NOT NULL UNIQUE, saved INTEGER NOT NULL DEFAULT 0, "
+                                     "used_at TEXT NOT NULL)")
+                    self.ok = True
+                except (OSError, sqlite3.Error):
+                    self.ok = False
+
+            def _run(self, sql, params=(), fetch=False):
+                if not self.ok:
+                    return []
+                try:
+                    with sqlite3.connect(self.path, timeout=5) as conn:
+                        cursor = conn.execute(sql, params)          # always executed; read back only when asked
+                        rows = cursor.fetchall() if fetch else []
+                    return rows
+                except sqlite3.Error:
+                    return []
+
+            def used(self, expression):
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._run("INSERT INTO graph_calc_expressions (expression, saved, used_at) VALUES (?, 0, ?) "
+                          "ON CONFLICT(expression) DO UPDATE SET used_at = excluded.used_at", (expression, now))
+                self._run("DELETE FROM graph_calc_expressions WHERE saved = 0 AND id NOT IN (SELECT id FROM "
+                          "graph_calc_expressions WHERE saved = 0 ORDER BY used_at DESC LIMIT ?)", (HISTORY_LIMIT,))
+
+            def save(self, expression):
+                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self._run("INSERT INTO graph_calc_expressions (expression, saved, used_at) VALUES (?, 1, ?) "
+                          "ON CONFLICT(expression) DO UPDATE SET saved = 1", (expression, now))
+
+            def history(self):
+                return [r[0] for r in self._run("SELECT expression FROM graph_calc_expressions ORDER BY used_at DESC "
+                                                "LIMIT ?", (HISTORY_LIMIT,), fetch=True)]
+
+            def saved(self):
+                return [r[0] for r in self._run("SELECT expression FROM graph_calc_expressions WHERE saved = 1 "
+                                                "ORDER BY expression COLLATE NOCASE", fetch=True)]
+
+            def unsave(self, expression):
+                self._run("UPDATE graph_calc_expressions SET saved = 0 WHERE expression = ?", (expression,))
+
+            def clear_history(self):
+                self._run("DELETE FROM graph_calc_expressions WHERE saved = 0")
+
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
+
+        class GraphingCalculator:
+            def __init__(self):
+                self.rootgraphcalc = root = tk.Tk()
+                self.store = Store(DB_PATH)
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.x_min, self.x_max, self.y_min, self.y_max = -10.0, 10.0, -10.0, 10.0
+                self.show_grid = True
+                self.functions = []             # [{"text", "f", "colour", "width", "visible"}]
+                self.selected = None
+                self.marks = []                 # [(kind, x, y)] for the selected function
+                self.trace_x = None
+                self._drag = None
+                root.title(TITLE)
+                width = min(900, root.winfo_screenwidth() - 40)
+                height = min(660, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(640, 460)
+                root.configure(bg=FACE)
+                root.protocol("WM_DELETE_WINDOW", self.close)
+                self.small = tkfont.Font(root=root, family="MS Sans Serif", size=7)
+                self._make_icon()
+                self.create_title_bar()
+                self.create_menu()
+                self.create_widgets()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+                self.expr_entry.focus_set()
+
+            # ----- frame -----------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((0, 0, 16, 16, BLACK), (1, 1, 15, 15, LIGHT), (7, 1, 8, 15, SHADOW),
+                                               (1, 8, 15, 9, SHADOW), (2, 12, 4, 14, "#0000c0"), (4, 9, 6, 12, "#0000c0"),
+                                               (6, 6, 8, 9, "#0000c0"), (8, 4, 10, 6, "#0000c0"), (10, 2, 12, 4, "#0000c0"),
+                                               (12, 1, 14, 2, "#0000c0")):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+
+            def create_title_bar(self):
+                root = self.rootgraphcalc
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                title = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                title.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, title, icon)
+                self.caption_button(bar, "close", self.close).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.rootgraphcalc.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                root = self.rootgraphcalc
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+            def _on_map(self, event):
+                root = self.rootgraphcalc
+                if event.widget is root and self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.rootgraphcalc.overrideredirect(False)
+                self.rootgraphcalc.iconify()
+
+            def toggle_maximize(self):
+                root = self.rootgraphcalc
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self._cdrag = (event.x_root - self.rootgraphcalc.winfo_x(), event.y_root - self.rootgraphcalc.winfo_y())
+
+            def _caption_drag(self, event):
+                if self.custom_frame and not self.maximized:
+                    self.rootgraphcalc.geometry("+%d+%d" % (event.x_root - self._cdrag[0], event.y_root - self._cdrag[1]))
+
+            def _grip_press(self, event):
+                root = self.rootgraphcalc
+                self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.rootgraphcalc.geometry("%dx%d" % (max(640, width + event.x_root - x0),
+                                                           max(460, height + event.y_root - y0)))
+
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it. A click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            # ----- Windows 95 dialogs ---------------------------------------------------------------------
+            def button(self, parent, text, command, width=None, default=False):
+                widget = tk.Button(parent, text=text, command=command, font=FONT_B if default else FONT, bg=FACE,
+                                   fg=BLACK, activebackground=FACE, relief="raised", bd=2, padx=6, pady=1,
+                                   highlightthickness=1 if default else 0, highlightbackground=BLACK, takefocus=0)
+                if width:
+                    widget.config(width=width)
+                return widget
+
+            def window(self, title, topmost=True):
+                root = self.rootgraphcalc
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                if topmost:
+                    win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                label = tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B)
+                label.pack(side="left", padx=4)
+                win.close_button = self.caption_button(bar, "close", win.destroy)
+                win.close_button.pack(side="right", padx=2)
+
+                def press(event):
+                    win._drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+                def drag(event):
+                    win.geometry("+%d+%d" % (event.x_root - win._drag[0], event.y_root - win._drag[1]))
+                for widget in (bar, label):
+                    widget.bind("<ButtonPress-1>", press)
+                    widget.bind("<B1-Motion>", drag)
+                return win
+
+            def show(self, win, modal=True):
+                root = self.rootgraphcalc
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                         root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+                win.lift()
+                win.focus_force()
+                if not modal:
+                    return
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+
+            def message(self, title, text, icon="info"):
+                win = self.window(title)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                picture = tk.Canvas(body, width=32, height=32, bg=FACE, highlightthickness=0)
+                if icon == "error":
+                    picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                    picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                    picture.create_line(22, 10, 10, 22, fill="white", width=3)
+                elif icon == "warning":
+                    picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=BLACK)
+                    picture.create_text(16, 19, text="!", fill=BLACK, font=("Times New Roman", 15, "bold"))
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=LIGHT, outline=BLACK)
+                    picture.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+                picture.pack(side="left", anchor="n", padx=(0, 12))
+                tk.Label(body, text=text, bg=FACE, font=FONT, justify="left", wraplength=420).pack(side="left")
+                self.button(win, "OK", win.destroy, width=9, default=True).pack(pady=(4, 12))
+                win.bind("<Return>", lambda e: win.destroy())
+                win.bind("<Escape>", lambda e: win.destroy())
+                self.show(win)
+
+            def text_window(self, title, text, mono=True, load=None):
+                win = self.window(title, topmost=False)
+                holder = tk.Frame(win, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=8, pady=(8, 4))
+                scroll = tk.Scrollbar(holder, orient="vertical")
+                scroll.pack(side="right", fill="y")
+                box = tk.Text(holder, font=("Courier New", 9) if mono else FONT, width=64, height=30, bd=0,
+                              highlightthickness=0, wrap="word", yscrollcommand=scroll.set, padx=6)
+                box.pack(fill="both", expand=True)
+                scroll.config(command=box.yview)
+                box.insert("1.0", text)
+                box.config(state="disabled")
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(2, 8))
+                if load:
+                    def use():
+                        try:
+                            line = box.get("insert linestart", "insert lineend").strip()
+                            if box.tag_ranges("sel"):
+                                line = box.get("sel.first", "sel.last").strip()
+                        except tk.TclError:
+                            line = ""
+                        expr = re.split(r"\s{2,}", line)[0] if line else ""
+                        if expr:
+                            win.destroy()
+                            load(expr)
+                    self.button(row, "Plot Line", use, width=10, default=True).pack(side="left", padx=4)
+                    box.bind("<Double-Button-1>", lambda e: win.after(10, use))
+                    tk.Label(row, text="(click a line, or double-click it)", font=FONT, bg=FACE).pack(side="left", padx=4)
+                self.button(row, "Close", win.destroy, width=10).pack(side="left", padx=4)
+                win.bind("<Escape>", lambda e: win.destroy())
+                self.show(win, modal=False)
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def create_menu(self):
+                bar = tk.Frame(self.rootgraphcalc, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                m = menubutton("File")
+                m.add_command(label="New Graph", command=self.clear_graph)
+                m.add_command(label="Save Expression", accelerator="Ctrl+S", command=self.save_expression)
+                m.add_command(label="Saved Expressions...", command=self.show_saved)
+                m.add_separator()
+                m.add_command(label="Exit", command=self.close)
+                m = menubutton("Edit")
+                m.add_command(label="Settings (Range)...", command=self.open_settings)
+                m.add_command(label="Plot Options...", command=self.plot_options)
+                m.add_command(label="Toggle Grid", accelerator="G", command=self.toggle_grid)
+                m = menubutton("View")
+                m.add_command(label="Zoom In", accelerator="+", command=lambda: self.zoom(0.5))
+                m.add_command(label="Zoom Out", accelerator="-", command=lambda: self.zoom(2.0))
+                m.add_command(label="Reset View", accelerator="Home", command=self.reset_view)
+                m.add_command(label="Square Units", command=self.square_units)
+                m.add_command(label="Fit Y to the Graph", command=self.fit_y)
+                m.add_separator()
+                m.add_command(label="History...", command=self.show_history)
+                m = menubutton("Tools")
+                m.add_command(label="Find Roots", command=self.find_roots)
+                m.add_command(label="Find Maximum", command=lambda: self.find_extrema(True))
+                m.add_command(label="Find Minimum", command=lambda: self.find_extrema(False))
+                m.add_command(label="Value at x...", command=self.value_at)
+                m.add_command(label="Table of Values...", command=self.table_of_values)
+                m.add_separator()
+                m.add_command(label="Clear Marks", command=self.clear_marks)
+                m = menubutton("Help")
+                m.add_command(label="Help Topics", accelerator="F1", command=self.show_help)
+                m.add_command(label="Function Reference", command=self.show_functions)
+                m.add_command(label="Examples", command=self.show_examples)
+                m.add_separator()
+                m.add_command(label="About", command=self.show_about)
+
+            def create_widgets(self):
+                root = self.rootgraphcalc
+                top = tk.Frame(root, bg=FACE, bd=1, relief="raised")
+                top.pack(side="top", fill="x")
+                tk.Label(top, text="f(x) =", font=("MS Sans Serif", 10, "bold"), bg=FACE).pack(side="left", padx=(6, 4))
+                self.expr_entry = tk.Entry(top, font=("Courier New", 11), bg=LIGHT, relief="sunken", bd=2,
+                                           highlightthickness=0)
+                self.expr_entry.pack(side="left", fill="x", expand=True, pady=4)
+                self.expr_entry.bind("<Return>", lambda e: self.plot_graph())
+                self.button(top, "Plot Graph", self.plot_graph, default=True).pack(side="left", padx=(6, 2))
+                self.button(top, "Add Graph", self.add_graph).pack(side="left", padx=(2, 6))
+
+                status = tk.Frame(root, bg=FACE)
+                status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(status, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=LIGHT)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                self.pos_label = tk.Label(status, text="", font=FONT, bg=FACE, relief="sunken", bd=1, width=34, anchor="w",
+                                          padx=4)
+                self.pos_label.pack(side="right", padx=1)
+                self.info_label = tk.Label(status, text="", font=FONT, bg=FACE, relief="sunken", bd=1, anchor="w", padx=4)
+                self.info_label.pack(side="left", fill="x", expand=True, padx=1)
+
+                quick = tk.Frame(root, bg=FACE, bd=2, relief="groove")
+                quick.pack(side="bottom", fill="x", padx=4, pady=(0, 4))
+                tk.Label(quick, text="Quick:", font=FONT_B, bg=FACE).pack(side="left", padx=(4, 2))
+                for label, text in (("sin(x)", "sin(x)"), ("cos(x)", "cos(x)"), ("tan(x)", "tan(x)"), ("x^2", "x^2"),
+                                    ("x^3", "x^3"), ("sqrt(x)", "sqrt(x)"), ("log(x)", "log(x)"), ("exp(x)", "exp(x)"),
+                                    ("abs(x)", "abs(x)"), ("1/x", "1/x"), ("x^n", "x^"), ("pi", "pi")):
+                    tk.Button(quick, text=label, font=FONT, bg=FACE, activebackground=FACE, relief="raised", bd=2,
+                              padx=3, pady=0, highlightthickness=0, takefocus=0,
+                              command=lambda t=text: self.insert_function(t)).pack(side="left", padx=1, pady=3)
+
+                body = tk.Frame(root, bg=FACE)
+                body.pack(fill="both", expand=True, padx=4, pady=4)
+                side = tk.LabelFrame(body, text=" Functions ", font=FONT, bg=FACE, bd=2, relief="groove")
+                side.pack(side="left", fill="y", padx=(0, 4))
+                self.func_frame = tk.Frame(side, bg=FACE)
+                self.func_frame.pack(fill="both", expand=True, padx=4, pady=4)
+                row = tk.Frame(side, bg=FACE)
+                row.pack(fill="x", padx=4, pady=(0, 4))
+                self.button(row, "Remove", self.remove_selected).pack(side="left")
+                self.button(row, "Clear", self.clear_graph).pack(side="left", padx=4)
+                holder = tk.Frame(body, bg=FACE, bd=2, relief="sunken")
+                holder.pack(side="left", fill="both", expand=True)
+                self.canvas = tk.Canvas(holder, bg=LIGHT, highlightthickness=0, cursor="crosshair")
+                self.canvas.pack(fill="both", expand=True)
+                c = self.canvas
+                c.bind("<Configure>", lambda e: self.redraw())
+                c.bind("<ButtonPress-1>", self._press)
+                c.bind("<B1-Motion>", self._move)
+                c.bind("<ButtonRelease-1>", self._release)
+                c.bind("<Motion>", self._hover)
+                c.bind("<Leave>", lambda e: (setattr(self, "trace_x", None), self.redraw_trace()))
+                c.bind("<MouseWheel>", lambda e: self.zoom(0.8 if e.delta > 0 else 1.25, e.x, e.y))
+                c.bind("<Button-4>", lambda e: self.zoom(0.8, e.x, e.y))
+                c.bind("<Button-5>", lambda e: self.zoom(1.25, e.x, e.y))
+                c.bind("<Double-Button-1>", lambda e: self.zoom(0.5, e.x, e.y))
+                for key, action in (("<Control-s>", self.save_expression), ("<F1>", self.show_help)):
+                    root.bind(key, lambda e, a=action: (a(), "break")[1])
+                for key, action in (("<plus>", lambda: self.zoom(0.5)), ("<KP_Add>", lambda: self.zoom(0.5)),
+                                    ("<minus>", lambda: self.zoom(2.0)), ("<KP_Subtract>", lambda: self.zoom(2.0)),
+                                    ("<Home>", self.reset_view), ("<g>", self.toggle_grid)):
+                    root.bind(key, lambda e, a=action: None if isinstance(e.widget, tk.Entry) else (a(), "break")[1])
+                self.update_info_label()
+                self.fill_function_list()
+
+            # ----- coordinates -----------------------------------------------------------------------------
+            def size(self):
+                return max(2, self.canvas.winfo_width()), max(2, self.canvas.winfo_height())
+
+            def to_screen(self, x, y):
+                w, h = self.size()
+                return ((x - self.x_min) / (self.x_max - self.x_min) * w, (self.y_max - y) / (self.y_max - self.y_min) * h)
+
+            def to_world(self, sx, sy):
+                w, h = self.size()
+                return (self.x_min + sx / float(w) * (self.x_max - self.x_min),
+                        self.y_max - sy / float(h) * (self.y_max - self.y_min))
+
+            # ----- drawing ---------------------------------------------------------------------------------
+            def redraw(self):
                 self.draw_axes()
-                self.plot_graph_internal(self.current_expression)
-                self.draw_marked_points()
-                
-                result = "Points found:\n\n"
-                for i, (root, root_y) in enumerate(roots, 1):
-                    if abs(root_y) < 0.01:
-                        result += f"Root {i}: x ≈ {root:.4f}, y ≈ {root_y:.6f}\n"
-                    else:
-                        result += f"Near zero {i}: x ≈ {root:.4f}, y ≈ {root_y:.4f}\n"
-                messagebox.showinfo("Roots/Near Zero", result)
-            else:
-                messagebox.showinfo("Roots", "Could not evaluate function in visible range.")
-        
-        def find_maximum(self):
-            """Găsește maximele locale sau valorile maxime ale funcției"""
-            if not self.current_expression:
-                messagebox.showwarning("Warning", "Please plot a function first!")
-                return
-            
-            max_points = []
-            all_points = []
-            step = (self.x_max - self.x_min) / 2000
-            x = self.x_min + step * 2
-            
-            while x <= self.x_max - step * 2:
-                y_prev = self.evaluate_expression(self.current_expression, x - step)
-                y = self.evaluate_expression(self.current_expression, x)
-                y_next = self.evaluate_expression(self.current_expression, x + step)
-                
-                if y is not None:
-                    all_points.append((x, y))
-                    
-                    if y_prev is not None and y_next is not None:
-                        # Verificăm dacă e un maxim local
-                        if y > y_prev and y > y_next:
-                            is_duplicate = False
-                            for existing_x, _ in max_points:
-                                if abs(x - existing_x) < step * 5:
-                                    is_duplicate = True
-                                    break
-                            if not is_duplicate:
-                                max_points.append((x, y))
-                                self.marked_points.append(("max", x, y))
-                
-                x += step
-            
-            # Dacă nu am găsit maxime locale, găsim cele mai mari valori Y
-            if not max_points and all_points:
-                # Sortăm după valoarea Y (descrescător)
-                all_points.sort(key=lambda item: item[1], reverse=True)
-                
-                # Luăm primele 3-5 puncte cu cele mai mari valori
-                for x_val, y_val in all_points[:10]:
-                    is_duplicate = False
-                    for existing_x, _ in max_points:
-                        if abs(x_val - existing_x) < (self.x_max - self.x_min) / 20:
-                            is_duplicate = True
-                            break
-                    if not is_duplicate and len(max_points) < 5:
-                        max_points.append((x_val, y_val))
-                        self.marked_points.append(("max", x_val, y_val))
-            
-            if max_points:
-                self.draw_axes()
-                self.plot_graph_internal(self.current_expression)
-                self.draw_marked_points()
-                
-                result = "Maximum points found:\n\n"
-                for i, (x, y) in enumerate(max_points, 1):
-                    result += f"Maximum {i}: ({x:.4f}, {y:.4f})\n"
-                messagebox.showinfo("Maxima", result)
-            else:
-                messagebox.showinfo("Maxima", "Could not evaluate function in visible range.")
-        
-        def find_minimum(self):
-            """Găsește minimele locale sau valorile minime ale funcției"""
-            if not self.current_expression:
-                messagebox.showwarning("Warning", "Please plot a function first!")
-                return
-            
-            min_points = []
-            all_points = []
-            step = (self.x_max - self.x_min) / 2000
-            x = self.x_min + step * 2
-            
-            while x <= self.x_max - step * 2:
-                y_prev = self.evaluate_expression(self.current_expression, x - step)
-                y = self.evaluate_expression(self.current_expression, x)
-                y_next = self.evaluate_expression(self.current_expression, x + step)
-                
-                if y is not None:
-                    all_points.append((x, y))
-                    
-                    if y_prev is not None and y_next is not None:
-                        # Verificăm dacă e un minim local
-                        if y < y_prev and y < y_next:
-                            is_duplicate = False
-                            for existing_x, _ in min_points:
-                                if abs(x - existing_x) < step * 5:
-                                    is_duplicate = True
-                                    break
-                            if not is_duplicate:
-                                min_points.append((x, y))
-                                self.marked_points.append(("min", x, y))
-                
-                x += step
-            
-            # Dacă nu am găsit minime locale, găsim cele mai mici valori Y
-            if not min_points and all_points:
-                # Sortăm după valoarea Y (crescător)
-                all_points.sort(key=lambda item: item[1])
-                
-                # Luăm primele 3-5 puncte cu cele mai mici valori
-                for x_val, y_val in all_points[:10]:
-                    is_duplicate = False
-                    for existing_x, _ in min_points:
-                        if abs(x_val - existing_x) < (self.x_max - self.x_min) / 20:
-                            is_duplicate = True
-                            break
-                    if not is_duplicate and len(min_points) < 5:
-                        min_points.append((x_val, y_val))
-                        self.marked_points.append(("min", x_val, y_val))
-            
-            if min_points:
-                self.draw_axes()
-                self.plot_graph_internal(self.current_expression)
-                self.draw_marked_points()
-                
-                result = "Minimum points found:\n\n"
-                for i, (x, y) in enumerate(min_points, 1):
-                    result += f"Minimum {i}: ({x:.4f}, {y:.4f})\n"
-                messagebox.showinfo("Minima", result)
-            else:
-                messagebox.showinfo("Minima", "Could not evaluate function in visible range.")
-        
-        def show_help(self):
-            """Afișează fereastra de ajutor"""
-            help_win = tk.Toplevel(self.rootgraphcalc)
-            help_win.title("Help Topics")
-            help_win.geometry("500x600")
-            help_win.configure(bg="#c0c0c0")
-            
-            text_frame = tk.Frame(help_win, bg="white", relief=tk.SUNKEN, bd=2)
-            text_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-            
-            scrollbar = tk.Scrollbar(text_frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set, 
-                          font=("MS Sans Serif", 9), bg="white")
-            text.pack(fill=tk.BOTH, expand=True)
-            scrollbar.config(command=text.yview)
-            
-            help_text = """GRAPHING CALCULATOR HELP
+                for index, fn in enumerate(self.functions):
+                    if fn["visible"]:
+                        self.plot(fn, selected=index == self.selected)
+                self.draw_marks()
+                self.redraw_trace()
 
-GETTING STARTED
-Enter a mathematical function in the input field using 'x' as the variable.
-Click 'Plot Graph' or press Enter to display the graph.
+            def draw_axes(self):
+                """Grid and labels at 'nice' steps (only steps of 1 before: none when zoomed in, thousands when out)."""
+                c = self.canvas
+                c.delete("all")
+                w, h = self.size()
+                if w < 10 or h < 10:
+                    return
+                sx_step = nice_step(self.x_max - self.x_min, max(4, w // 70))
+                sy_step = nice_step(self.y_max - self.y_min, max(4, h // 50))
+                ox, oy = self.to_screen(0, 0)
+                ax_y = min(max(oy, 0), h - 14)                # the labels stay visible when the axis is off screen
+                ax_x = min(max(ox, 34), w)
+                k = math.ceil(self.x_min / sx_step)
+                while k * sx_step <= self.x_max:
+                    xv = k * sx_step
+                    px = self.to_screen(xv, 0)[0]
+                    if self.show_grid:
+                        c.create_line(px, 0, px, h, fill="#e4e4e4")
+                    if abs(xv) > sx_step / 1000 and 10 <= px <= w - 10:      # no half-cut labels at the edges
+                        c.create_line(px, ax_y - 3, px, ax_y + 3, fill=BLACK)
+                        c.create_text(px, ax_y + 4, text=fmt(round(xv, 12)), font=self.small, anchor="n", fill=SHADOW)
+                    k += 1
+                k = math.ceil(self.y_min / sy_step)
+                while k * sy_step <= self.y_max:
+                    yv = k * sy_step
+                    py = self.to_screen(0, yv)[1]
+                    if self.show_grid:
+                        c.create_line(0, py, w, py, fill="#e4e4e4")
+                    if abs(yv) > sy_step / 1000 and 7 <= py <= h - 7:
+                        c.create_line(ax_x - 3, py, ax_x + 3, py, fill=BLACK)
+                        c.create_text(ax_x - 5, py, text=fmt(round(yv, 12)), font=self.small, anchor="e", fill=SHADOW)
+                    k += 1
+                if 0 <= ox <= w:
+                    c.create_line(ox, 0, ox, h, fill=BLACK, width=1)
+                if 0 <= oy <= h:
+                    c.create_line(0, oy, w, oy, fill=BLACK, width=1)
 
-ENTERING FUNCTIONS
-- Use standard operators: +, -, *, /, **
-- Exponents: x**2 for x squared, x**3 for x cubed
-- Parentheses for grouping: (x+1)*(x-1)
+            def samples(self, fn):
+                """Screen points, cut where the function is undefined or jumps (asymptotes: no vertical lines)."""
+                w, h = self.size()
+                n = w * 2
+                pieces, current, prev = [], [], None
+                for i in range(n + 1):
+                    x = self.x_min + (self.x_max - self.x_min) * i / n
+                    y = fn["f"](x)
+                    if y is None:
+                        if len(current) > 1:
+                            pieces.append(current)
+                        current, prev = [], None
+                        continue
+                    sx, sy = self.to_screen(x, y)
+                    if prev is not None and abs(sy - prev[1]) > h:
+                        mid = fn["f"]((x + prev[2]) / 2.0)
+                        if mid is None or not (min(y, prev[3]) <= mid <= max(y, prev[3])):
+                            if len(current) > 1:
+                                pieces.append(current)
+                            current = []
+                    sy = max(-h * 4, min(h * 5, sy))
+                    current.extend((sx, sy))
+                    prev = (sx, sy, x, y)
+                if len(current) > 3:
+                    pieces.append(current)
+                return pieces
 
-NAVIGATION
-- Zoom In/Out: Change the viewing window (graph persists)
-- Settings: Manually adjust X and Y ranges
-- Reset View: Return to default [-10, 10] range
-- Resize window: Graph automatically adapts to new size
+            def plot(self, fn, selected=False):
+                for piece in self.samples(fn):
+                    if len(piece) >= 4:      # one canvas item per piece (one per pair of points before: slow)
+                        self.canvas.create_line(*piece, fill=fn["colour"], width=fn["width"] + (1 if selected else 0),
+                                                tags="graph")
 
-MENUS
-File Menu:
-- New Graph: Clear current expression
-- Save Expression: Save current function
-- Exit: Close the application
+            def draw_marks(self):
+                c = self.canvas
+                colours = {"root": "#d00000", "max": "#008000", "min": "#e07000", "point": NAVY}
+                for kind, x, y in self.marks:
+                    if not (self.x_min <= x <= self.x_max and self.y_min <= y <= self.y_max):
+                        continue
+                    sx, sy = self.to_screen(x, y)
+                    colour = colours.get(kind, BLACK)
+                    c.create_oval(sx - 4, sy - 4, sx + 4, sy + 4, fill=colour, outline=BLACK, tags="mark")
+                    c.create_text(sx + 7, sy - 7, text="%s (%s, %s)" % (kind.capitalize(), fmt(x), fmt(y)),
+                                  font=self.small, fill=colour, anchor="sw", tags="mark")
 
-Edit Menu:
-- Settings: Adjust graph window ranges
-- Plot Options: Change line color and width
-- Toggle Grid: Show/hide grid lines
+            def redraw_trace(self):
+                c = self.canvas
+                c.delete("trace")
+                if self.trace_x is None or self.selected is None:
+                    return
+                fn = self.functions[self.selected]
+                y = fn["f"](self.trace_x)
+                sx = self.to_screen(self.trace_x, 0)[0]
+                w, h = self.size()
+                c.create_line(sx, 0, sx, h, fill="#a0a0ff", dash=(2, 3), tags="trace")
+                if y is not None and self.y_min <= y <= self.y_max:
+                    sy = self.to_screen(self.trace_x, y)[1]
+                    c.create_oval(sx - 3, sy - 3, sx + 3, sy + 3, outline=fn["colour"], width=2, tags="trace")
 
-View Menu:
-- Zoom controls for quick navigation
-- History: View previously plotted functions
+            def update_info_label(self):
+                fn = self.functions[self.selected] if self.selected is not None else None
+                self.info_label.config(text="X [%s, %s]   Y [%s, %s]%s" % (
+                    fmt(self.x_min), fmt(self.x_max), fmt(self.y_min), fmt(self.y_max),
+                    ("   Selected: %s" % fn["text"]) if fn else ""))
 
-Tools Menu:
-- Find Roots: Locate where f(x) = 0 (marked in RED)
-- Find Maximum: Locate local maxima (marked in GREEN)
-- Find Minimum: Locate local minima (marked in ORANGE)
+            # ----- mouse -----------------------------------------------------------------------------------
+            def _press(self, event):
+                self._drag = (event.x, event.y, self.x_min, self.x_max, self.y_min, self.y_max)
+                self.canvas.config(cursor="fleur")
 
-KEYBOARD SHORTCUTS
-- Enter: Plot the current function
-- Use quick function buttons for common operations
+            def _move(self, event):
+                """Drag to move the graph."""
+                if not self._drag:
+                    return
+                x0, y0, a, b, c, d = self._drag
+                w, h = self.size()
+                dx = (event.x - x0) / float(w) * (b - a)
+                dy = (event.y - y0) / float(h) * (d - c)
+                self.x_min, self.x_max, self.y_min, self.y_max = a - dx, b - dx, c + dy, d + dy
+                self.redraw()
+                self.update_info_label()
 
-TIPS
-- Start with simple functions to understand behavior
-- Adjust the viewing window to see more detail
-- Use parentheses to ensure correct order of operations
-- Check the info bar for current range settings
-- Graph persists when zooming or resizing window
-- Special points are marked on the graph with colors
+            def _release(self, event):
+                self._drag = None
+                self.canvas.config(cursor="crosshair")
+
+            def _hover(self, event):
+                x, y = self.to_world(event.x, event.y)
+                text = "x = %s   y = %s" % (fmt(x), fmt(y))
+                if self.selected is not None:
+                    self.trace_x = x
+                    fx = self.functions[self.selected]["f"](x)
+                    text = "x = %s   f(x) = %s" % (fmt(x), fmt(fx))
+                    self.redraw_trace()
+                self.pos_label.config(text=text)
+
+            def zoom(self, factor, sx=None, sy=None):
+                """Around the mouse (wheel, double-click) or around the centre (buttons, menu)."""
+                w, h = self.size()
+                cx, cy = self.to_world(w / 2.0 if sx is None else sx, h / 2.0 if sy is None else sy)
+                new_w, new_h = (self.x_max - self.x_min) * factor, (self.y_max - self.y_min) * factor
+                if not 1e-9 < new_w < 1e9 or not 1e-9 < new_h < 1e9:
+                    return
+                fx = (cx - self.x_min) / (self.x_max - self.x_min)
+                fy = (cy - self.y_min) / (self.y_max - self.y_min)
+                self.x_min, self.x_max = cx - fx * new_w, cx + (1 - fx) * new_w
+                self.y_min, self.y_max = cy - fy * new_h, cy + (1 - fy) * new_h
+                self.redraw()
+                self.update_info_label()
+
+            def reset_view(self):
+                self.x_min, self.x_max, self.y_min, self.y_max = -10.0, 10.0, -10.0, 10.0
+                self.redraw()
+                self.update_info_label()
+
+            def square_units(self):
+                w, h = self.size()
+                cy = (self.y_min + self.y_max) / 2.0
+                half = (self.x_max - self.x_min) * h / float(w) / 2.0
+                self.y_min, self.y_max = cy - half, cy + half
+                self.redraw()
+                self.update_info_label()
+
+            def fit_y(self):
+                fn = self.selected_function()
+                if not fn:
+                    return
+                ys = [fn["f"](self.x_min + (self.x_max - self.x_min) * i / 400.0) for i in range(401)]
+                ys = sorted(y for y in ys if y is not None)
+                if not ys:
+                    return
+                low, high = ys[int(len(ys) * 0.02)], ys[int(len(ys) * 0.98) - 1 if len(ys) > 1 else 0]
+                if high - low < 1e-9:
+                    low, high = low - 1, high + 1
+                pad = (high - low) * 0.1
+                self.y_min, self.y_max = low - pad, high + pad
+                self.redraw()
+                self.update_info_label()
+
+            # ----- functions -------------------------------------------------------------------------------
+            def insert_function(self, text):
+                self.expr_entry.insert("insert", text)
+                self.expr_entry.focus_set()
+
+            def _compile(self, text):
+                try:
+                    return compile_expression(text)
+                except ExprError as exc:
+                    self.message("Invalid Function", "%s\n\n%s" % (text, exc), "error")
+                    return None
+
+            def plot_graph(self, text=None):
+                """Plot Graph: replaces the selected function (or adds the first one)."""
+                text = (text if text is not None else self.expr_entry.get()).strip()
+                if not text:
+                    self.message("Warning", "Please enter a function!", "warning")
+                    return
+                f = self._compile(text)
+                if not f:
+                    return
+                if self.selected is None:
+                    self._add(text, f)
+                else:
+                    fn = self.functions[self.selected]
+                    fn["text"], fn["f"] = text, f
+                    self.marks = []
+                self.store.used(text)
+                self.expr_entry.delete(0, "end")
+                self.expr_entry.insert(0, text)
+                self.fill_function_list()
+                self.redraw()
+                self.update_info_label()
+
+            def add_graph(self):
+                text = self.expr_entry.get().strip()
+                if not text:
+                    self.message("Warning", "Please enter a function!", "warning")
+                    return
+                if len(self.functions) >= MAX_FUNCTIONS:
+                    self.message("Add Graph", "At most %d functions at a time. Remove one first." % MAX_FUNCTIONS,
+                                 "warning")
+                    return
+                f = self._compile(text)
+                if f:
+                    self._add(text, f)
+                    self.store.used(text)
+                    self.fill_function_list()
+                    self.redraw()
+                    self.update_info_label()
+
+            def _add(self, text, f):
+                used = {fn["colour"] for fn in self.functions}
+                colour = next((c for _n, c in COLOURS if c not in used), COLOURS[0][1])
+                self.functions.append({"text": text, "f": f, "colour": colour, "width": 2, "visible": True})
+                self.selected = len(self.functions) - 1
+                self.marks = []
+
+            def fill_function_list(self):
+                for child in self.func_frame.winfo_children():
+                    child.destroy()
+                if not self.functions:
+                    tk.Label(self.func_frame, text="(none yet)\n\nType a function\nabove and press\nPlot Graph.",
+                             font=FONT, bg=FACE, fg=SHADOW, justify="left").pack(anchor="w")
+                    return
+                for index, fn in enumerate(self.functions):
+                    selected = index == self.selected
+                    row = tk.Frame(self.func_frame, bg=NAVY if selected else FACE, bd=1,
+                                   relief="sunken" if selected else "flat")
+                    row.pack(fill="x", pady=1)
+                    var = tk.BooleanVar(value=fn["visible"])
+                    tk.Checkbutton(row, variable=var, bg=FACE, activebackground=FACE, selectcolor=LIGHT,
+                                   highlightthickness=0, command=lambda i=index, v=var: self.set_visible(i, v.get())).pack(
+                        side="left")
+                    swatch = tk.Frame(row, bg=fn["colour"], width=14, height=10, bd=1, relief="solid")
+                    swatch.pack(side="left", padx=2)
+                    label = tk.Label(row, text="y%d = %s" % (index + 1, fn["text"] if len(fn["text"]) <= 22
+                                                            else fn["text"][:21] + "~"),
+                                     font=FONT, bg=NAVY if selected else FACE, fg=LIGHT if selected else BLACK, anchor="w",
+                                     width=24)
+                    label.pack(side="left", fill="x")
+                    for widget in (row, label, swatch):
+                        widget.bind("<Button-1>", lambda e, i=index: self.select(i))
+                        widget.bind("<Double-Button-1>", lambda e, i=index: self.edit_function(i))
+
+            def select(self, index):
+                self.selected = index
+                self.marks = []
+                fn = self.functions[index]
+                self.expr_entry.delete(0, "end")
+                self.expr_entry.insert(0, fn["text"])
+                self.fill_function_list()
+                self.redraw()
+                self.update_info_label()
+
+            def edit_function(self, index):
+                self.select(index)
+                self.expr_entry.focus_set()
+                self.expr_entry.select_range(0, "end")
+
+            def set_visible(self, index, visible):
+                self.functions[index]["visible"] = visible
+                self.redraw()
+
+            def selected_function(self, warn=True):
+                if self.selected is None or not self.functions:
+                    if warn:
+                        self.message("Warning", "Please plot a function first!", "warning")
+                    return None
+                return self.functions[self.selected]
+
+            def remove_selected(self):
+                if self.selected is None:
+                    return
+                del self.functions[self.selected]
+                self.selected = (len(self.functions) - 1) if self.functions else None
+                self.marks = []
+                if self.selected is not None:
+                    self.expr_entry.delete(0, "end")
+                    self.expr_entry.insert(0, self.functions[self.selected]["text"])
+                self.fill_function_list()
+                self.redraw()
+                self.update_info_label()
+
+            def clear_graph(self):
+                self.functions, self.selected, self.marks = [], None, []
+                self.expr_entry.delete(0, "end")
+                self.fill_function_list()
+                self.redraw()
+                self.update_info_label()
+
+            def toggle_grid(self):
+                self.show_grid = not self.show_grid
+                self.redraw()
+
+            def clear_marks(self):
+                self.marks = []
+                self.redraw()
+
+            # ----- tools -----------------------------------------------------------------------------------
+            def find_roots(self):
+                fn = self.selected_function()
+                if not fn:
+                    return
+                roots = find_roots(fn["f"], self.x_min, self.x_max)
+                self.marks = [m for m in self.marks if m[0] != "root"] + [("root", x, 0.0) for x, _y in roots]
+                self.redraw()
+                if roots:
+                    self.message("Roots", "f(x) = %s\n\n%s" % (fn["text"], "\n".join(
+                        "x%d = %s" % (i, fmt(x)) for i, (x, _y) in enumerate(roots, 1))))
+                else:
+                    # nothing invented (the old version marked the points 'closest to zero' as roots)
+                    self.message("Roots", "f(x) = %s\n\nNo root in the visible range X [%s, %s]." % (
+                        fn["text"], fmt(self.x_min), fmt(self.x_max)))
+
+            def find_extrema(self, maximum):
+                fn = self.selected_function()
+                if not fn:
+                    return
+                kind = "max" if maximum else "min"
+                points = find_extrema(fn["f"], self.x_min, self.x_max, maximum)
+                self.marks = [m for m in self.marks if m[0] != kind] + [(kind, x, y) for x, y in points]
+                self.redraw()
+                title = "Maxima" if maximum else "Minima"
+                if points:
+                    self.message(title, "f(x) = %s\n\n%s" % (fn["text"], "\n".join(
+                        "%s %d: (%s, %s)" % ("Maximum" if maximum else "Minimum", i, fmt(x), fmt(y))
+                        for i, (x, y) in enumerate(points, 1))))
+                else:
+                    self.message(title, "f(x) = %s\n\nNo local %s in the visible range." % (
+                        fn["text"], "maximum" if maximum else "minimum"))
+
+            def ask_numbers(self, title, fields):
+                win = self.window(title)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(padx=14, pady=(10, 4))
+                entries = []
+                for row, (label, value) in enumerate(fields):
+                    tk.Label(body, text=label, font=FONT, bg=FACE).grid(row=row, column=0, sticky="w", pady=3)
+                    entry = tk.Entry(body, font=FONT, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0, width=16)
+                    entry.insert(0, value)
+                    entry.grid(row=row, column=1, padx=(8, 0), pady=3)
+                    entries.append(entry)
+                error = tk.Label(win, text="", font=FONT, bg=FACE, fg="#c00000")
+                error.pack()
+                result = {}
+
+                def ok():
+                    values = []
+                    for entry in entries:
+                        try:
+                            values.append(compile_expression(entry.get())(0))   # 2pi, pi/2, 1e3 are accepted
+                        except ExprError:
+                            values.append(None)
+                    if None in values:
+                        error.config(text="Enter numbers (pi/2 and 2pi also work).")
+                        return
+                    result["values"] = values
+                    win.destroy()
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                self.button(row, "OK", ok, width=9, default=True).pack(side="left", padx=4)
+                self.button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=4)
+                win.bind("<Return>", lambda e: ok())
+                win.bind("<Escape>", lambda e: win.destroy())
+                entries[0].focus_set()
+                entries[0].select_range(0, "end")
+                self.show(win)
+                return result.get("values")
+
+            def value_at(self):
+                fn = self.selected_function()
+                if not fn:
+                    return
+                values = self.ask_numbers("Value at x", [("x =", "0")])
+                if values:
+                    x = values[0]
+                    y = fn["f"](x)
+                    if y is not None:
+                        self.marks = [m for m in self.marks if m[0] != "point"] + [("point", x, y)]
+                        self.redraw()
+                    self.message("Value at x", "f(x) = %s\n\nf(%s) = %s" % (fn["text"], fmt(x), fmt(y)))
+
+            def table_of_values(self):
+                fn = self.selected_function()
+                if not fn:
+                    return
+                values = self.ask_numbers("Table of Values", [("From x =", fmt(self.x_min)), ("To x =", fmt(self.x_max)),
+                                                             ("Step =", fmt(nice_step(self.x_max - self.x_min, 20)))])
+                if not values:
+                    return
+                start, end, step = values
+                if step <= 0 or end < start or (end - start) / step > 5000:
+                    self.message("Table of Values", "Choose From < To and a step that gives at most 5000 rows.", "warning")
+                    return
+                lines = ["f(x) = %s" % fn["text"], "", "%-18s %s" % ("x", "f(x)"), "-" * 40]
+                i = 0
+                while start + i * step <= end + step * 1e-9:
+                    x = start + i * step
+                    lines.append("%-18s %s" % (fmt(round(x, 12)), fmt(fn["f"](x))))
+                    i += 1
+                self.text_window("Table of Values", "\n".join(lines))
+
+            # ----- settings ----------------------------------------------------------------------------------
+            def open_settings(self):
+                values = self.ask_numbers("Graph Settings", [("X Min:", fmt(self.x_min)), ("X Max:", fmt(self.x_max)),
+                                                            ("Y Min:", fmt(self.y_min)), ("Y Max:", fmt(self.y_max))])
+                if not values:
+                    return
+                x0, x1, y0, y1 = values
+                if x0 >= x1 or y0 >= y1:              # (it accepted an empty or inverted range before)
+                    self.message("Graph Settings", "X Min must be less than X Max, and Y Min less than Y Max.", "error")
+                    return
+                self.x_min, self.x_max, self.y_min, self.y_max = x0, x1, y0, y1
+                self.redraw()
+                self.update_info_label()
+
+            def plot_options(self):
+                fn = self.selected_function()
+                if not fn:
+                    return
+                win = self.window("Plot Options")
+                body = tk.Frame(win, bg=FACE)
+                body.pack(padx=14, pady=10)
+                tk.Label(body, text="Line Color:", font=FONT, bg=FACE).grid(row=0, column=0, sticky="w", pady=4)
+                colour_var = tk.StringVar(value=fn["colour"])
+                swatches = tk.Frame(body, bg=FACE)
+                swatches.grid(row=0, column=1, sticky="w", padx=(8, 0))
+                for name, colour in COLOURS:
+                    tk.Radiobutton(swatches, variable=colour_var, value=colour, bg=colour, activebackground=colour,
+                                   selectcolor=LIGHT, indicatoron=0, width=2, bd=2, relief="raised",
+                                   offrelief="raised", highlightthickness=0).pack(side="left", padx=1)
+                tk.Label(body, text="Line Width:", font=FONT, bg=FACE).grid(row=1, column=0, sticky="w", pady=4)
+                width_var = tk.IntVar(value=fn["width"])
+                widths = tk.Frame(body, bg=FACE)
+                widths.grid(row=1, column=1, sticky="w", padx=(8, 0))
+                for w in (1, 2, 3, 4, 5):
+                    tk.Radiobutton(widths, text=str(w), variable=width_var, value=w, font=FONT, bg=FACE,
+                                   activebackground=FACE, selectcolor=LIGHT, highlightthickness=0).pack(side="left")
+
+                def apply():
+                    fn["colour"], fn["width"] = colour_var.get(), width_var.get()
+                    win.destroy()
+                    self.fill_function_list()
+                    self.redraw()
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(0, 12))
+                self.button(row, "Apply", apply, width=9, default=True).pack(side="left", padx=4)
+                self.button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=4)
+                self.show(win)
+
+            # ----- saved and history -------------------------------------------------------------------------
+            def save_expression(self):
+                text = self.expr_entry.get().strip()
+                if not text:
+                    self.message("Warning", "No expression to save!", "warning")
+                    return
+                if self._compile(text):
+                    self.store.save(text)
+                    self.info_label.config(text="Saved: %s" % text)
+
+            def _list_window(self, title, items, remove=None, clear=None):
+                win = self.window(title)
+                holder = tk.Frame(win, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=10, pady=(10, 4))
+                box = tk.Listbox(holder, font=("Courier New", 10), width=48, height=14, bd=0, highlightthickness=0,
+                                 bg=LIGHT, selectbackground=NAVY, selectforeground=LIGHT, activestyle="none")
+                box.pack(fill="both", expand=True)
+                for item in items:
+                    box.insert("end", item)
+                if items:
+                    box.selection_set(0)
+                else:
+                    box.insert("end", "(empty)")
+
+                def picked():
+                    sel = box.curselection()
+                    return items[sel[0]] if sel and sel[0] < len(items) else None
+
+                def load(add):
+                    item = picked()
+                    if item:
+                        win.destroy()
+                        self.expr_entry.delete(0, "end")
+                        self.expr_entry.insert(0, item)
+                        if add and len(self.functions) < MAX_FUNCTIONS:
+                            self.add_graph()
+                        else:
+                            self.plot_graph(item)
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 10))
+                self.button(row, "Plot", lambda: load(False), width=8, default=True).pack(side="left", padx=3)
+                self.button(row, "Add", lambda: load(True), width=8).pack(side="left", padx=3)
+                if remove:
+                    self.button(row, "Remove", lambda: picked() and (remove(picked()), win.destroy(), self.show_saved()),
+                                width=8).pack(side="left", padx=3)
+                if clear:
+                    self.button(row, "Clear", lambda: (clear(), win.destroy()), width=8).pack(side="left", padx=3)
+                self.button(row, "Close", win.destroy, width=8).pack(side="left", padx=3)
+                box.bind("<Double-Button-1>", lambda e: load(False))
+                box.bind("<Return>", lambda e: load(False))
+                win.bind("<Escape>", lambda e: win.destroy())
+                box.focus_set()
+                self.show(win)
+
+            def show_saved(self):
+                self._list_window("Saved Expressions", self.store.saved(), remove=self.store.unsave)
+
+            def show_history(self):
+                self._list_window("Expression History", self.store.history(), clear=self.store.clear_history)
+
+            # ----- help ------------------------------------------------------------------------------------
+            def show_help(self):
+                self.text_window("Help Topics", HELP_TEXT, mono=False)
+
+            def show_functions(self):
+                self.text_window("Function Reference", FUNCTIONS_TEXT)
+
+            def show_examples(self):
+                self.text_window("Function Examples", EXAMPLES_TEXT, load=lambda expr: self.plot_graph(expr))
+
+            def show_about(self):
+                self.message("About Graphing Calculator", "Graphing Calculator\nVersion 3.0\n\nA simple graphing "
+                             "calculator for plotting mathematical functions.\n\n~ Tudor Marmureanu ~")
+
+            def close(self):
+                self.rootgraphcalc.destroy()
+
+        HELP_TEXT = """GRAPHING CALCULATOR HELP
+
+    GETTING STARTED
+    Type a function of x in the f(x) field and press Enter or Plot Graph.
+    Add Graph puts another function on the same axes (up to 6, each in its own color).
+
+    THE FUNCTIONS LIST (left)
+    Click a function to select it: the tools, Plot Options and the trace work on the selected one.
+    The box hides or shows a function; double-click it to change it, then press Plot Graph.
+
+    TYPING FUNCTIONS
+    + - * / and ^ (or **) for powers; parentheses for grouping.
+    2x, 3sin(x) and (x+1)(x-1) are understood as products.
+    y = ... and f(x) = ... at the start are accepted.
+
+    MOUSE
+    Drag: move the graph.     Wheel: zoom around the pointer.
+    Double-click: zoom in there.     Moving over the graph shows x and f(x) at the bottom.
+
+    KEYBOARD
+    Enter: plot   + / - : zoom   Home: reset view   G: grid   Ctrl+S: save expression   F1: help
+
+    TOOLS
+    Find Roots (red), Find Maximum (green), Find Minimum (orange) look in the visible range.
+    When there is nothing, they say so (no "nearest" points are marked any more).
+    Value at x and Table of Values work on the selected function.
+
+    SAVED EXPRESSIONS AND HISTORY
+    File > Save Expression keeps the expression; File > Saved Expressions lists them.
+    View > History shows the last 50 functions you plotted. Both are kept between sessions.
     """
-            text.insert("1.0", help_text)
-            text.config(state=tk.DISABLED)
-            
-            tk.Button(help_win, text="Close", command=help_win.destroy,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=12).pack(pady=5)
-        
-        def show_functions(self):
-            """Afișează referința funcțiilor disponibile"""
-            func_win = tk.Toplevel(self.rootgraphcalc)
-            func_win.title("Function Reference")
-            func_win.geometry("450x600")
-            func_win.configure(bg="#c0c0c0")
-            
-            text_frame = tk.Frame(func_win, bg="white", relief=tk.SUNKEN, bd=2)
-            text_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-            
-            scrollbar = tk.Scrollbar(text_frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set,
-                          font=("Courier New", 9), bg="white")
-            text.pack(fill=tk.BOTH, expand=True)
-            scrollbar.config(command=text.yview)
-            
-            func_text = """FUNCTION REFERENCE
 
-    BASIC OPERATIONS
-    x + 5        Addition
-    x - 3        Subtraction
-    x * 2        Multiplication
-    x / 4        Division
-    x ** 2       Exponentiation (x squared)
-    x ** 0.5     Square root alternative
+        FUNCTIONS_TEXT = """FUNCTION REFERENCE
 
-    TRIGONOMETRIC FUNCTIONS
-    sin(x)       Sine function
-    cos(x)       Cosine function
-    tan(x)       Tangent function
+    OPERATORS
+    x + 5   x - 3   x * 2   x / 4   x % 3     arithmetic
+    x^2  or  x**2                             power
+    2x   3(x+1)   (x+1)(x-1)                  implicit multiplication
 
-    Note: x should be in radians
-    To convert degrees: sin(x * pi / 180)
+    TRIGONOMETRY (radians)
+    sin(x)  cos(x)  tan(x)  sec(x)  csc(x)  cot(x)
+    asin(x) acos(x) atan(x)
+    Degrees: sin(x * pi / 180)
+
+    HYPERBOLIC
+    sinh(x) cosh(x) tanh(x)
 
     EXPONENTIAL AND LOGARITHMIC
-    exp(x)       Exponential function (e^x)
-    log(x)       Natural logarithm (base e)
-    log(x)/log(10)  Base-10 logarithm
+    exp(x)     e^x
+    log(x)     natural logarithm (same as ln(x))
+    log10(x)   base 10      log2(x)   base 2
 
-    ALGEBRAIC FUNCTIONS
-    sqrt(x)      Square root
-    abs(x)       Absolute value
-    x ** (1/3)   Cube root
+    ALGEBRAIC
+    sqrt(x)  cbrt(x)  abs(x)  sign(x)
+    floor(x) ceil(x)  round(x)
 
     CONSTANTS
-    pi           Pi (3.14159...)
-    e            Euler's number (2.71828...)
-
-    COMPLEX EXPRESSIONS
-    (x**2 + 2*x + 1)     Quadratic
-    sin(x) * cos(x)      Product of trig functions
-    exp(-x**2)           Gaussian function
-    1 / (1 + exp(-x))    Sigmoid function
-
-    EXAMPLE COMBINATIONS
-    x**3 - 3*x**2 + 2*x - 1
-    sin(x) + cos(2*x)
-    exp(x) / (1 + exp(x))
-    sqrt(abs(x))
-    log(abs(x))
+    pi  e  tau
     """
-            text.insert("1.0", func_text)
-            text.config(state=tk.DISABLED)
-            
-            tk.Button(func_win, text="Close", command=func_win.destroy,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=12).pack(pady=5)
-        
-        def show_examples(self):
-            """Afișează exemple de funcții"""
-            ex_win = tk.Toplevel(self.rootgraphcalc)
-            ex_win.title("Function Examples")
-            ex_win.geometry("450x600")
-            ex_win.configure(bg="#c0c0c0")
-            
-            text_frame = tk.Frame(ex_win, bg="white", relief=tk.SUNKEN, bd=2)
-            text_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
-            
-            scrollbar = tk.Scrollbar(text_frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            text = tk.Text(text_frame, wrap=tk.WORD, yscrollcommand=scrollbar.set,
-                          font=("Courier New", 9), bg="white")
-            text.pack(fill=tk.BOTH, expand=True)
-            scrollbar.config(command=text.yview)
-            
-            examples_text = """FUNCTION EXAMPLES
 
-    LINEAR FUNCTIONS
-    x                    Simple linear (slope 1)
-    2*x + 3              Line with slope 2, y-intercept 3
-    -x + 5               Negative slope
+        EXAMPLES_TEXT = """FUNCTION EXAMPLES   (click a line, then Plot Line - or double-click it)
 
-    QUADRATIC FUNCTIONS
-    x**2                 Basic parabola
-    x**2 - 4             Shifted down 4 units
-    -x**2 + 2*x + 3      Downward opening parabola
-    (x-2)**2 + 1         Vertex at (2, 1)
-
-    POLYNOMIAL FUNCTIONS
-    x**3                 Cubic function
-    x**3 - 3*x           Cubic with local extrema
-    x**4 - 2*x**2        Even function with symmetry
-
-    RATIONAL FUNCTIONS
-    1/x                  Hyperbola
-    1/(x**2)             Reciprocal squared
-    (x+1)/(x-1)          Shifted rational function
-    x/(x**2+1)           Bounded rational function
-
-    TRIGONOMETRIC FUNCTIONS
-    sin(x)               Sine wave
-    cos(x)               Cosine wave
-    tan(x)               Tangent (with asymptotes)
-    sin(2*x)             Double frequency
-    sin(x) + cos(x)      Sum of waves
-    2*sin(x)             Amplitude 2
-
-    EXPONENTIAL FUNCTIONS
-    exp(x)               Natural exponential
-    exp(-x)              Decay function
-    2**x                 Base 2 exponential
-    exp(-x**2)           Gaussian bell curve
-
-    LOGARITHMIC FUNCTIONS
-    log(x)               Natural logarithm
-    log(abs(x))          Log of absolute value
-    log(x+1)             Shifted logarithm
-
-    ABSOLUTE VALUE
-    abs(x)               V-shaped graph
-    abs(x-2)             Shifted absolute value
-    abs(sin(x))          Rectified sine wave
-
-    SQUARE ROOT
-    sqrt(x)              Square root (x >= 0)
-    sqrt(abs(x))         Square root of absolute value
-
-    COMBINATIONS
-    sin(x)/x             Sinc function
-    exp(x)*sin(x)        Damped oscillation
-    x*sin(x)             Growing oscillation
-    log(abs(x))*x        Mixed function
-    1/(1+exp(-x))        Sigmoid (logistic function)
-    exp(-x**2)*sin(5*x)  Modulated Gaussian
-
-    Try these examples to explore different graph shapes!
+    2x + 3                 Line with slope 2, y-intercept 3
+    x^2 - 4                Parabola shifted down 4
+    -x^2 + 2x + 3          Downward parabola
+    (x-2)^2 + 1            Vertex at (2, 1)
+    x^3 - 3x               Cubic with a maximum and a minimum
+    x^4 - 2x^2             Even function
+    1/x                    Hyperbola
+    (x+1)/(x-1)            Rational function
+    x/(x^2+1)              Bounded rational function
+    sin(x)                 Sine wave
+    tan(x)                 Tangent (asymptotes are not joined)
+    sin(2x)                Double frequency
+    sin(x) + cos(x)        Sum of waves
+    exp(-x)                Decay
+    2^x                    Base 2 exponential
+    exp(-x^2)              Gaussian bell curve
+    log(x)                 Natural logarithm
+    log(abs(x))            Log of the absolute value
+    abs(x-2)               Shifted V
+    sqrt(abs(x))           Square root of the absolute value
+    cbrt(x)                Cube root (also for negative x)
+    sin(x)/x               Sinc function
+    exp(x)*sin(x)          Growing oscillation
+    x sin(x)               Growing oscillation
+    1/(1+exp(-x))          Sigmoid
+    exp(-x^2)*sin(5x)      Modulated Gaussian
     """
-            text.insert("1.0", examples_text)
-            text.config(state=tk.DISABLED)
-            
-            def load_example():
-                try:
-                    sel_start = text.index(tk.SEL_FIRST)
-                    sel_end = text.index(tk.SEL_LAST)
-                    selected = text.get(sel_start, sel_end).strip()
-                    if selected:
-                        parts = selected.split()
-                        if parts:
-                            func = parts[0]
-                            self.expr_entry.delete(0, tk.END)
-                            self.expr_entry.insert(0, func)
-                            ex_win.destroy()
-                except:
-                    messagebox.showinfo("Info", "Select an expression line first, then click Load")
-            
-            btn_frame = tk.Frame(ex_win, bg="#c0c0c0")
-            btn_frame.pack(pady=5)
-            
-            tk.Button(btn_frame, text="Load Selected", command=load_example,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=12).pack(side=tk.LEFT, padx=5)
-            
-            tk.Button(btn_frame, text="Close", command=ex_win.destroy,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=12).pack(side=tk.LEFT, padx=5)
-        
-        def show_about(self):
-            """Afișează fereastra About"""
-            about_win = tk.Toplevel(self.rootgraphcalc)
-            about_win.title("About Graphing Calculator")
-            about_win.geometry("350x250")
-            about_win.configure(bg="#c0c0c0")
-            about_win.resizable(False, False)
-            
-            frame = tk.Frame(about_win, bg="white", relief=tk.SUNKEN, bd=2)
-            frame.pack(pady=20, padx=20, fill=tk.BOTH, expand=True)
-            
-            tk.Label(frame, text="Graphing Calculator", bg="white", 
-                    font=("MS Sans Serif", 14, "bold")).pack(pady=10)
-            
-            tk.Label(frame, text="Version 2.0", bg="white",
-                    font=("MS Sans Serif", 9)).pack(pady=5)
-            
-            tk.Label(frame, text="A simple graphing calculator", bg="white",
-                    font=("MS Sans Serif", 9)).pack(pady=5)
-            
-            tk.Label(frame, text="for plotting mathematical functions", bg="white",
-                    font=("MS Sans Serif", 9)).pack(pady=5)
-            
-            tk.Label(frame, text="~ Tudor Marmureanu ~", bg="white",
-                    font=("MS Sans Serif", 8, "italic")).pack(pady=15)
-            
-            tk.Button(about_win, text="OK", command=about_win.destroy,
-                     relief=tk.RAISED, bd=2, bg="#c0c0c0", 
-                     font=("MS Sans Serif", 9), width=12).pack(pady=10)
 
-    if __name__ == "__main__":
-        rootgraphcalc = tk.Tk()
-        app = GraphingCalculator(rootgraphcalc)
-        rootgraphcalc.mainloop()
+        app = GraphingCalculator()
+        app.rootgraphcalc.mainloop()
+        return app
+
+    graphing_calculator_95()
         
 if codemergervar == 98099999999999999999999999999999999999999999999999999:
     import sqlite3, os as _os
@@ -174075,546 +176491,815 @@ if timetrackerVARRR == 55555000908888886666666666666666666666666666678:
 
             # Rularea buclei principale
             validation.mainloop()
-    import tkinter as tk
-    from tkinter import messagebox
-    import time
-    import sqlite3
-    import os
+    
+    def time_tracker_95():
+        """Time Tracker (Windows 95 look). Totals stay in Config/dbo_bitpack.db, table time_tracker_tasks
+        (task_name, total_seconds), as before; each work session is also kept in time_tracker_sessions."""
+        import os
+        import csv
+        import time
+        import sqlite3
+        import datetime as dt
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from tkinter import filedialog
 
-    class TimeTracker:
-        def __init__(self, rootttrack1ttrack):
-            self.rootttrack1 = rootttrack1ttrack
-            self.rootttrack1.title("Time Tracker")
-            self.rootttrack1.geometry("700x600")
-            self.rootttrack1.configure(bg="#c0c0c0")
-            
-            # Database setup
-            #self.db_path = "time_tracker.db"
-            self.db_path = "Config/dbo_bitpack.db"
-            self.init_database()
-            
-            # Variables
-            self.tasks = {}
-            self.current_task = None
-            self.start_time = None
-            self.is_running = False
-            self.elapsed_seconds = 0
-            self.show_chart = False
-            self.mini_window = None
-            
-            # Windows 95 colors
-            self.bg_color = "#c0c0c0"
-            self.btn_face = "#c0c0c0"
-            self.header_blue = "#000080"
-            
-            self.create_widgets()
-            self.load_tasks()
-            self.update_timer()
-            
-            # Bind minimize event
-            self.rootttrack1.bind("<Unmap>", self.on_minimize)
-            
-        def init_database(self):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS time_tracker_tasks (
-                    task_name TEXT PRIMARY KEY,
-                    total_seconds INTEGER NOT NULL
-                )
-            ''')
-            conn.commit()
-            conn.close()
-        
-        def save_task_to_db(self, task_name, seconds):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO time_tracker_tasks (task_name, total_seconds) 
-                VALUES (?, ?)
-                ON CONFLICT(task_name) 
-                DO UPDATE SET total_seconds = total_seconds + ?
-            ''', (task_name, seconds, seconds))
-            conn.commit()
-            conn.close()
-        
-        def load_tasks(self):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('SELECT task_name, total_seconds FROM time_tracker_tasks')
-            rows = cursor.fetchall()
-            conn.close()
-            
-            self.tasks = {task: seconds for task, seconds in rows}
-            self.update_task_list()
-        
-        def delete_task_from_db(self, task_name):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM time_tracker_tasks WHERE task_name = ?', (task_name,))
-            conn.commit()
-            conn.close()
-        
-        def clear_all_from_db(self):
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM time_tracker_tasks')
-            conn.commit()
-            conn.close()
-        
-        def create_3d_frame(self, parent, relief="raised"):
-            frame = tk.Frame(parent, bg=self.bg_color, bd=2, relief=relief)
-            return frame
-        
-        def create_widgets(self):
-            # Blue header with gradient effect
-            header_frame = tk.Frame(self.rootttrack1, bg=self.header_blue, height=45)
-            header_frame.pack(fill="x", side="top")
-            header_frame.pack_propagate(False)
-            
-            # Title in header
-            title_label = tk.Label(header_frame, text="Time Tracker", 
-                                  font=("MS Sans Serif", 12, "bold"),
-                                  bg=self.header_blue, fg="white")
-            title_label.pack(pady=15)
-            
-            # Main frame
-            main_frame = tk.Frame(self.rootttrack1, bg=self.bg_color, padx=10, pady=10)
-            main_frame.pack(fill="both", expand=True)
-            
-            # Input frame
-            input_frame = self.create_3d_frame(main_frame, "sunken")
-            input_frame.pack(fill="x", pady=(0, 10))
-            
-            input_inner = tk.Frame(input_frame, bg=self.bg_color, padx=5, pady=5)
-            input_inner.pack(fill="x")
-            
-            tk.Label(input_inner, text="Task:", font=("MS Sans Serif", 10),
-                    bg=self.bg_color).pack(side="left", padx=(0, 5))
-            
-            self.task_entry = tk.Entry(input_inner, font=("MS Sans Serif", 10),
-                                       relief="sunken", bd=2)
-            self.task_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
-            self.task_entry.bind("<Return>", lambda e: self.start_task())
-            
-            # Control buttons
-            btn_frame = tk.Frame(input_inner, bg=self.bg_color)
-            btn_frame.pack(side="left")
-            
-            self.start_btn = self.create_win95_button(btn_frame, "Start", 
-                                                      self.start_task, width=8)
-            self.start_btn.pack(side="left", padx=2)
-            
-            self.stop_btn = self.create_win95_button(btn_frame, "Stop", 
-                                                     self.stop_task, width=8)
-            self.stop_btn.pack(side="left", padx=2)
-            self.stop_btn.config(state="disabled")
-            
-            # Timer display
-            timer_frame = self.create_3d_frame(main_frame, "sunken")
-            timer_frame.pack(fill="x", pady=(0, 10))
-            
-            timer_inner = tk.Frame(timer_frame, bg="#000000", padx=10, pady=10)
-            timer_inner.pack(fill="x", padx=2, pady=2)
-            
-            self.timer_label = tk.Label(timer_inner, text="00:00:00",
-                                        font=("Courier New", 24, "bold"),
-                                        bg="#000000", fg="#00ff00")
-            self.timer_label.pack()
-            
-            self.status_label = tk.Label(timer_inner, text="Status: Idle",
-                                         font=("MS Sans Serif", 10),
-                                         bg="#000000", fg="#c0c0c0")
-            self.status_label.pack()
-            
-            # Container for list and chart
-            self.content_frame = tk.Frame(main_frame, bg=self.bg_color)
-            self.content_frame.pack(fill="both", expand=True, pady=(0, 10))
-            
-            # Task list frame
-            self.list_container = self.create_3d_frame(self.content_frame, "sunken")
-            self.list_container.pack(fill="both", expand=True)
-            
-            list_header = tk.Frame(self.list_container, bg=self.bg_color)
-            list_header.pack(fill="x", padx=2, pady=2)
-            tk.Label(list_header, text="Recorded Tasks",
-                    font=("MS Sans Serif", 10, "bold"),
-                    bg=self.bg_color).pack(side="left")
-            
-            # Scrollbar and listbox
-            scroll_frame = tk.Frame(self.list_container, bg="white")
-            scroll_frame.pack(fill="both", expand=True, padx=2, pady=(0, 2))
-            
-            scrollbar = tk.Scrollbar(scroll_frame)
-            scrollbar.pack(side="right", fill="y")
-            
-            self.task_listbox = tk.Listbox(scroll_frame, font=("Courier New", 9),
-                                           bg="white", fg="black",
-                                           yscrollcommand=scrollbar.set,
-                                           relief="flat", bd=0)
-            self.task_listbox.pack(side="left", fill="both", expand=True)
-            scrollbar.config(command=self.task_listbox.yview)
-            
-            # Chart canvas (hidden initially)
-            self.chart_container = self.create_3d_frame(self.content_frame, "sunken")
-            
-            # Bottom buttons
-            bottom_frame = tk.Frame(main_frame, bg=self.bg_color)
-            bottom_frame.pack(fill="x")
-            
-            self.create_win95_button(bottom_frame, "Delete Task", 
-                                    self.delete_task, width=12).pack(side="left", padx=2)
-            self.create_win95_button(bottom_frame, "Clear All", 
-                                    self.clear_all, width=12).pack(side="left", padx=2)
-            
-            self.chart_btn = self.create_win95_button(bottom_frame, "Show Chart", 
-                                    self.toggle_chart, width=12)
-            self.chart_btn.pack(side="left", padx=2)
-            
-            self.create_win95_button(bottom_frame, "Exit", 
-                                    self.exit_app, width=12).pack(side="right", padx=2)
-            
-        def create_win95_button(self, parent, text, command, width=10):
-            btn = tk.Button(parent, text=text, command=command,
-                           font=("MS Sans Serif", 10),
-                           bg=self.btn_face, fg="black",
-                           relief="raised", bd=2,
-                           width=width, height=1,
-                           activebackground=self.bg_color)
-            return btn
-        
-        def start_task(self):
-            task_name = self.task_entry.get().strip()
-            if not task_name:
-                messagebox.showwarning("Warning", "Enter task name!")
-                return
-            
-            if self.is_running:
-                messagebox.showwarning("Warning", "A task is already running!")
-                return
-            
-            self.current_task = task_name
-            self.start_time = time.time()
-            self.elapsed_seconds = 0
-            self.is_running = True
-            
-            self.start_btn.config(state="disabled")
-            self.stop_btn.config(state="normal")
-            self.task_entry.config(state="disabled")
-            
-            self.status_label.config(text=f"Status: Running - {task_name}")
-            
-        def stop_task(self):
-            if not self.is_running:
-                return
-            
-            elapsed = self.elapsed_seconds
-            
-            # Update in memory
-            if self.current_task in self.tasks:
-                self.tasks[self.current_task] += elapsed
-            else:
-                self.tasks[self.current_task] = elapsed
-            
-            # Save to database
-            self.save_task_to_db(self.current_task, elapsed)
-            
-            self.is_running = False
-            self.start_btn.config(state="normal")
-            self.stop_btn.config(state="disabled")
-            self.task_entry.config(state="normal")
-            self.task_entry.delete(0, tk.END)
-            
-            self.status_label.config(text="Status: Idle")
-            self.timer_label.config(text="00:00:00")
-            
-            self.update_task_list()
-            if self.show_chart:
-                self.draw_chart()
-            
-        def update_timer(self):
-            if self.is_running and self.start_time:
-                self.elapsed_seconds = int(time.time() - self.start_time)
-                hours = self.elapsed_seconds // 3600
-                minutes = (self.elapsed_seconds % 3600) // 60
-                seconds = self.elapsed_seconds % 60
-                self.timer_label.config(text=f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-            
-            self.rootttrack1.after(1000, self.update_timer)
-        
-        def format_time(self, seconds):
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            secs = int(seconds % 60)
-            return f"{hours}h {minutes}m {secs}s"
-        
-        def update_task_list(self):
-            self.task_listbox.delete(0, tk.END)
-            for task, seconds in sorted(self.tasks.items(), key=lambda x: x[1], reverse=True):
-                time_str = self.format_time(seconds)
-                self.task_listbox.insert(tk.END, f"{task:<35} {time_str:>20}")
-        
-        def toggle_chart(self):
-            self.show_chart = not self.show_chart
-            
-            if self.show_chart:
-                self.list_container.pack_forget()
-                self.chart_container.pack(fill="both", expand=True)
-                self.chart_btn.config(text="Show List")
-                self.draw_chart()
-            else:
-                self.chart_container.pack_forget()
-                self.list_container.pack(fill="both", expand=True)
-                self.chart_btn.config(text="Show Chart")
-        
-        def draw_chart(self):
-            # Clear previous chart
-            for widget in self.chart_container.winfo_children():
-                widget.destroy()
-            
-            if not self.tasks:
-                label = tk.Label(self.chart_container, text="No data to display",
-                               font=("MS Sans Serif", 12),
-                               bg=self.bg_color, fg="#808080")
-                label.pack(expand=True)
-                return
-            
-            # Chart header
-            chart_header = tk.Frame(self.chart_container, bg=self.bg_color)
-            chart_header.pack(fill="x", padx=2, pady=2)
-            tk.Label(chart_header, text="Time Statistics",
-                    font=("MS Sans Serif", 10, "bold"),
-                    bg=self.bg_color).pack(side="left")
-            
-            # Canvas for chart
-            canvas_frame = tk.Frame(self.chart_container, bg="white")
-            canvas_frame.pack(fill="both", expand=True, padx=2, pady=2)
-            
-            canvas = tk.Canvas(canvas_frame, bg="white", highlightthickness=0)
-            canvas.pack(fill="both", expand=True, padx=10, pady=10)
-            
-            # Wait for canvas to be drawn
-            self.rootttrack1.update()
-            
-            width = canvas.winfo_width()
-            height = canvas.winfo_height()
-            
-            if width < 100 or height < 100:
-                return
-            
-            # Sort tasks by time
-            sorted_tasks = sorted(self.tasks.items(), key=lambda x: x[1], reverse=True)[:10]
-            
-            if not sorted_tasks:
-                return
-            
-            # Calculate dimensions
-            padding = 50
-            chart_height = height - 2 * padding
-            chart_width = width - 2 * padding
-            
-            max_seconds = max(s for _, s in sorted_tasks)
-            if max_seconds == 0:
-                return
-            
-            # Bar colors (Windows 95 palette)
-            colors = ["#000080", "#008080", "#800080", "#808000", "#800000",
-                     "#008000", "#0000FF", "#00FFFF", "#FF00FF", "#808080"]
-            
-            # Draw bars
-            bar_width = chart_width / len(sorted_tasks) * 0.8
-            spacing = chart_width / len(sorted_tasks)
-            
-            for i, (task, seconds) in enumerate(sorted_tasks):
-                bar_height = (seconds / max_seconds) * chart_height
-                x = padding + i * spacing + (spacing - bar_width) / 2
-                y = height - padding
-                
-                # Draw bar
-                color = colors[i % len(colors)]
-                canvas.create_rectangle(x, y, x + bar_width, y - bar_height,
-                                      fill=color, outline="black", width=2)
-                
-                # Draw value (formatted time)
-                hours = int(seconds // 3600)
-                minutes = int((seconds % 3600) // 60)
-                secs = int(seconds % 60)
-                value_text = f"{hours}h {minutes}m {secs}s"
-                canvas.create_text(x + bar_width/2, y - bar_height - 10,
-                                 text=value_text, font=("MS Sans Serif", 8, "bold"))
-                
-                # Draw task name (truncated)
-                task_short = task[:10] + "..." if len(task) > 10 else task
-                canvas.create_text(x + bar_width/2, y + 15,
-                                 text=task_short, font=("MS Sans Serif", 8),
-                                 angle=45, anchor="ne")
-            
-            # Draw axes
-            canvas.create_line(padding, height - padding, width - padding, height - padding,
-                             fill="black", width=2)
-            canvas.create_line(padding, padding, padding, height - padding,
-                             fill="black", width=2)
-        
-        def delete_task(self):
-            selection = self.task_listbox.curselection()
-            if not selection:
-                messagebox.showinfo("Info", "Select a task from the list!")
-                return
-            
-            task_line = self.task_listbox.get(selection[0])
-            task_name = task_line[:35].strip()
-            
-            if messagebox.askyesno("Confirm", f"Delete task '{task_name}'?"):
-                if task_name in self.tasks:
-                    del self.tasks[task_name]
-                    self.delete_task_from_db(task_name)
-                    self.update_task_list()
-                    if self.show_chart:
-                        self.draw_chart()
-        
-        def clear_all(self):
-            if not self.tasks:
-                messagebox.showinfo("Info", "No recorded tasks!")
-                return
-            
-            if messagebox.askyesno("Confirm", "Delete all tasks?"):
-                self.tasks.clear()
-                self.clear_all_from_db()
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        LIST_FONT = ("Courier New", 9)
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Time Tracker"
+        DB_PATH = "Config/dbo_bitpack.db"
+        CHECKPOINT_SECONDS = 60              # the running time is written this often (it was lost on a crash)
+        COLOURS = ["#000080", "#008080", "#800080", "#808000", "#800000", "#008000", "#0000ff", "#00a0a0", "#c000c0",
+                   "#606060"]
+        COLUMNS = (("Task", 40, "name"), ("Today", 11, "today"), ("Total", 13, "total"), ("Last worked", 17, "last"))
+
+        def hms(seconds):
+            seconds = int(seconds)
+            return "%02d:%02d:%02d" % (seconds // 3600, seconds // 60 % 60, seconds % 60)
+
+        def human(seconds):
+            seconds = int(seconds)
+            h, m, s = seconds // 3600, seconds // 60 % 60, seconds % 60
+            return "%dh %02dm" % (h, m) if h else ("%dm %02ds" % (m, s) if m else "%ds" % s)
+
+        # ══════════════════════════════════════════════════════════════
+        # STORAGE (the totals table is the same as before)
+        # ══════════════════════════════════════════════════════════════
+
+        class Store:
+            def __init__(self, path):
+                self.path = path
+                folder = os.path.dirname(path)
+                if folder and not os.path.isdir(folder):
+                    os.makedirs(folder)
+                with self.db() as conn:
+                    conn.execute("CREATE TABLE IF NOT EXISTS time_tracker_tasks (task_name TEXT PRIMARY KEY, "
+                                 "total_seconds INTEGER NOT NULL)")
+                    conn.execute("CREATE TABLE IF NOT EXISTS time_tracker_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                                 "task_name TEXT NOT NULL, started TEXT NOT NULL, ended TEXT, seconds INTEGER NOT NULL)")
+
+            def db(self):
+                return sqlite3.connect(self.path, timeout=10)
+
+            def tasks(self):
+                """[(name, total, today, last)]"""
+                today = dt.date.today().isoformat()
+                with self.db() as conn:
+                    totals = conn.execute("SELECT task_name, total_seconds FROM time_tracker_tasks").fetchall()
+                    per_day = dict(conn.execute("SELECT task_name, SUM(seconds) FROM time_tracker_sessions "
+                                                "WHERE substr(started, 1, 10) = ? GROUP BY task_name", (today,)).fetchall())
+                    last = dict(conn.execute("SELECT task_name, MAX(COALESCE(ended, started)) FROM time_tracker_sessions "
+                                             "GROUP BY task_name").fetchall())
+                return [(name, total or 0, per_day.get(name, 0) or 0, last.get(name)) for name, total in totals]
+
+            def add_time(self, task, seconds, session_id, started):
+                """Adds seconds to the task's total and to its session (one transaction)."""
+                if seconds <= 0:
+                    return session_id
+                now = dt.datetime.now().isoformat(sep=" ", timespec="seconds")
+                with self.db() as conn:
+                    conn.execute("INSERT INTO time_tracker_tasks (task_name, total_seconds) VALUES (?, ?) "
+                                 "ON CONFLICT(task_name) DO UPDATE SET total_seconds = total_seconds + ?",
+                                 (task, seconds, seconds))
+                    if session_id is None:
+                        session_id = conn.execute("INSERT INTO time_tracker_sessions (task_name, started, ended, seconds) "
+                                                  "VALUES (?, ?, ?, ?)", (task, started, now, seconds)).lastrowid
+                    else:
+                        conn.execute("UPDATE time_tracker_sessions SET seconds = seconds + ?, ended = ? WHERE id = ?",
+                                     (seconds, now, session_id))
+                return session_id
+
+            def ensure_task(self, task):
+                with self.db() as conn:
+                    conn.execute("INSERT OR IGNORE INTO time_tracker_tasks (task_name, total_seconds) VALUES (?, 0)",
+                                 (task,))
+
+            def delete(self, task):
+                with self.db() as conn:
+                    conn.execute("DELETE FROM time_tracker_tasks WHERE task_name = ?", (task,))
+                    conn.execute("DELETE FROM time_tracker_sessions WHERE task_name = ?", (task,))
+
+            def clear(self):
+                with self.db() as conn:
+                    conn.execute("DELETE FROM time_tracker_tasks")
+                    conn.execute("DELETE FROM time_tracker_sessions")
+
+            def sessions(self):
+                with self.db() as conn:
+                    return conn.execute("SELECT task_name, started, ended, seconds FROM time_tracker_sessions "
+                                        "ORDER BY started").fetchall()
+
+        # ══════════════════════════════════════════════════════════════
+        # THE WINDOW
+        # ══════════════════════════════════════════════════════════════
+
+        class TimeTracker:
+            def __init__(self):
+                self.rootttrack1 = root = tk.Tk()
+                self.store = Store(DB_PATH)
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.current_task = None
+                self.session_id = None
+                self.session_started = None
+                self.run_start = None              # time.time() when the current stretch began (None = paused)
+                self.saved_seconds = 0             # seconds of this session already written to the database
+                self.paused_seconds = 0            # seconds of this session before the current stretch
+                self.rows = []
+                self.sort_key, self.sort_reverse = "total", True
+                self.show_chart = False
+                self.mini_window = None
+                root.title(TITLE)
+                width = min(720, root.winfo_screenwidth() - 40)
+                height = min(600, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(520, 420)
+                root.configure(bg=FACE)
+                # fix: closing the window saves the running time (the X lost it, Exit lost it too)
+                root.protocol("WM_DELETE_WINDOW", self.exit_app)
+                self.small = tkfont.Font(root=root, family="MS Sans Serif", size=8)
+                self._make_icon()
+                self.create_title_bar()
+                self.create_widgets()
+                if self.custom_frame:
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+                self.load_tasks()
+                self.update_timer()
+
+            # ----- frame -----------------------------------------------------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(width=16, height=16)
+                for x0, y0, x1, y1, colour in ((4, 0, 12, 1, BLACK), (2, 1, 4, 2, BLACK), (12, 1, 14, 2, BLACK),
+                                               (1, 2, 2, 14, BLACK), (14, 2, 15, 14, BLACK), (2, 14, 14, 15, BLACK),
+                                               (2, 2, 14, 14, LIGHT), (7, 4, 9, 9, NAVY), (9, 8, 12, 9, NAVY),
+                                               (7, 0, 9, 1, "#c00000")):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+
+            def create_title_bar(self):
+                root = self.rootttrack1
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(width=1, height=1)
+                if IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                    root.bind("<Unmap>", self.on_unmap)
+                    root.bind("<Map>", self.on_map_plain)
+                    return
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                self.title_label = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                self.title_label.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, self.title_label, icon)
+                self.caption_button(bar, "close", self.exit_app).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.rootttrack1.overrideredirect(True)
+                self._apply_taskbar_style()
+
+            def _apply_taskbar_style(self):
+                root = self.rootttrack1
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(root.winfo_id())
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+                except Exception:
+                    return
+                root.withdraw()
+                root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+            def _on_map(self, event):
+                root = self.rootttrack1
+                if event.widget is not root:
+                    return
+                self.close_mini_window()                   # back from the taskbar: the small window goes
+                if self.minimizing and root.state() == "normal":
+                    self.minimizing = False
+                    root.overrideredirect(True)
+                    root.after(10, self._apply_taskbar_style)
+
+            def on_unmap(self, event):
+                """Only the main window being minimized shows the small window (any child unmap did before)."""
+                if event.widget is self.rootttrack1 and self.rootttrack1.state() == "iconic" and self.current_task:
+                    self.show_mini_window()
+
+            def on_map_plain(self, event):
+                if event.widget is self.rootttrack1:
+                    self.close_mini_window()
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.rootttrack1.overrideredirect(False)
+                self.rootttrack1.iconify()
+                if self.current_task:
+                    self.show_mini_window()
+
+            def toggle_maximize(self):
+                root = self.rootttrack1
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self._drag = (event.x_root - self.rootttrack1.winfo_x(), event.y_root - self.rootttrack1.winfo_y())
+
+            def _caption_drag(self, event):
+                if self.custom_frame and not self.maximized:
+                    self.rootttrack1.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+            def _grip_press(self, event):
+                root = self.rootttrack1
+                self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.rootttrack1.geometry("%dx%d" % (max(520, width + event.x_root - x0),
+                                                         max(420, height + event.y_root - y0)))
+
+            def _focus_on_click(self, event):
+                """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+                another window had it. A click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            # ----- Windows 95 dialogs ---------------------------------------------------------------------
+            def button(self, parent, text, command, width=None, default=False, state="normal"):
+                widget = tk.Button(parent, text=text, command=command, font=FONT_B if default else FONT, bg=FACE,
+                                   fg=BLACK, activebackground=FACE, relief="raised", bd=2, padx=6, pady=1, state=state,
+                                   disabledforeground=SHADOW, highlightthickness=1 if default else 0,
+                                   highlightbackground=BLACK, takefocus=0)
+                if width:
+                    widget.config(width=width)
+                return widget
+
+            def message(self, title, text, icon="info", buttons=("OK",), default=0):
+                root = self.rootttrack1
+                win = tk.Toplevel(root)
+                win.overrideredirect(True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                win.transient(root)
+                win.attributes("-topmost", True)
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                tk.Label(bar, text=title, bg=NAVY, fg=LIGHT, font=FONT_B).pack(side="left", padx=4)
+                result = {"value": buttons[-1]}
+
+                def answer(value):
+                    result["value"] = value
+                    win.destroy()
+                self.caption_button(bar, "close", lambda: answer(buttons[-1])).pack(side="right", padx=2)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                picture = tk.Canvas(body, width=32, height=32, bg=FACE, highlightthickness=0)
+                if icon == "warning":
+                    picture.create_polygon(16, 2, 30, 29, 2, 29, fill="#ffff00", outline=BLACK)
+                    picture.create_text(16, 19, text="!", fill=BLACK, font=("Times New Roman", 15, "bold"))
+                else:
+                    picture.create_oval(2, 2, 30, 30, fill=LIGHT, outline=BLACK)
+                    picture.create_text(16, 16, text="?" if icon == "question" else "i", fill="#0000ff",
+                                        font=("Times New Roman", 16, "bold"))
+                picture.pack(side="left", anchor="n", padx=(0, 12))
+                tk.Label(body, text=text, bg=FACE, font=FONT, justify="left", wraplength=360).pack(side="left")
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(4, 12))
+                for index, label in enumerate(buttons):
+                    self.button(row, label, lambda v=label: answer(v), width=9, default=index == default).pack(
+                        side="left", padx=4)
+                win.bind("<Return>", lambda e: answer(buttons[default]))
+                win.bind("<Escape>", lambda e: answer(buttons[-1]))
+                win.update_idletasks()
+                w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+                win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                         root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+                win.lift()
+                win.focus_force()
+
+                def take_clicks():
+                    try:
+                        if win.winfo_exists() and win.winfo_viewable():
+                            win.grab_set()
+                    except tk.TclError:
+                        pass
+                clicks_job = win.after(100, take_clicks)
+                # when the box closes (even within 100 ms, or with the whole tool) nothing is left waiting
+                win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                         add="+")
+                root.wait_window(win)
+                return result["value"]
+
+            # ----- layout ----------------------------------------------------------------------------------
+            def create_widgets(self):
+                root = self.rootttrack1
+                bar = tk.Frame(root, bg=FACE)
+                bar.pack(side="top", fill="x")
+
+                def menubutton(text):
+                    widget = tk.Menubutton(bar, text=text, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                           activeforeground=LIGHT, relief="flat", bd=0, padx=6, pady=2, underline=0,
+                                           takefocus=0, highlightthickness=0)
+                    widget.pack(side="left")
+                    menu = tk.Menu(widget, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                                   activeforeground=LIGHT)
+                    widget.config(menu=menu)
+                    return menu
+
+                m = menubutton("File")
+                m.add_command(label="Export to CSV...", command=self.export_csv)
+                m.add_separator()
+                m.add_command(label="Exit", command=self.exit_app)
+                m = menubutton("Task")
+                m.add_command(label="Start", accelerator="Enter", command=self.start_task)
+                m.add_command(label="Pause / Resume", accelerator="F6", command=self.pause_task)
+                m.add_command(label="Stop", accelerator="F7", command=self.stop_task)
+                m.add_separator()
+                m.add_command(label="Continue Selected Task", command=self.continue_selected)
+                m.add_command(label="Delete Task", accelerator="Del", command=self.delete_task)
+                m.add_command(label="Clear All", command=self.clear_all)
+                m = menubutton("View")
+                m.add_command(label="List / Chart", command=self.toggle_chart)
+                m = menubutton("Help")
+                m.add_command(label="About Time Tracker", command=lambda: self.message(
+                    "About Time Tracker", "Time Tracker\n\nType a task and press Start. Pause stops the clock without "
+                    "ending the task; typing another task and pressing Start switches to it.\n\nThe running time is "
+                    "saved every minute and when you close the window, so it is not lost."))
+
+                main = tk.Frame(root, bg=FACE)
+                main.pack(fill="both", expand=True, padx=8, pady=6)
+                entry_row = tk.Frame(main, bg=FACE)
+                entry_row.pack(fill="x")
+                tk.Label(entry_row, text="Task:", font=FONT, bg=FACE).pack(side="left")
+                self.task_entry = tk.Entry(entry_row, font=FONT, bg=LIGHT, relief="sunken", bd=2, highlightthickness=0)
+                self.task_entry.pack(side="left", fill="x", expand=True, padx=6)
+                self.task_entry.bind("<Return>", lambda e: self.start_task())
+                self.start_btn = self.button(entry_row, "Start", self.start_task, width=8, default=True)
+                self.start_btn.pack(side="left", padx=2)
+                self.pause_btn = self.button(entry_row, "Pause", self.pause_task, width=8, state="disabled")
+                self.pause_btn.pack(side="left", padx=2)
+                self.stop_btn = self.button(entry_row, "Stop", self.stop_task, width=8, state="disabled")
+                self.stop_btn.pack(side="left", padx=2)
+
+                timer = tk.Frame(main, bg=BLACK, bd=2, relief="sunken")
+                timer.pack(fill="x", pady=8)
+                self.timer_label = tk.Label(timer, text="00:00:00", font=("Courier New", 24, "bold"), bg=BLACK,
+                                            fg="#00ff00")
+                self.timer_label.pack(pady=(6, 0))
+                self.status_label = tk.Label(timer, text="Status: Idle", font=FONT, bg=BLACK, fg=FACE)
+                self.status_label.pack(pady=(0, 6))
+
+                self.content = tk.Frame(main, bg=FACE)
+                self.content.pack(fill="both", expand=True)
+                self.list_box_frame = tk.LabelFrame(self.content, text=" Recorded Tasks ", font=FONT, bg=FACE, bd=2,
+                                                    relief="groove")
+                holder = tk.Frame(self.list_box_frame, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=6, pady=6)
+                scroll = tk.Scrollbar(holder, orient="vertical")
+                scroll.pack(side="right", fill="y")
+                self.char_w = tkfont.Font(font=LIST_FONT).measure("0")
+                self.header = tk.Listbox(holder, font=LIST_FONT, height=1, bg=FACE, fg=BLACK, bd=0, highlightthickness=0,
+                                         activestyle="none", selectbackground=FACE, selectforeground=BLACK,
+                                         exportselection=False, cursor="hand2")
+                self.header.pack(side="top", fill="x")
+                self.task_listbox = tk.Listbox(holder, font=LIST_FONT, bg=LIGHT, fg=BLACK, bd=0, highlightthickness=0,
+                                               activestyle="none", selectbackground=NAVY, selectforeground=LIGHT,
+                                               exportselection=False, yscrollcommand=scroll.set)
+                self.task_listbox.pack(fill="both", expand=True)
+                scroll.config(command=self.task_listbox.yview)
+                self.header.bind("<ButtonRelease-1>", self._header_click)
+                self.task_listbox.bind("<Double-Button-1>", lambda e: self.continue_selected())
+                self.task_listbox.bind("<Delete>", lambda e: self.delete_task())
+                self.task_listbox.bind("<Button-3>", self._context_menu)
+                self.chart_frame = tk.LabelFrame(self.content, text=" Time Statistics ", font=FONT, bg=FACE, bd=2,
+                                                 relief="groove")
+                self.chart = tk.Canvas(self.chart_frame, bg=LIGHT, highlightthickness=0, bd=2, relief="sunken")
+                self.chart.pack(fill="both", expand=True, padx=6, pady=6)
+                self.chart.bind("<Configure>", lambda e: self.draw_chart())
+                self.list_box_frame.pack(fill="both", expand=True)
+
+                buttons = tk.Frame(main, bg=FACE)
+                buttons.pack(fill="x", pady=(6, 0))
+                self.button(buttons, "Continue", self.continue_selected, width=10).pack(side="left", padx=2)
+                self.button(buttons, "Delete Task", self.delete_task, width=11).pack(side="left", padx=2)
+                self.button(buttons, "Clear All", self.clear_all, width=10).pack(side="left", padx=2)
+                self.chart_btn = self.button(buttons, "Show Chart", self.toggle_chart, width=11)
+                self.chart_btn.pack(side="left", padx=2)
+                self.button(buttons, "Exit", self.exit_app, width=9).pack(side="right", padx=2)
+
+                status = tk.Frame(root, bg=FACE)
+                status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+                grip = tk.Canvas(status, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(13, i, i, 13, fill=LIGHT)
+                    grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                    grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                grip.pack(side="right", anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+                self.today_label = tk.Label(status, text="", font=FONT, bg=FACE, relief="sunken", bd=1, width=22,
+                                            anchor="w", padx=4)
+                self.today_label.pack(side="right", padx=1)
+                self.message_label = tk.Label(status, text="Ready", font=FONT, bg=FACE, relief="sunken", bd=1,
+                                              anchor="w", padx=4)
+                self.message_label.pack(side="left", fill="x", expand=True, padx=1)
+                for key, action in (("<F6>", self.pause_task), ("<F7>", self.stop_task)):
+                    root.bind(key, lambda e, a=action: (a(), "break")[1])
+
+            # ----- the clock ---------------------------------------------------------------------------------
+            def session_seconds(self):
+                if not self.current_task:
+                    return 0
+                running = int(time.time() - self.run_start) if self.run_start else 0
+                return self.paused_seconds + running
+
+            def update_timer(self):
+                seconds = self.session_seconds()
+                self.timer_label.config(text=hms(seconds), fg="#00ff00" if self.run_start else "#ffff00")
+                if self.mini_window is not None:
+                    self.mini_timer_label.config(text=hms(seconds))
+                # checkpoint: the time so far is written now and then (nothing is lost on a crash)
+                if self.current_task and seconds - self.saved_seconds >= CHECKPOINT_SECONDS:
+                    self.checkpoint()
+                self.timer_job = self.rootttrack1.after(500, self.update_timer)
+
+            def checkpoint(self):
+                seconds = self.session_seconds()
+                delta = seconds - self.saved_seconds
+                if delta > 0 and self.current_task:
+                    try:
+                        self.session_id = self.store.add_time(self.current_task, delta, self.session_id,
+                                                              self.session_started)
+                        self.saved_seconds = seconds
+                        self.load_tasks()
+                    except sqlite3.Error as exc:
+                        self.message_label.config(text="Could not save: %s" % exc)
+
+            def set_state(self):
+                running, active = self.run_start is not None, self.current_task is not None
+                self.pause_btn.config(state="normal" if active else "disabled", text="Resume" if active and not running
+                                      else "Pause")
+                self.stop_btn.config(state="normal" if active else "disabled")
+                self.start_btn.config(text="Switch" if active else "Start")
+                if active:
+                    self.status_label.config(text="Status: %s - %s" % ("Running" if running else "Paused",
+                                                                       self.current_task))
+                else:
+                    self.status_label.config(text="Status: Idle")
+                if hasattr(self, "title_label"):
+                    self.title_label.config(text="%s - %s" % (TITLE, self.current_task) if active else TITLE)
+
+            def start_task(self, name=None):
+                task_name = (name or self.task_entry.get()).strip()
+                if not task_name:
+                    self.message("Warning", "Enter task name!", "warning")
+                    return
+                if self.current_task:
+                    if task_name == self.current_task:
+                        if self.run_start is None:
+                            self.pause_task()           # the same task: just resume it
+                        return
+                    self.stop_task(quiet=True)          # another task: switch to it (Stop + Start before)
+                self.current_task = task_name
+                self.session_id = None
+                self.session_started = dt.datetime.now().isoformat(sep=" ", timespec="seconds")
+                self.run_start = time.time()
+                self.saved_seconds = self.paused_seconds = 0
+                self.store.ensure_task(task_name)
+                self.task_entry.delete(0, "end")
+                self.set_state()
+                self.load_tasks()
+                self.message_label.config(text="Started: %s" % task_name)
+
+            def pause_task(self):
+                if not self.current_task:
+                    return
+                if self.run_start is not None:
+                    self.paused_seconds += int(time.time() - self.run_start)
+                    self.run_start = None
+                    self.checkpoint()
+                    self.message_label.config(text="Paused: %s" % self.current_task)
+                else:
+                    self.run_start = time.time()
+                    self.message_label.config(text="Resumed: %s" % self.current_task)
+                self.set_state()
+
+            def stop_task(self, quiet=False):
+                if not self.current_task:
+                    return
+                self.checkpoint()                        # writes what was not written yet
+                task, seconds = self.current_task, self.session_seconds()
+                self.current_task = self.run_start = self.session_id = None
+                self.saved_seconds = self.paused_seconds = 0
+                self.set_state()
+                self.load_tasks()
+                self.close_mini_window()
+                if not quiet:
+                    self.message_label.config(text="Stopped: %s after %s" % (task, human(seconds)))
+
+            def continue_selected(self):
+                row = self.selected_row()
+                if row:
+                    self.start_task(row[0])
+
+            # ----- the list and the chart --------------------------------------------------------------------
+            def _line(self, values):
+                parts = []
+                for (_title, width, _key), value in zip(COLUMNS, values):
+                    text = str(value)
+                    parts.append((text[:width - 2] + "~ ") if len(text) > width - 1 else text.ljust(width))
+                return " " + "".join(parts)
+
+            def _header_click(self, event):
+                self.header.selection_clear(0, "end")
+                position = self.char_w
+                for _title, width, key in COLUMNS:
+                    if position <= event.x < position + width * self.char_w:
+                        self.sort_reverse = not self.sort_reverse if self.sort_key == key else key != "name"
+                        self.sort_key = key
+                        self.update_task_list()
+                        return
+                    position += width * self.char_w
+
+            def load_tasks(self):
+                try:
+                    self.tasks = self.store.tasks()
+                except sqlite3.Error as exc:
+                    self.tasks = []
+                    self.message_label.config(text="The tasks could not be read: %s" % exc)
                 self.update_task_list()
                 if self.show_chart:
                     self.draw_chart()
-        
-        def exit_app(self):
-            if self.is_running:
-                if messagebox.askyesno("Confirm", "A task is running. Exit anyway?"):
-                    self.close_mini_window()
-                    self.rootttrack1.destroy()
-            else:
-                self.close_mini_window()
-                self.rootttrack1.destroy()
-        
-        def on_minimize(self, event):
-            # Check if window is actually minimized (iconified)
-            if self.rootttrack1.state() == 'iconic' and self.is_running and not self.mini_window:
-                self.show_mini_window()
-        
-        def show_mini_window(self):
-            if self.mini_window:
-                return
-            
-            self.mini_window = tk.Toplevel(self.rootttrack1)
-            self.mini_window.overrideredirect(True)  # Remove title bar
-            self.mini_window.geometry("280x140")
-            self.mini_window.configure(bg=self.bg_color)
-            
-            # Position in bottom right
-            screen_width = self.mini_window.winfo_screenwidth()
-            screen_height = self.mini_window.winfo_screenheight()
-            x = screen_width - 300
-            y = screen_height - 200
-            self.mini_window.geometry(f"280x140+{x}+{y}")
-            
-            # Keep on top
-            self.mini_window.attributes('-topmost', True)
-            
-            # Outer border frame
-            border_frame = tk.Frame(self.mini_window, bg="black", bd=0)
-            border_frame.pack(fill="both", expand=True)
-            
-            # Blue header
-            header_frame = tk.Frame(border_frame, bg=self.header_blue, height=20)
-            header_frame.pack(fill="x", side="top")
-            header_frame.pack_propagate(False)
-            
-            # Header content
-            header_content = tk.Frame(header_frame, bg=self.header_blue)
-            header_content.pack(fill="both", expand=True)
-            
-            tk.Label(header_content, text="Active Task", 
-                    font=("MS Sans Serif", 10, "bold"),
-                    bg=self.header_blue, fg="white").pack(side="left", padx=10, pady=5)
-            
-            # Close button (X)
-            close_btn = tk.Button(header_content, text="X", 
-                                 font=("MS Sans Serif", 9, "bold"),
-                                 bg=self.bg_color, fg="black",
-                                 relief="raised", bd=1,
-                                 width=3, height=1,
-                                 command=self.close_mini_window)
-            close_btn.pack(side="right", padx=5, pady=3)
-            
-            # Main frame
-            main_frame = tk.Frame(border_frame, bg=self.bg_color, bd=2, relief="raised")
-            main_frame.pack(fill="both", expand=True)
-            
-            inner_frame = tk.Frame(main_frame, bg=self.bg_color, padx=10, pady=10)
-            inner_frame.pack(fill="both", expand=True)
-            
-            # Task label
-            tk.Label(inner_frame, text="Task:",
-                    font=("MS Sans Serif", 9, "bold"),
-                    bg=self.bg_color).pack(anchor="w")
-            
-            task_display = self.current_task[:25] + "..." if len(self.current_task) > 25 else self.current_task
-            tk.Label(inner_frame, text=task_display,
-                    font=("MS Sans Serif", 10),
-                    bg=self.bg_color, fg="#000080").pack(anchor="w", pady=(0, 5))
-            
-            # Timer display
-            self.mini_timer_label = tk.Label(inner_frame, text="00:00:00",
-                                            font=("Courier New", 11, "bold"),
-                                            bg=self.bg_color, fg="#008000")
-            self.mini_timer_label.pack(pady=(0, 8))
-            
-            # Stop button
-            stop_btn = tk.Button(inner_frame, text="Stop Task",
-                               font=("MS Sans Serif", 10),
-                               bg="#c0c0c0", fg="black",
-                               relief="raised", bd=2,
-                               width=15, height=1,
-                               activebackground="#c0c0c0",
-                               command=self.stop_from_mini)
-            stop_btn.pack()
-            
-            # Make window draggable
-            header_frame.bind("<Button-1>", self.start_drag)
-            header_frame.bind("<B1-Motion>", self.on_drag)
-            header_content.bind("<Button-1>", self.start_drag)
-            header_content.bind("<B1-Motion>", self.on_drag)
-            
-            # Update mini timer
-            self.update_mini_timer()
-        
-        def start_drag(self, event):
-            self.mini_window.x = event.x
-            self.mini_window.y = event.y
-        
-        def on_drag(self, event):
-            x = self.mini_window.winfo_x() + event.x - self.mini_window.x
-            y = self.mini_window.winfo_y() + event.y - self.mini_window.y
-            self.mini_window.geometry(f"+{x}+{y}")
-        
-        def update_mini_timer(self):
-            if self.mini_window and self.is_running:
-                hours = self.elapsed_seconds // 3600
-                minutes = (self.elapsed_seconds % 3600) // 60
-                seconds = self.elapsed_seconds % 60
-                self.mini_timer_label.config(text=f"{hours:02d}:{minutes:02d}:{seconds:02d}")
-                self.mini_window.after(1000, self.update_mini_timer)
-        
-        def stop_from_mini(self):
-            self.stop_task()
-            self.close_mini_window()
-        
-        def close_mini_window(self):
-            if self.mini_window:
-                self.mini_window.destroy()
-                self.mini_window = None
 
-    if __name__ == "__main__":
-        rootttrack1ttrack = tk.Tk()
-        app = TimeTracker(rootttrack1ttrack)
-        rootttrack1ttrack.mainloop()
+            def update_task_list(self):
+                keep = self.selected_row()
+                index = {"name": 0, "total": 1, "today": 2, "last": 3}[self.sort_key]
+                self.rows = sorted(self.tasks, key=lambda r: (str(r[0]).lower() if index == 0 else (r[index] or 0)
+                                                              if index != 3 else (r[3] or "")), reverse=self.sort_reverse)
+                self.header.delete(0, "end")
+                self.header.insert("end", self._line([t + ((" v" if self.sort_reverse else " ^") if k == self.sort_key
+                                                           else "") for t, _w, k in COLUMNS]))
+                self.task_listbox.delete(0, "end")
+                for name, total, today, last in self.rows:
+                    marker = "> " if name == self.current_task else "  "
+                    last_text = dt.datetime.strptime(last[:16], "%Y-%m-%d %H:%M").strftime("%d.%m.%Y %H:%M") if last else ""
+                    self.task_listbox.insert("end", self._line((marker + name, human(today) if today else "-",
+                                                                human(total), last_text)))
+                    if name == self.current_task:
+                        self.task_listbox.itemconfig("end", fg=NAVY)
+                if keep:
+                    for i, row in enumerate(self.rows):
+                        if row[0] == keep[0]:
+                            self.task_listbox.selection_set(i)
+                total_today = sum(r[2] for r in self.tasks)
+                self.today_label.config(text="Today: %s" % human(total_today))
+
+            def selected_row(self):
+                """The chosen task, by its row (the name was cut from the text at 35 characters before)."""
+                if not hasattr(self, "task_listbox"):
+                    return None
+                picked = self.task_listbox.curselection()
+                if picked and picked[0] < len(self.rows):
+                    return self.rows[picked[0]]
+                return None
+
+            def _context_menu(self, event):
+                index = self.task_listbox.nearest(event.y)
+                if index >= 0:
+                    self.task_listbox.selection_clear(0, "end")
+                    self.task_listbox.selection_set(index)
+                menu = tk.Menu(self.rootttrack1, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                menu.add_command(label="Continue This Task", command=self.continue_selected)
+                menu.add_command(label="Delete Task", command=self.delete_task)
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    menu.grab_release()
+
+            def toggle_chart(self):
+                self.show_chart = not self.show_chart
+                if self.show_chart:
+                    self.list_box_frame.pack_forget()
+                    self.chart_frame.pack(fill="both", expand=True)
+                    self.chart_btn.config(text="Show List")
+                    self.draw_chart()
+                else:
+                    self.chart_frame.pack_forget()
+                    self.list_box_frame.pack(fill="both", expand=True)
+                    self.chart_btn.config(text="Show Chart")
+
+            def draw_chart(self):
+                """Horizontal bars, so long names fit (redrawn on the canvas; no update() inside any more)."""
+                canvas = self.chart
+                canvas.delete("all")
+                w, h = canvas.winfo_width(), canvas.winfo_height()
+                if w < 60 or h < 60:
+                    return
+                data = sorted([(n, t) for n, t, _d, _l in self.tasks if t > 0], key=lambda x: -x[1])[:12]
+                if not data:
+                    canvas.create_text(w // 2, h // 2, text="No data to display", font=self.small, fill=SHADOW)
+                    return
+                label_w = min(220, max(self.small.measure(n[:30]) for n, _t in data) + 16)
+                top, bottom = 12, h - 12
+                bar_h = max(10, min(26, (bottom - top) // len(data) - 6))
+                maximum = data[0][1]
+                room = w - label_w - 90
+                for i, (name, seconds) in enumerate(data):
+                    y = top + i * (bar_h + 6)
+                    canvas.create_text(label_w - 8, y + bar_h // 2, text=name if len(name) <= 30 else name[:29] + "~",
+                                       anchor="e", font=self.small)
+                    length = max(2, int(room * seconds / float(maximum)))
+                    colour = COLOURS[i % len(COLOURS)]
+                    canvas.create_rectangle(label_w + 1, y + 1, label_w + length + 1, y + bar_h + 1, fill=SHADOW,
+                                            outline="")
+                    canvas.create_rectangle(label_w, y, label_w + length, y + bar_h, fill=colour, outline=BLACK)
+                    canvas.create_text(label_w + length + 6, y + bar_h // 2, text=human(seconds), anchor="w",
+                                       font=self.small)
+                canvas.create_line(label_w, top - 4, label_w, top + len(data) * (bar_h + 6), fill=BLACK)
+
+            # ----- deleting, export, exit ------------------------------------------------------------------
+            def delete_task(self):
+                row = self.selected_row()
+                if not row:
+                    self.message("Info", "Select a task from the list!")
+                    return
+                if row[0] == self.current_task:
+                    self.message("Delete Task", "This task is running. Stop it first.", "warning")
+                    return
+                if self.message("Confirm", "Delete task '%s' and its %s?" % (row[0], human(row[1])), "question",
+                                ("Yes", "No"), default=1) == "Yes":
+                    self.store.delete(row[0])
+                    self.load_tasks()
+
+            def clear_all(self):
+                if not self.tasks:
+                    self.message("Info", "No recorded tasks!")
+                    return
+                if self.current_task:
+                    self.message("Clear All", "A task is running. Stop it first.", "warning")
+                    return
+                if self.message("Confirm", "Delete all %d tasks and their times?\n\nThis cannot be undone." %
+                                len(self.tasks), "warning", ("Yes", "No"), default=1) == "Yes":
+                    self.store.clear()
+                    self.load_tasks()
+
+            def export_csv(self):
+                path = filedialog.asksaveasfilename(parent=self.rootttrack1, defaultextension=".csv",
+                                                    initialfile="time_tracker_%s.csv" % dt.date.today().isoformat(),
+                                                    filetypes=[("CSV files", "*.csv")])
+                if not path:
+                    return
+                self.checkpoint()
+                try:
+                    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+                        writer = csv.writer(fh, delimiter=";")
+                        writer.writerow(["Task", "Total (h)", "Total (hh:mm:ss)", "Today (hh:mm:ss)"])
+                        for name, total, today, _last in sorted(self.tasks, key=lambda r: -r[1]):
+                            writer.writerow([name, ("%.2f" % (total / 3600.0)).replace(".", ","), hms(total), hms(today)])
+                        writer.writerow([])
+                        writer.writerow(["Task", "Started", "Ended", "Duration (hh:mm:ss)"])
+                        for name, started, ended, seconds in self.store.sessions():
+                            writer.writerow([name, started, ended or "", hms(seconds)])
+                except OSError as exc:
+                    self.message("Export", "Could not save the file:\n%s" % exc, "warning")
+                    return
+                self.message_label.config(text="Exported to %s" % path)
+
+            def exit_app(self):
+                """The running time is saved first (Exit and the X lost it before)."""
+                if self.current_task:
+                    answer = self.message("Exit", "'%s' is running (%s).\n\nSave its time and exit?" % (
+                        self.current_task, hms(self.session_seconds())), "question", ("Yes", "No", "Cancel"))
+                    if answer == "Cancel":
+                        return
+                    if answer == "Yes":
+                        self.stop_task(quiet=True)
+                    else:
+                        self.current_task = None        # "No": the minutes already saved stay, the rest is dropped
+                self.close_mini_window()
+                try:
+                    self.rootttrack1.after_cancel(self.timer_job)
+                except (AttributeError, tk.TclError):
+                    pass
+                self.rootttrack1.destroy()
+
+            # ----- the small window while minimized ------------------------------------------------------------
+            def show_mini_window(self):
+                if self.mini_window is not None or not self.current_task:
+                    return
+                win = self.mini_window = tk.Toplevel(self.rootttrack1)
+                win.overrideredirect(True)
+                win.attributes("-topmost", True)
+                win.configure(bg=FACE, bd=2, relief="raised")
+                bar = tk.Frame(win, bg=NAVY, height=20)
+                bar.pack(fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                tk.Label(bar, image=self.icon, bg=NAVY).pack(side="left", padx=(2, 0))
+                title = tk.Label(bar, text="Active Task", bg=NAVY, fg=LIGHT, font=FONT_B)
+                title.pack(side="left", padx=4)
+                self.caption_button(bar, "close", self.close_mini_window).pack(side="right", padx=2)
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=10, pady=8)
+                name = self.current_task if len(self.current_task) <= 32 else self.current_task[:31] + "~"
+                tk.Label(body, text=name, font=FONT_B, bg=FACE, fg=NAVY).pack(anchor="w")
+                self.mini_timer_label = tk.Label(body, text=hms(self.session_seconds()), font=("Courier New", 14, "bold"),
+                                                 bg=BLACK, fg="#00ff00", width=10, relief="sunken", bd=2)
+                self.mini_timer_label.pack(pady=6)
+                row = tk.Frame(body, bg=FACE)
+                row.pack()
+                self.button(row, "Pause", lambda: (self.pause_task(), mini_pause.config(
+                    text="Resume" if self.run_start is None else "Pause")), width=7).pack(side="left", padx=2)
+                mini_pause = row.winfo_children()[-1]
+                self.button(row, "Stop", self.stop_task, width=7).pack(side="left", padx=2)
+                self.button(row, "Restore", self.restore_main, width=7).pack(side="left", padx=2)
+
+                def press(event):
+                    win._drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+                def drag(event):
+                    win.geometry("+%d+%d" % (event.x_root - win._drag[0], event.y_root - win._drag[1]))
+                for widget in (bar, title):
+                    widget.bind("<ButtonPress-1>", press)
+                    widget.bind("<B1-Motion>", drag)
+                win.update_idletasks()
+                win.geometry("+%d+%d" % (win.winfo_screenwidth() - win.winfo_reqwidth() - 20,
+                                         win.winfo_screenheight() - win.winfo_reqheight() - 70))
+
+            def restore_main(self):
+                root = self.rootttrack1
+                self.close_mini_window()
+                root.deiconify()
+                root.lift()
+                root.focus_force()
+
+            def close_mini_window(self):
+                if self.mini_window is not None:
+                    try:
+                        self.mini_window.destroy()
+                    except tk.TclError:
+                        pass
+                    self.mini_window = None
+
+        app = TimeTracker()
+        app.rootttrack1.mainloop()
+        return app
+
+    time_tracker_95()
 
 if dbcompVARRR == 555550009088888866666666666666666666666666666789:
     import sqlite3, os as _os
