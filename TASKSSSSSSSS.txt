@@ -1,11 +1,6 @@
 terminal == 2: (are ttk)
 
-pycharm bug (+? ttk)
-
-AI?
-
-== 10000: (are ttk, pause manager)
-== 1990: (launcher)
+AI (tema retro + fara control panel sau sa deschida alte ferestre/aplicatii din Windows)
 
 == 555554444333000:(topology)
 
@@ -15,9 +10,6 @@ AI?
 
 == 5555500090888888666666666666666666666666666667890:
 == 3333333333333333333333333333333333333300000000000000000000000011111111:
-== 4343434343434444444444443333333333343434356: (paths.txt)
-== 43434343434344444444444433333333333434343567: (profiles.json)
-== 434343434343444444444444333333333334343435678: (ChooseLocationForPause)
 == 8712: (API) (verificare la final + de ce nu ramane in taskbar; am incercat sa fac eu)
 SQL:
 == 445532:
@@ -37,6 +29,15 @@ quiz:
 maker - == 12:
 test - == 122:
 pausemanager 1 si 2
-main1 si main2 sa aiba interfata noua
+main1, main2 si main3 sa aiba interfata noua
+== 9023: (px95)
 
-la image editor, la add text sa am un singur font, nu o lista. in pdf editor la fel: la insert table (pastreaza doar un font, nu pune toate 3). 
+if vscodevar == 999955550000: (tema retro + de vazut daca poate rula si ca exe pe ul alt pc fara python instalat)
+
+ADMIN (conturi playground):
+== 6745:
+== 333333333:
+== 40: (GUI creator simplu??????)
+if dosboxvar == 3333444400999:
+
+la image editor, la add text sa am un singur font, nu o lista. in pdf editor la fel: la insert table (pastreaza doar un font, nu pune toate 3). dar spune-mi doar ce sa modific/ce font sa pastrez, ca sa nu mai modifici toate aplicatiile.
