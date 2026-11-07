@@ -41,3 +41,6 @@ ADMIN (conturi playground):
 if dosboxvar == 3333444400999:
 
 la image editor, la add text sa am un singur font, nu o lista. in pdf editor la fel: la insert table (pastreaza doar un font, nu pune toate 3). dar spune-mi doar ce sa modific/ce font sa pastrez, ca sa nu mai modifici toate aplicatiile.
+
+if show_validation == True:
+fereastra validation are main1 si main2 (daca modific interfata -> retro); in rest, este acelasi cod la cheia de produs
