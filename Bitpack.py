@@ -14231,7 +14231,7 @@ This Setup program will configure Bitpack on your computer.
 BITPACK SOFTWARE LICENSE TERMS
 
 Version: 0.95.0
-Date: 28.10.2026
+Date: 13.11.2026
 
 IMPORTANT — READ CAREFULLY
 
@@ -14301,7 +14301,7 @@ All rights reserved.
 
 # Version: 0.95.0
 
-# Date: 28.10.2026
+# Date: 13.11.2026
 
 # 1. Introduction
     # • This license sets forth the terms and conditions for the use of Bitpack (hereinafter referred to as "the Software"), which is developed for exclusive personal use within the IT department of any company (hereinafter referred to as "the Company"). The software will not be distributed or used outside of this department or by anyone other than the buyer.
@@ -14342,7 +14342,7 @@ All rights reserved.
 # By using the Software, the Licensee agrees to the terms and conditions of this license.
 
 # Tudor Marmureanu
-# 28.10.2026
+# 13.11.2026
         # """
         license_text.insert('1.0', license_content)
         license_text.config(state='disabled')
@@ -89502,8 +89502,8 @@ if w95var == 1998 or w95var1 == 1997:
             
             def run(self):
                 # Bind escape key to exit fullscreen
-                #self.rootW95dist.bind("<Escape>", lambda e: self.rootW95dist.quit())
-                self.rootW95dist.bind("<Escape>", lambda e: self.exit_fullscreen())
+                self.rootW95dist.bind("<Escape>", lambda e: self.rootW95dist.quit())
+                #self.rootW95dist.bind("<Escape>", lambda e: self.toggle_fullscreen() if getattr(self, "is_fullscreen", False) else None)
                 
                 # Bind F11 to toggle fullscreen
                 self.rootW95dist.bind("<F11>", lambda e: self.toggle_fullscreen())
@@ -89511,10 +89511,42 @@ if w95var == 1998 or w95var1 == 1997:
                 # Start the GUI
                 self.rootW95dist.mainloop()
             
-            def exit_fullscreen(self):
-                if getattr(self, "is_fullscreen", False):
-                    self.toggle_fullscreen()
-            
+            # def toggle_fullscreen(self):
+                # """F11 / Escape. Ecran complet = tot monitorul (peste taskbar-ul Windows); iesire = zona de lucru
+                # (ecranul fara taskbar-ul Windows). Fara state("zoomed"): pe Windows o fereastra maximizata ignora
+                # geometry(), de aceea Full Screen nu se vedea si iesirea nu mergea."""
+                # root = self.rootW95dist
+                # caption = getattr(self, "w95_caption", None)
+                # if caption is not None and self.show_title_bar:
+                    # self.is_fullscreen = caption.toggle_fullscreen()
+                # else:
+                    # self.is_fullscreen = not getattr(self, "is_fullscreen", False)
+                    # try:
+                        # root.state("normal")            # din "zoomed": altfel geometry() nu are efect
+                    # except tk.TclError:
+                        # pass
+                    # if self.is_fullscreen:
+                        # root.geometry("%dx%d+0+0" % (root.winfo_screenwidth(), root.winfo_screenheight()))
+                    # else:
+                        # x, y, w, h = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight() - 40
+                        # try:                            # zona de lucru Windows (fara taskbar-ul Windows)
+                            # import ctypes
+                            # from ctypes import wintypes
+                            # rect = wintypes.RECT()
+                            # if ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0):
+                                # x, y, w, h = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        # except Exception:
+                            # pass
+                        # root.geometry("%dx%d+%d+%d" % (w, h, x, y))
+                # root.update_idletasks()
+                # root.lift()
+                # try:
+                    # root.focus_force()                  # tastatura ramane la desktop: Escape / F11 merg din nou
+                # except tk.TclError:
+                    # pass
+                # if self.start_menu_visible:
+                    # self.hide_start_menu()
+                    # self.show_start_menu()
             def toggle_fullscreen(self):
                 """F11. Pe Windows Tk nu permite attributes("-fullscreen") la o fereastra fara bara nativa:
                 fereastra ia toata marimea ecranului (cu bara Win95: bara dispare si revine)."""
@@ -134754,135 +134786,7 @@ if calculatorvarrr == 11111111111111111111:
     calculator_95()
     
 if retrogamesvar == 22222222222222222222:
-    import sqlite3, os as _os
-    _db_path = "Config/dbo_bitpack.db"
-    _has_key = True  # default
-    if _os.path.exists(_db_path):
-        _conn = sqlite3.connect(_db_path)
-        _cursor = _conn.cursor()
-        _cursor.execute("SELECT has_key FROM accounts WHERE var_value='22222222222222222222'")
-        _result = _cursor.fetchone()
-        _conn.close()
-        if _result is not None:
-            _has_key = bool(_result[0])
-    
-    if not _has_key:
-        pass
-    else:
-        FOLDER_NAME = "Serial"
-        FILE_NAME = "product_key.lic95"
-        cale_fis = "file_paths.txt"
-        cale_fldr = "folder_paths.txt"
-
-        # Definirea cheii de validare
-        KEY = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
-        
-        key_is_valid = False
-        file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            try:
-                with open(file_path, "r") as file:
-                    saved_key = file.read().strip()
-                    if saved_key == KEY:
-                        key_is_valid = True
-            except Exception as e:
-                print(f"Error checking key: {e}")
-        if not key_is_valid:
-            # Verifică și creează folderul Serial dacă nu există
-            if not os.path.exists(FOLDER_NAME):
-                try:
-                    os.makedirs(FOLDER_NAME)
-                    print(f"Folder '{FOLDER_NAME}' created successfully.")
-                except Exception as e:
-                    print(f"Error creating folder '{FOLDER_NAME}': {e}")
-
-            def validate_key(event=None):
-                # Funcția pentru validarea cheii
-                global xx
-                if text_box.get("1.0", "end-1c").strip() == KEY:
-                    xx = 2
-                    validate_button.config(state=tk.NORMAL)
-                    no_key_button.config(state=tk.DISABLED)
-                    
-                    # Calea completă către fișier în folderul Serial
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    
-                    # Salvarea cheii în fișier text
-                    with open(file_path, "w") as file:
-                        file.write(KEY)
-                    try:
-                        if not os.path.exists("file_paths.txt"):
-                            with open("file_paths.txt", "w") as file:
-                                file.write("")
-                    except Exception as e:
-                        print(f"An error occurred while creating the file file_paths.txt: {e}")
-
-                    try:
-                        if not os.path.exists("folder_paths.txt"):
-                            with open("folder_paths.txt", "w") as file:
-                                file.write("")
-                    except Exception as e:
-                        print(f"An error occurred while creating the file folder_paths.txt: {e}")
-                else:
-                    xx = 0
-                    validate_button.config(state=tk.DISABLED)
-                    no_key_button.config(state=tk.NORMAL)
-
-            def load_key():
-                try:
-                    # Calea completă către fișier în folderul Serial
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    
-                    # Încărcarea cheii din fișier text
-                    with open(file_path, "r") as file:
-                        key = file.read().strip()
-                        text_box.delete("1.0", "end")
-                        text_box.insert("1.0", key)
-                        validate_key()  # Validarea automată a cheii încărcate
-                except FileNotFoundError:
-                    pass
-
-            def nokey():
-                messagebox.showinfo(title="Unlicensed Product", message="Secure connection.\nWelcome to Bitpack!\nFor full access, please contact the administrator (Tudor Marmureanu).")
-                sys.exit()
-
-            def valkey():
-                messagebox.showinfo(title="Product Activated (professional version)", message="Secure connection.\nWelcome to Bitpack!")
-                validation.destroy()
-
-            def on_closing():
-                #pass
-                messagebox.showwarning("Warning", "Close the program from the Command Prompt to stop all processes!")
-
-            # Crearea ferestrei principale pentru validare
-            validation = tk.Tk()
-            validation.protocol("WM_DELETE_WINDOW", on_closing)
-            validation.title("Product key validation")
-            validation.geometry("260x260")  # Setarea dimensiunilor ferestrei principale
-            validation.config(bg="gray20")
-            #image_icon52 = PhotoImage(file = "img/keylogo.png")
-            #validation.iconphoto(False, image_icon52)
-
-            # Crearea obiectului Text editabil
-            text_box = tk.Text(validation, height=1, width=30)  # Setarea wrap="none" pentru a face obiectul Text dreptunghiular
-            text_box.config(bd=4)
-            text_box.pack(pady=10)
-            text_box.bind("<KeyRelease>", validate_key)  # Legarea funcției validate_key() de evenimentul de eliberare a tastelor
-
-            # Crearea butonului "I don't have a product key"
-            no_key_button = tk.Button(validation, text="I don't have a product key", bg="black", fg="lime green", bd=5, command=nokey)
-            no_key_button.pack(pady=5)
-
-            # Crearea butonului "Validate key"
-            validate_button = tk.Button(validation, text="Validate key" ,bg="black", fg="lime green", bd=5, command=valkey, state=tk.DISABLED)
-            validate_button.pack(pady=5)
-
-            # Încărcarea cheii la deschiderea programului (dacă există)
-            load_key()
-
-            # Rularea buclei principale
-            validation.mainloop()
+    bitpack95_validation("22222222222222222222")
 
     import os
     os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
@@ -183658,136 +183562,7 @@ if sqlexecwdVAR == 7777777777777777777777333333333333333333000000000000202020209
     sql_executor_95()
         
 if ddavar == 5533310:
-    import sqlite3, os as _os
-    _db_path = "Config/dbo_bitpack.db"
-    _has_key = True  # default
-    if _os.path.exists(_db_path):
-        _conn = sqlite3.connect(_db_path)
-        _cursor = _conn.cursor()
-        _cursor.execute("SELECT has_key FROM accounts WHERE var_value='5533310'")
-        _result = _cursor.fetchone()
-        _conn.close()
-        if _result is not None:
-            _has_key = bool(_result[0])
-    
-    if not _has_key:
-        pass
-    else:
-        # Definirea numele fișierului pentru salvarea cheii
-        FOLDER_NAME = "Serial"
-        FILE_NAME = "product_key.lic95"
-        cale_fis = "file_paths.txt"
-        cale_fldr = "folder_paths.txt"
-
-        # Definirea cheii de validare
-        KEY = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
-        
-        key_is_valid = False
-        file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            try:
-                with open(file_path, "r") as file:
-                    saved_key = file.read().strip()
-                    if saved_key == KEY:
-                        key_is_valid = True
-            except Exception as e:
-                print(f"Error checking key: {e}")
-        if not key_is_valid:
-            # Verifică și creează folderul Serial dacă nu există
-            if not os.path.exists(FOLDER_NAME):
-                try:
-                    os.makedirs(FOLDER_NAME)
-                    print(f"Folder '{FOLDER_NAME}' created successfully.")
-                except Exception as e:
-                    print(f"Error creating folder '{FOLDER_NAME}': {e}")
-
-            def validate_key(event=None):
-                # Funcția pentru validarea cheii
-                global xx
-                if text_box.get("1.0", "end-1c").strip() == KEY:
-                    xx = 2
-                    validate_button.config(state=tk.NORMAL)
-                    no_key_button.config(state=tk.DISABLED)
-                    
-                    # Calea completă către fișier în folderul Serial
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    
-                    # Salvarea cheii în fișier text
-                    with open(file_path, "w") as file:
-                        file.write(KEY)
-                    try:
-                        if not os.path.exists("file_paths.txt"):
-                            with open("file_paths.txt", "w") as file:
-                                file.write("")
-                    except Exception as e:
-                        print(f"An error occurred while creating the file file_paths.txt: {e}")
-
-                    try:
-                        if not os.path.exists("folder_paths.txt"):
-                            with open("folder_paths.txt", "w") as file:
-                                file.write("")
-                    except Exception as e:
-                        print(f"An error occurred while creating the file folder_paths.txt: {e}")
-                else:
-                    xx = 0
-                    validate_button.config(state=tk.DISABLED)
-                    no_key_button.config(state=tk.NORMAL)
-
-            def load_key():
-                try:
-                    # Calea completă către fișier în folderul Serial
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    
-                    # Încărcarea cheii din fișier text
-                    with open(file_path, "r") as file:
-                        key = file.read().strip()
-                        text_box.delete("1.0", "end")
-                        text_box.insert("1.0", key)
-                        validate_key()  # Validarea automată a cheii încărcate
-                except FileNotFoundError:
-                    pass
-
-            def nokey():
-                messagebox.showinfo(title="Unlicensed Product", message="Secure connection.\nWelcome to Bitpack!\nFor full access, please contact the administrator (Tudor Marmureanu).")
-                sys.exit()
-
-            def valkey():
-                messagebox.showinfo(title="Product Activated (professional version)", message="Secure connection.\nWelcome to Bitpack!")
-                validation.destroy()
-
-            def on_closing():
-                #pass
-                messagebox.showwarning("Warning", "Close the program from the Command Prompt to stop all processes!")
-
-            # Crearea ferestrei principale pentru validare
-            validation = tk.Tk()
-            validation.protocol("WM_DELETE_WINDOW", on_closing)
-            validation.title("Product key validation")
-            validation.geometry("260x260")  # Setarea dimensiunilor ferestrei principale
-            validation.config(bg="gray20")
-            #image_icon52 = PhotoImage(file = "img/keylogo.png")
-            #validation.iconphoto(False, image_icon52)
-
-            # Crearea obiectului Text editabil
-            text_box = tk.Text(validation, height=1, width=30)  # Setarea wrap="none" pentru a face obiectul Text dreptunghiular
-            text_box.config(bd=4)
-            text_box.pack(pady=10)
-            text_box.bind("<KeyRelease>", validate_key)  # Legarea funcției validate_key() de evenimentul de eliberare a tastelor
-
-            # Crearea butonului "I don't have a product key"
-            no_key_button = tk.Button(validation, text="I don't have a product key", bg="black", fg="lime green", bd=5, command=nokey)
-            no_key_button.pack(pady=5)
-
-            # Crearea butonului "Validate key"
-            validate_button = tk.Button(validation, text="Validate key" ,bg="black", fg="lime green", bd=5, command=valkey, state=tk.DISABLED)
-            validate_button.pack(pady=5)
-
-            # Încărcarea cheii la deschiderea programului (dacă există)
-            load_key()
-
-            # Rularea buclei principale
-            validation.mainloop()
+    bitpack95_validation("5533310")
     ddagame()
        
 if icoconvvar == 876523:
@@ -225687,136 +225462,7 @@ if shadowvar == 1092228:
     This is an original fan tribute: no art, audio, text or code from the
     original game is used or reproduced.
     """
-    import sqlite3, os as _os
-    _db_path = "Config/dbo_bitpack.db"
-    _has_key = True  # default
-    if _os.path.exists(_db_path):
-        _conn = sqlite3.connect(_db_path)
-        _cursor = _conn.cursor()
-        _cursor.execute("SELECT has_key FROM accounts WHERE var_value='1092228'")
-        _result = _cursor.fetchone()
-        _conn.close()
-        if _result is not None:
-            _has_key = bool(_result[0])
-    
-    if not _has_key:
-        pass
-    else:
-        # Definirea numele fișierului pentru salvarea cheii
-        FOLDER_NAME = "Serial"
-        FILE_NAME = "product_key.lic95"
-        cale_fis = "file_paths.txt"
-        cale_fldr = "folder_paths.txt"
-
-        # Definirea cheii de validare
-        KEY = "R46BX-JHR2J-PG7ER-24QFG-MWKVR"
-        
-        key_is_valid = False
-        file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-            try:
-                with open(file_path, "r") as file:
-                    saved_key = file.read().strip()
-                    if saved_key == KEY:
-                        key_is_valid = True
-            except Exception as e:
-                print(f"Error checking key: {e}")
-        if not key_is_valid:
-            # Verifică și creează folderul Serial dacă nu există
-            if not os.path.exists(FOLDER_NAME):
-                try:
-                    os.makedirs(FOLDER_NAME)
-                    print(f"Folder '{FOLDER_NAME}' created successfully.")
-                except Exception as e:
-                    print(f"Error creating folder '{FOLDER_NAME}': {e}")
-
-            def validate_key(event=None):
-                # Funcția pentru validarea cheii
-                global xx
-                if text_box.get("1.0", "end-1c").strip() == KEY:
-                    xx = 2
-                    validate_button.config(state=tk.NORMAL)
-                    no_key_button.config(state=tk.DISABLED)
-                    
-                    # Calea completă către fișier în folderul Serial
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    
-                    # Salvarea cheii în fișier text
-                    with open(file_path, "w") as file:
-                        file.write(KEY)
-                    try:
-                        if not os.path.exists("file_paths.txt"):
-                            with open("file_paths.txt", "w") as file:
-                                file.write("")
-                    except Exception as e:
-                        print(f"An error occurred while creating the file file_paths.txt: {e}")
-
-                    try:
-                        if not os.path.exists("folder_paths.txt"):
-                            with open("folder_paths.txt", "w") as file:
-                                file.write("")
-                    except Exception as e:
-                        print(f"An error occurred while creating the file folder_paths.txt: {e}")
-                else:
-                    xx = 0
-                    validate_button.config(state=tk.DISABLED)
-                    no_key_button.config(state=tk.NORMAL)
-
-            def load_key():
-                try:
-                    # Calea completă către fișier în folderul Serial
-                    file_path = os.path.join(FOLDER_NAME, FILE_NAME)
-                    
-                    # Încărcarea cheii din fișier text
-                    with open(file_path, "r") as file:
-                        key = file.read().strip()
-                        text_box.delete("1.0", "end")
-                        text_box.insert("1.0", key)
-                        validate_key()  # Validarea automată a cheii încărcate
-                except FileNotFoundError:
-                    pass
-
-            def nokey():
-                messagebox.showinfo(title="Unlicensed Product", message="Secure connection.\nWelcome to Bitpack!\nFor full access, please contact the administrator (Tudor Marmureanu).")
-                sys.exit()
-
-            def valkey():
-                messagebox.showinfo(title="Product Activated (professional version)", message="Secure connection.\nWelcome to Bitpack!")
-                validation.destroy()
-
-            def on_closing():
-                #pass
-                messagebox.showwarning("Warning", "Close the program from the Command Prompt to stop all processes!")
-
-            # Crearea ferestrei principale pentru validare
-            validation = tk.Tk()
-            validation.protocol("WM_DELETE_WINDOW", on_closing)
-            validation.title("Product key validation")
-            validation.geometry("260x260")  # Setarea dimensiunilor ferestrei principale
-            validation.config(bg="gray20")
-            #image_icon52 = PhotoImage(file = "img/keylogo.png")
-            #validation.iconphoto(False, image_icon52)
-
-            # Crearea obiectului Text editabil
-            text_box = tk.Text(validation, height=1, width=30)  # Setarea wrap="none" pentru a face obiectul Text dreptunghiular
-            text_box.config(bd=4)
-            text_box.pack(pady=10)
-            text_box.bind("<KeyRelease>", validate_key)  # Legarea funcției validate_key() de evenimentul de eliberare a tastelor
-
-            # Crearea butonului "I don't have a product key"
-            no_key_button = tk.Button(validation, text="I don't have a product key", bg="black", fg="lime green", bd=5, command=nokey)
-            no_key_button.pack(pady=5)
-
-            # Crearea butonului "Validate key"
-            validate_button = tk.Button(validation, text="Validate key" ,bg="black", fg="lime green", bd=5, command=valkey, state=tk.DISABLED)
-            validate_button.pack(pady=5)
-
-            # Încărcarea cheii la deschiderea programului (dacă există)
-            load_key()
-
-            # Rularea buclei principale
-            validation.mainloop()
+    bitpack95_validation("1092228")
 
     import sys
     import os
