@@ -75550,9 +75550,9 @@ if w95var == 1998 or w95var1 == 1997:
                 return ("No updates are available: support for Bitpack ended on %s.\n"
                         "Bitpack runs as a 100%% local application." % support_date())
             return "Bitpack %s is up to date (supported until %s)." % (BITPACK_VERSION, support_date())
- 
+            
         UPDATE_FLAG = "update_popup_hidden"       # app_flags: '1' = mesajul de la pornire nu mai apare
- 
+
         def update_popup_hidden():
             db = os.path.join("Config", "dbo_bitpack.db")
             if not os.path.isfile(db):
@@ -75567,7 +75567,7 @@ if w95var == 1998 or w95var1 == 1997:
             except Exception:
                 return False
             return bool(row) and row[0] == "1"
- 
+
         def set_update_popup_hidden(hidden):
             """Salveaza preferinta. -> True daca s-a salvat. Nu creeaza Config/dbo_bitpack.db."""
             db = os.path.join("Config", "dbo_bitpack.db")
@@ -79901,159 +79901,6 @@ if w95var == 1998 or w95var1 == 1997:
                 window.on_close = lambda: setattr(self, "_update_manager_refresh", None)
                 self.add_window(window)
                 
-            def create_update_manager(self):
-                if self._focus_existing("Update Manager"):      # already open: brought to the front
-                    return
-                window = W95Window(self, "Update Manager", "Update Manager", "update", 500, 350, resizable=False)
-                head = tk.Frame(window.body, bg=FACE)
-                head.pack(fill="x", padx=12, pady=(10, 6))
-                tk.Label(head, image=self.icons32["update"], bg=FACE).pack(side="left", padx=(0, 10))
-                tk.Label(head, text="Bitpack Update Manager", font=("MS Sans Serif", 10, "bold"),
-                         bg=FACE).pack(side="left")
-                table = tk.Frame(window.body, bg=LIGHT, bd=2, relief="sunken")
-                table.pack(fill="x", padx=12)
-                values = {}
-                for r, name in enumerate(("Product", "Version", "Support", "Mode", "Last check")):
-                    tk.Label(table, text=name + ":", font=FONT_B, bg=LIGHT, anchor="w", padx=6).grid(
-                        row=r, column=0, sticky="w", pady=1)
-                    values[name] = tk.Label(table, text="", font=FONT, bg=LIGHT, anchor="w", padx=6)
-                    values[name].grid(row=r, column=1, sticky="w", pady=1)
-                table.grid_columnconfigure(1, weight=1)
-                status = tk.Label(window.body, text="", font=FONT, bg=FACE, justify="left", anchor="w",
-                                  wraplength=460)
-                status.pack(fill="x", padx=12, pady=(8, 4))
-                progress = tk.Canvas(window.body, height=16, bg=LIGHT, bd=2, relief="sunken", highlightthickness=0)
-                progress.pack(fill="x", padx=12)
-                hide_var = tk.BooleanVar(master=window.top, value=update_popup_hidden())
- 
-                def save_hide():
-                    if set_update_popup_hidden(hide_var.get()):
-                        status.config(fg=BLACK, text="Saved: the out-of-date message %s at startup." % (
-                            "will not be shown" if hide_var.get() else "will be shown"))
-                    else:
-                        hide_var.set(not hide_var.get())
-                        status.config(fg="#c00000", text="The setting could not be saved (Config/dbo_bitpack.db "
-                                                         "not found or not writable).")
-                tk.Checkbutton(window.body, text="Don't show the out-of-date message at startup", variable=hide_var,
-                               command=save_hide, font=FONT, bg=FACE, activebackground=FACE, selectcolor=LIGHT,
-                               highlightthickness=0, anchor="w", takefocus=0).pack(fill="x", padx=9, pady=(6, 0))
-                buttons = tk.Frame(window.body, bg=FACE)
-                buttons.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
- 
-                def draw(percent):
-                    progress.delete("all")
-                    width, height = progress.winfo_width() - 4, progress.winfo_height() - 4
-                    for i in range(int(max(0, width) * percent / 100) // 9):
-                        progress.create_rectangle(3 + i * 9, 3, 3 + i * 9 + 7, height + 1, fill=NAVY, outline="")
- 
-                def refresh():
-                    ended = support_ended()
-                    values["Product"].config(text="Bitpack")
-                    values["Version"].config(text=BITPACK_VERSION)
-                    values["Support"].config(text=("Ended on %s (out of date)" if ended else "Until %s") % support_date(),
-                                             fg="#c00000" if ended else "#008000")
-                    values["Mode"].config(text="100% local application (no updates)" if ended else "Online updates")
-                    values["Last check"].config(text=self.last_update_check or "Never")
- 
-                def check(step=0):
-                    try:
-                        if not window.top.winfo_exists():
-                            return
-                    except tk.TclError:
-                        return
-                    if step == 0:
-                        check_button.config(state="disabled")
-                        status.config(text="Checking for updates...", fg=BLACK)
-                    if step == 5:
-                        status.config(text="Looking for a newer version of Bitpack...")
-                    draw(step * 100 / 12)
-                    if step < 12:
-                        self.rootW95dist.after(200, lambda: check(step + 1))
-                        return
-                    self.last_update_check = time.strftime("%d.%m.%Y %H:%M:%S")
-                    refresh()
-                    status.config(text=update_result_text(), fg="#c00000" if support_ended() else "#008000")
-                    check_button.config(state="normal")
- 
-                check_button = self.w95_button(buttons, "Check for Updates", check, width=16, default=True)
-                self.w95_button(buttons, "Close", window.close, width=10).pack(side="right")
-                check_button.pack(side="right", padx=(0, 6))
-                refresh()
-                status.config(text=update_result_text(), fg="#c00000" if support_ended() else "#008000")
-                self._update_manager_refresh = refresh
-                window.on_close = lambda: setattr(self, "_update_manager_refresh", None)
-                self.add_window(window)
-                
-            def create_update_manager(self):
-                if self._focus_existing("Update Manager"):      # already open: brought to the front
-                    return
-                window = W95Window(self, "Update Manager", "Update Manager", "update", 500, 320, resizable=False)
-                head = tk.Frame(window.body, bg=FACE)
-                head.pack(fill="x", padx=12, pady=(10, 6))
-                tk.Label(head, image=self.icons32["update"], bg=FACE).pack(side="left", padx=(0, 10))
-                tk.Label(head, text="Bitpack Update Manager", font=("MS Sans Serif", 10, "bold"),
-                         bg=FACE).pack(side="left")
-                table = tk.Frame(window.body, bg=LIGHT, bd=2, relief="sunken")
-                table.pack(fill="x", padx=12)
-                values = {}
-                for r, name in enumerate(("Product", "Version", "Support", "Mode", "Last check")):
-                    tk.Label(table, text=name + ":", font=FONT_B, bg=LIGHT, anchor="w", padx=6).grid(
-                        row=r, column=0, sticky="w", pady=1)
-                    values[name] = tk.Label(table, text="", font=FONT, bg=LIGHT, anchor="w", padx=6)
-                    values[name].grid(row=r, column=1, sticky="w", pady=1)
-                table.grid_columnconfigure(1, weight=1)
-                status = tk.Label(window.body, text="", font=FONT, bg=FACE, justify="left", anchor="w",
-                                  wraplength=460)
-                status.pack(fill="x", padx=12, pady=(8, 4))
-                progress = tk.Canvas(window.body, height=16, bg=LIGHT, bd=2, relief="sunken", highlightthickness=0)
-                progress.pack(fill="x", padx=12)
-                buttons = tk.Frame(window.body, bg=FACE)
-                buttons.pack(side="bottom", fill="x", padx=12, pady=(0, 12))
- 
-                def draw(percent):
-                    progress.delete("all")
-                    width, height = progress.winfo_width() - 4, progress.winfo_height() - 4
-                    for i in range(int(max(0, width) * percent / 100) // 9):
-                        progress.create_rectangle(3 + i * 9, 3, 3 + i * 9 + 7, height + 1, fill=NAVY, outline="")
- 
-                def refresh():
-                    ended = support_ended()
-                    values["Product"].config(text="Bitpack")
-                    values["Version"].config(text=BITPACK_VERSION)
-                    values["Support"].config(text=("Ended on %s (out of date)" if ended else "Until %s") % support_date(),
-                                             fg="#c00000" if ended else "#008000")
-                    values["Mode"].config(text="100% local application (no updates)" if ended else "Online updates")
-                    values["Last check"].config(text=self.last_update_check or "Never")
- 
-                def check(step=0):
-                    try:
-                        if not window.top.winfo_exists():
-                            return
-                    except tk.TclError:
-                        return
-                    if step == 0:
-                        check_button.config(state="disabled")
-                        status.config(text="Checking for updates...", fg=BLACK)
-                    if step == 5:
-                        status.config(text="Looking for a newer version of Bitpack...")
-                    draw(step * 100 / 12)
-                    if step < 12:
-                        self.rootW95dist.after(200, lambda: check(step + 1))
-                        return
-                    self.last_update_check = time.strftime("%d.%m.%Y %H:%M:%S")
-                    refresh()
-                    status.config(text=update_result_text(), fg="#c00000" if support_ended() else "#008000")
-                    check_button.config(state="normal")
- 
-                check_button = self.w95_button(buttons, "Check for Updates", check, width=16, default=True)
-                self.w95_button(buttons, "Close", window.close, width=10).pack(side="right")
-                check_button.pack(side="right", padx=(0, 6))
-                refresh()
-                status.config(text=update_result_text(), fg="#c00000" if support_ended() else "#008000")
-                self._update_manager_refresh = refresh
-                window.on_close = lambda: setattr(self, "_update_manager_refresh", None)
-                self.add_window(window)
-
             def create_about_window(self):
                 if self._focus_existing("About Window"):         # already open: brought to the front
                     return
@@ -86725,91 +86572,6 @@ if w95var == 1998 or w95var1 == 1997:
                 
                 self.add_window_to_taskbar(f"Text Editor - {filename}", editor_window)
                 editor_window.protocol("WM_DELETE_WINDOW", lambda: self.close_window(f"Text Editor - {filename}", editor_window))
-
-            def create_text_editor_with_content(self, content, filename, file_path=None):
-                """Create a text editor window with predefined content"""
-                editor_window = tk.Toplevel(self.rootW95dist)
-                editor_window.title(f"Text Editor - {filename}")
-                editor_window.overrideredirect(True)
-                editor_window.geometry("600x400+200+100")
-                editor_window.configure(bg="#c0c0c0")
-                
-                # Add Windows 95 style title bar
-                title_bar = tk.Frame(editor_window, bg="#000080", height=25)
-                title_bar.pack(fill="x", side="top")
-                title_label = tk.Label(title_bar, text=f"Text Editor - {filename}", fg="white", bg="#000080",
-                                      font=("MS Sans Serif", 8, "bold"))
-                title_label.pack(side="left", padx=5, pady=2)
-                
-                self.make_window_draggable(editor_window, title_bar)
-                
-                # Close button for title bar
-                close_button = tk.Button(title_bar, text="×", bg="#c0c0c0", fg="black",
-                                        font=("Arial", 8, "bold"), width=2, height=1,
-                                        relief="raised", bd=1,
-                                        command=lambda: self.close_window(f"Text Editor - {filename}", editor_window))
-                close_button.pack(side="right", padx=2, pady=1)
-                
-                # Menubar
-                menubar = tk.Menu(editor_window)
-                editor_window.config(menu=menubar)
-                
-                file_menu = tk.Menu(menubar, tearoff=0)
-                menubar.add_cascade(label="File", menu=file_menu)
-                
-                # Text area
-                text_frame = tk.Frame(editor_window, bg="#c0c0c0")
-                text_frame.pack(fill="both", expand=True, padx=5, pady=5)
-                
-                # Scrollbar
-                scrollbar = tk.Scrollbar(text_frame)
-                scrollbar.pack(side="right", fill="y")
-                
-                # Text widget
-                text_area = tk.Text(text_frame, wrap="word", yscrollcommand=scrollbar.set,
-                                   font=("Courier New", 10), bg="white", fg="black")
-                text_area.pack(fill="both", expand=True)
-                scrollbar.config(command=text_area.yview)
-                
-                # Insert the content
-                text_area.insert(1.0, content)
-                
-                # Funcții pentru meniu
-                def save_file():
-                    try:
-                        with open(file_path, 'w', encoding='utf-8') as file:
-                            content = text_area.get(1.0, tk.END)
-                            file.write(content)
-                            messagebox.showinfo("Success", "File saved successfully!")
-                    except Exception as e:
-                        messagebox.showerror("Error", f"Could not save file: {str(e)}")
-                
-                def save_as_file():
-                    file_path_new = filedialog.asksaveasfilename(
-                        defaultextension=".txt",
-                        filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
-                    )
-                    if file_path_new:
-                        try:
-                            with open(file_path_new, 'w', encoding='utf-8') as file:
-                                content = text_area.get(1.0, tk.END)
-                                file.write(content)
-                                nonlocal file_path
-                                file_path = file_path_new
-                                editor_window.title(f"Text Editor - {os.path.basename(file_path)}")
-                                title_label.config(text=f"Text Editor - {os.path.basename(file_path)}")
-                                messagebox.showinfo("Success", "File saved successfully!")
-                        except Exception as e:
-                            messagebox.showerror("Error", f"Could not save file: {str(e)}")
-                
-                # Adaugă opțiunile în meniu
-                file_menu.add_command(label="Save", command=save_file)
-                file_menu.add_command(label="Save As", command=save_as_file)
-                file_menu.add_separator()
-                file_menu.add_command(label="Exit", command=lambda: self.close_window(f"Text Editor - {filename}", editor_window))
-                
-                self.add_window_to_taskbar(f"Text Editor - {filename}", editor_window)
-                editor_window.protocol("WM_DELETE_WINDOW", lambda: self.close_window(f"Text Editor - {filename}", editor_window))
             
             def create_text_editor(self):
                 editor_window = tk.Toplevel(self.rootW95dist)
@@ -89699,12 +89461,6 @@ if w95var == 1998 or w95var1 == 1997:
                     # self.hide_start_menu()
                     # self.show_start_menu()
             
-            def toggle_start_menu(self):
-                if self.start_menu_visible:
-                    self.hide_start_menu()
-                else:
-                    self.show_start_menu()
-            
             def hide_start_menu(self):
                 self.start_menu.place_forget()
                 self.start_menu_visible = False
@@ -89746,13 +89502,18 @@ if w95var == 1998 or w95var1 == 1997:
             
             def run(self):
                 # Bind escape key to exit fullscreen
-                self.rootW95dist.bind("<Escape>", lambda e: self.rootW95dist.quit())
+                #self.rootW95dist.bind("<Escape>", lambda e: self.rootW95dist.quit())
+                self.rootW95dist.bind("<Escape>", lambda e: self.exit_fullscreen())
                 
                 # Bind F11 to toggle fullscreen
                 self.rootW95dist.bind("<F11>", lambda e: self.toggle_fullscreen())
                 
                 # Start the GUI
                 self.rootW95dist.mainloop()
+            
+            def exit_fullscreen(self):
+                if getattr(self, "is_fullscreen", False):
+                    self.toggle_fullscreen()
             
             def toggle_fullscreen(self):
                 """F11. Pe Windows Tk nu permite attributes("-fullscreen") la o fereastra fara bara nativa:
