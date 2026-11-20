@@ -92,6 +92,52 @@ except ImportError:    # Python 2 fallback
 import getpass
 #from pygame.locals import *
 
+def w95_games_flag(key, value=None):
+    """Reads (value None) or writes one value of the app_flags table."""
+    import os
+    import sqlite3
+    try:
+        os.makedirs("Config", exist_ok=True)
+        conn = sqlite3.connect(os.path.join("Config", "dbo_bitpack.db"), timeout=5)
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS app_flags (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            if value is None:
+                row = conn.execute("SELECT value FROM app_flags WHERE key = ?", (key,)).fetchone()
+                return row[0] if row else None
+            with conn:
+                conn.execute("INSERT INTO app_flags (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET "
+                             "value = excluded.value", (key, str(value)))
+            return str(value)
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def w95_games_enabled():
+    return w95_games_flag("w95games") == "True"
+
+
+def w95_games_command(command):
+    """The games commands of the Command Prompt (w95dist) and of the DOS terminal (bpk-dos):
+    exec class games:95 (on), exec class games:0 (off), exec class games --status.
+    Returns the text to show, or None when `command` is another command."""
+    c = " ".join(str(command).strip().lower().split())
+    if c == "exec class games:95":
+        if w95_games_flag("w95games", "True") is None:
+            return "Error: the games could not be activated (Config/dbo_bitpack.db cannot be written)."
+        return ("Bitpack Games activated: Tetris, Snake, Minesweeper, Pong.\n"
+                "The icons are on the Bitpack Desktop and in Start > Games.")
+    if c in ("exec class games:0", "exec class games:00"):
+        if w95_games_flag("w95games", "False") is None:
+            return "Error: the games could not be deactivated (Config/dbo_bitpack.db cannot be written)."
+        return ("Bitpack Games deactivated.\n"
+                "The icons are gone from the Bitpack Desktop and from the Start menu.")
+    if c == "exec class games --status":
+        return "Bitpack Games: %s" % ("activated" if w95_games_enabled() else "not activated "
+                                      "(type: exec class games:95)")
+    return None
+
 # =====================================================================================================
 # Bitpack: Config/init.bpk95 = baza de date ca un singur sir de caractere
 #   BPK95:1:<suma de control>:<scriptul SQL comprimat (zlib) si codat (base64)>
@@ -955,6 +1001,7 @@ def setup_database_ALL():
         {'app_name': 'Extension Manager', 'username': 'extension', 'password': 'manager', 'has_key': True, 'var_value': 1100220022},
         {'app_name': 'dbo_bitpack.db Database Viewer Dashboard', 'username': 'dbobitpackdash', 'password': 'dbobitpackdash', 'has_key': True, 'var_value': 778832},
         {'app_name': 'Color Picker', 'username': 'colorpicker', 'password': 'colorpicker', 'has_key': True, 'var_value': 112200220033000111},
+        {'app_name': 'Shift Planner', 'username': 'shiftpl', 'password': 'shiftpl', 'has_key': True, 'var_value': 333432},
         {'app_name': 'Video Editor', 'username': 'vided', 'password': 'vided', 'has_key': True, 'var_value': 3342109},
         {'app_name': 'Step Recorder', 'username': 'stprcd', 'password': 'stprcd', 'has_key': True, 'var_value': 67768},
         {'app_name': 'Report Designer', 'username': 'repbld', 'password': 'repbld', 'has_key': True, 'var_value': 88923},
@@ -1222,6 +1269,40 @@ def setup_database_ALL():
                 details TEXT
             )
         ''')
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        team TEXT NOT NULL DEFAULT '',
+        role TEXT NOT NULL DEFAULT '',
+        hours_per_day REAL NOT NULL DEFAULT 8,
+        active INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_shift_types (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'work',
+        start_time TEXT NOT NULL DEFAULT '',
+        end_time TEXT NOT NULL DEFAULT '',
+        break_minutes INTEGER NOT NULL DEFAULT 0,
+        color TEXT NOT NULL DEFAULT '#ffffff',
+        min_staff INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_entries (
+        employee_id INTEGER NOT NULL,
+        day TEXT NOT NULL,
+        code TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (employee_id, day))""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_holidays (
+        day TEXT PRIMARY KEY,
+        name TEXT NOT NULL)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        min_rest_hours REAL NOT NULL DEFAULT 12,
+        max_consecutive_days INTEGER NOT NULL DEFAULT 6,
+        max_week_hours REAL NOT NULL DEFAULT 48,
+        last_team TEXT NOT NULL DEFAULT '')""")
 
     # COPY APP: setari, programe, profiluri
     cursor.execute("""CREATE TABLE IF NOT EXISTS copy_app_settings (
@@ -2218,6 +2299,7 @@ def setup_database_INSTANCE():
         {'app_name': 'Extension Manager', 'username': 'extension', 'password': 'manager', 'has_key': True, 'var_value': 1100220022},
         {'app_name': 'dbo_bitpack.db Database Viewer Dashboard', 'username': 'dbobitpackdash', 'password': 'dbobitpackdash', 'has_key': True, 'var_value': 778832},
         {'app_name': 'Color Picker', 'username': 'colorpicker', 'password': 'colorpicker', 'has_key': True, 'var_value': 112200220033000111},
+        {'app_name': 'Shift Planner', 'username': 'shiftpl', 'password': 'shiftpl', 'has_key': True, 'var_value': 333432},
         {'app_name': 'Video Editor', 'username': 'vided', 'password': 'vided', 'has_key': True, 'var_value': 3342109},
         {'app_name': 'Step Recorder', 'username': 'stprcd', 'password': 'stprcd', 'has_key': True, 'var_value': 67768},
         {'app_name': 'Report Designer', 'username': 'repbld', 'password': 'repbld', 'has_key': True, 'var_value': 88923},
@@ -2480,6 +2562,40 @@ def setup_database_INSTANCE():
                 details TEXT
             )
         ''')
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_employees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        team TEXT NOT NULL DEFAULT '',
+        role TEXT NOT NULL DEFAULT '',
+        hours_per_day REAL NOT NULL DEFAULT 8,
+        active INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_shift_types (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'work',
+        start_time TEXT NOT NULL DEFAULT '',
+        end_time TEXT NOT NULL DEFAULT '',
+        break_minutes INTEGER NOT NULL DEFAULT 0,
+        color TEXT NOT NULL DEFAULT '#ffffff',
+        min_staff INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_entries (
+        employee_id INTEGER NOT NULL,
+        day TEXT NOT NULL,
+        code TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (employee_id, day))""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_holidays (
+        day TEXT PRIMARY KEY,
+        name TEXT NOT NULL)""")
+    cursor.execute("""CREATE TABLE IF NOT EXISTS shift_planner_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        min_rest_hours REAL NOT NULL DEFAULT 12,
+        max_consecutive_days INTEGER NOT NULL DEFAULT 6,
+        max_week_hours REAL NOT NULL DEFAULT 48,
+        last_team TEXT NOT NULL DEFAULT '')""")
 
     # COPY APP: setari, programe, profiluri
     cursor.execute("""CREATE TABLE IF NOT EXISTS copy_app_settings (
@@ -8128,6 +8244,9 @@ def run_instance_checker():
                 self.grip = grip
             sim.desktop.update_idletasks()
             dw, dh = max(sim.desktop.winfo_width(), 400), max(sim.desktop.winfo_height(), 300)
+            width, height = min(width, dw), min(height, dh)          # never bigger than the desktop
+            # sim.desktop.update_idletasks()
+            # dw, dh = max(sim.desktop.winfo_width(), 400), max(sim.desktop.winfo_height(), 300)
             if modal:
                 x, y = (dw - width) // 2, (dh - height) // 3
             else:
@@ -8165,8 +8284,8 @@ def run_instance_checker():
                 return
             x0, y0, gx, gy = self._drag_from
             dw, dh = self.sim.desktop.winfo_width(), self.sim.desktop.winfo_height()
-            x = min(max(gx + event.x_root - x0, 40 - self.geometry[2]), dw - 40)
-            y = min(max(gy + event.y_root - y0, 0), dh - 20)
+            x = min(max(gx + event.x_root - x0, 0), max(0, dw - self.geometry[2]))   # the whole window stays
+            y = min(max(gy + event.y_root - y0, 0), max(0, dh - self.geometry[3]))   # on the desktop
             self.geometry[0], self.geometry[1] = x, y
             self.frame.place_configure(x=x, y=y)
 
@@ -8177,9 +8296,30 @@ def run_instance_checker():
             if self.maximized:
                 return
             x0, y0, w, h = self._resize_from
-            self.geometry[2] = max(self.min_size[0], w + event.x_root - x0)
-            self.geometry[3] = max(self.min_size[1], h + event.y_root - y0)
+            dw, dh = self.sim.desktop.winfo_width(), self.sim.desktop.winfo_height()
+            self.geometry[2] = max(self.min_size[0], min(w + event.x_root - x0, dw - self.geometry[0]))
+            self.geometry[3] = max(self.min_size[1], min(h + event.y_root - y0, dh - self.geometry[1]))
             self.frame.place_configure(width=self.geometry[2], height=self.geometry[3])
+        # def _drag(self, event):
+            # if self.maximized:
+                # return
+            # x0, y0, gx, gy = self._drag_from
+            # dw, dh = self.sim.desktop.winfo_width(), self.sim.desktop.winfo_height()
+            # x = min(max(gx + event.x_root - x0, 40 - self.geometry[2]), dw - 40)
+            # y = min(max(gy + event.y_root - y0, 0), dh - 20)
+            # self.geometry[0], self.geometry[1] = x, y
+            # self.frame.place_configure(x=x, y=y)
+
+        # def _grip_press(self, event):
+            # self._resize_from = (event.x_root, event.y_root, self.geometry[2], self.geometry[3])
+
+        # def _grip_drag(self, event):
+            # if self.maximized:
+                # return
+            # x0, y0, w, h = self._resize_from
+            # self.geometry[2] = max(self.min_size[0], w + event.x_root - x0)
+            # self.geometry[3] = max(self.min_size[1], h + event.y_root - y0)
+            # self.frame.place_configure(width=self.geometry[2], height=self.geometry[3])
 
         def toggle_maximize(self):
             self.maximized = not self.maximized
@@ -8236,6 +8376,7 @@ def run_instance_checker():
             self._build_taskbar()
             self.desktop = tk.Canvas(self.root_inst, bg=TEAL, highlightthickness=0, bd=0)
             self.desktop.pack(side="top", fill="both", expand=True)
+            self.desktop.bind("<Configure>", self._keep_windows_inside, add="+")   # smaller desktop: windows follow
             self._build_desktop_icons()
             self._build_start_menu()
             self.update_clock()
@@ -8346,6 +8487,22 @@ def run_instance_checker():
                 window.minimize()
             else:
                 self.activate(window)
+
+        def _keep_windows_inside(self, event=None):
+            """After Full Screen ends (the desktop gets smaller) every window is moved back inside it."""
+            dw, dh = self.desktop.winfo_width(), self.desktop.winfo_height()
+            if dw < 50 or dh < 50:
+                return
+            for window in list(self.windows.values()):
+                if window.maximized:
+                    continue
+                x, y, w, h = window.geometry
+                w, h = min(w, dw), min(h, dh)
+                x, y = min(max(x, 0), dw - w), min(max(y, 0), dh - h)
+                if [x, y, w, h] != window.geometry:
+                    window.geometry = [x, y, w, h]
+                    if not window.minimized:
+                        window.frame.place_configure(x=x, y=y, width=w, height=h)
 
         # ----------------------------------------------------------------- start menu
         def _build_start_menu(self):
@@ -11737,6 +11894,8 @@ This comprehensive suite streamlines various IT tasks from system monitoring to 
 
 - Planogram Studio (planogram/studio)
 
+- Shift Planner (shiftpl/shiftpl)
+
 - Image Editor (imgeditor/imgeditor)
 
 - Image Resize (imgres/imgres)
@@ -11895,6 +12054,7 @@ SPECIALIZED TOOL ACCOUNTS:
 - screenrec/screenrec - Screen recording application
 - script/agent - Script runner for daily tasks
 - shell/integrator - Bitpack manual repair utility
+- shiftpl/shiftpl - Shift planner
 - sql/comp - SQLite and SQL comparison tool
 - sql/designer - Database designer
 - sql/diagram -  SQLite database manager and SQL query representation with diagram
@@ -12946,6 +13106,7 @@ trmn = None
 passfig = None
 passfig1 = None
 hardvar = None
+shiftplvar = None
 videoVAR = None
 stprcdvar = None
 repbldvar = None
@@ -13367,6 +13528,7 @@ def load_credentials():
         "Screen Recorder": {"username": "screenrec", "password": "screenrec"},
         "Script Runner": {"username": "script", "password": "agent"},
         "Shell Integrator": {"username": "shell", "password": "integrator"},
+        "Shift Planner": {"username": "shiftpl", "password": "shiftpl"},
         "SQL Comparision": {"username": "sql", "password": "comp"},
         "SQL Designer": {"username": "sql", "password": "designer"},
         "SQL Diagram": {"username": "sql", "password": "diagram"},
@@ -13785,6 +13947,7 @@ def login():
     global passfig
     global passfig1
     global hardvar
+    global shiftplvar
     global videoVAR
     global suggestion_scope
     global stprcdvar
@@ -14317,6 +14480,9 @@ def login():
     #clpuser = "colorpicker"
     #clppass = "colorpicker"
     clpuser, clppass = get_credentials(112200220033000111, "colorpicker", "colorpicker")
+    #shiftpluser = "shiftpl"
+    #shiftplpass = "shiftpl"
+    shiftpluser, shiftplpass = get_credentials(333432, "shiftpl", "shiftpl")
     #uservideo = "vided"
     #passvideo = "vided"
     uservideo, passvideo = get_credentials(3342109, "vided", "vided")
@@ -14733,6 +14899,11 @@ def login():
         show_validation = False
         adminT = False
         hardvar = check_login(username_entry.get(), password_entry.get(), fallback=6)
+        windowlogin.destroy()
+    elif username_entry.get()==shiftpluser and password_entry.get()==shiftplpass:
+        show_validation = False
+        adminT = False
+        shiftplvar = check_login(username_entry.get(), password_entry.get(), fallback=333432)
         windowlogin.destroy()
     elif username_entry.get()==uservideo and password_entry.get()==passvideo:
         show_validation = False
@@ -19074,7 +19245,7 @@ validation.mainloop()
 if show_validation == True:
     bitpack95_validation(on_valid=main1, on_no_key=main2)
 
-elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actvtmntvar != 9067 and pdfbulkvar != 654312 and rszbvar != 67855 and batchedvar !=231145 and arcbrvar != 132454 and fldrcpvar != 223198 and personaldriveVAR != 78876 and bpkdshgraphvar != 778832 and arpatablevar != 9091 and planogram95var != 456111111111111111 and codebvar != 99887345 and docmrgvar != 99823 and iconedvar != 999213 and videoVAR != 3342109 and fldpckVAR != 88932 and chartvar != 901298 and exccmpvar != 978132 and stickyvar != 9879 and repbldvar != 88923 and stprcdvar != 67768 and hardvar != 6 and postmanvar != 8712 and screenvar != 7 and zipvar != 8 and compvar != 9 and sqldesignerVARIABLE != 445532 and sqlmanagerVARIABLE != 44331122 and pdfvar != 10 and replfindvar != 11 and testvarr != 12 and testvarr2 != 122 and pdfvwvar != 13 and netwvar != 14 and crpvar2 != 155 and aivar != 20 and notepadvar != 21 and paintvar != 22 and Adm1var != 30 and Adm3var != 4409 and  Adm2var != 40 and zippassvar != 60 and bkvar != 700 and rnvar != 710 and passmngrr != 2000 and sqlcrvar != 2332 and pausevar != 10000 and taskmngrvar != 1000000 and show_validation == False and junkvar != 77777 and wbpvar != 123456789 and cmvar != 3333 and pingalivevar != 5566 and readervar != 1993 and hardmvar != 1994 and fetchervar != 1995 and shellvar != 1996 and w95var1 != 1997 and w95var != 1998 and sqllvar != 22222 and diagramvar != 2345432 and termadm != 6745 and commandervar != 88888888 and calendarvar != 999000 and allmonitorvar != 999001 and eventvval != 44445555 and assemblyvar != 333333333 and kbbbvar != 5189 and proc_varr != 67766776 and xmleditorvar != 111444555 and MDvar != 777666111 and archVar != 777666012 and expensevar != 777666013 and scrpVar != 777666014 and recoveryVarr != 777666090 and fishervar != 777666091 and muapdash != 777666092 and mindmapvar != 7776660999 and multifilevar != 77766609999 and safevar != 444555000888 and trafficvar != 333344440099 and pwdchkVAR != 9965 and dosboxvar != 3333444400999 and vscodevar != 999955550000 and pdfviewervar != 3333444400997676 and clipboardVAR != 333344440099767667 and filefinderVARR != 5555544443330 and topologyVAR != 555554444333000 and disktoolutilityvar != 99999999995555555555 and calculatorvarrr != 11111111111111111111 and devmgmtvar != 88888888888888888888 and todovar != 8888888888888888888888888888888888888888 and pdftoexcelvar != 666666666666666666666 and csvconvvar != 666666666666666666666666666666666666666666 and docupdfvar != 666666666666666666666666666666666666666666666666666666666666666 and emailvariable != 11002200 and manageextensionsvar != 1100220022 and clpvar != 112200220033000111 and winregvar != 112200220033000111000 and convcalcvar != 11100011100011100011100023 and programmercalcvar != 1110001110001110001110002322 and projmanvar != 111000111000111000111000232222 and regtestvar != 11100011100011100011100023222200 and graphcalcvar != 1110001110001110001110002322220099 and codemergervar != 98099999999999999999999999999999999999999999999999999 and xlcvarrrr != 55555555555555555555555555555555555555555555555555555555555555555555555 and dbmainvarrrr != 77777777777777777777777777777777777777777777777888812 and codeanaliservisvar != 43434343434344444444444433333333333434343 and pdfeditorVARvar != 434343434343444444444444333333333334343435 and wordtoPDFFFVAR != 449000000000000000000000000000000000000000000000000 and timelinevar != 555550009088888866666666666666666666666666666 and forensicvar != 5555500090888888666666666666666666666666666667 and timetrackerVARRR != 55555000908888886666666666666666666666666666678 and dbcompVARRR != 555550009088888866666666666666666666666666666789 and decisiontreeVAR != 5555500090888888666666666666666666666666666667890 and MO95VAR != 55555000908888886666666666666666666666666666678900 and verscontrVAR != 3333333333333333333333333333333333333300000000000000000000000011111111 and plotterVAR != 33333333333333333333333333333333333333000000000000000000000000111111112 and sqldiagramvaR != 777777777777777777777733333333333333333300000000000020202020 and sqlexecwdVAR != 7777777777777777777777333333333333333333000000000000202020209 and icoconvvar != 876523 and pxvar != 9023 and imgedvar != 7845:
+elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actvtmntvar != 9067 and pdfbulkvar != 654312 and rszbvar != 67855 and batchedvar !=231145 and arcbrvar != 132454 and fldrcpvar != 223198 and personaldriveVAR != 78876 and bpkdshgraphvar != 778832 and arpatablevar != 9091 and planogram95var != 456111111111111111 and codebvar != 99887345 and docmrgvar != 99823 and iconedvar != 999213 and videoVAR != 3342109 and fldpckVAR != 88932 and chartvar != 901298 and exccmpvar != 978132 and stickyvar != 9879 and repbldvar != 88923 and stprcdvar != 67768 and shiftplvar != 333432 and hardvar != 6 and postmanvar != 8712 and screenvar != 7 and zipvar != 8 and compvar != 9 and sqldesignerVARIABLE != 445532 and sqlmanagerVARIABLE != 44331122 and pdfvar != 10 and replfindvar != 11 and testvarr != 12 and testvarr2 != 122 and pdfvwvar != 13 and netwvar != 14 and crpvar2 != 155 and aivar != 20 and notepadvar != 21 and paintvar != 22 and Adm1var != 30 and Adm3var != 4409 and  Adm2var != 40 and zippassvar != 60 and bkvar != 700 and rnvar != 710 and passmngrr != 2000 and sqlcrvar != 2332 and pausevar != 10000 and taskmngrvar != 1000000 and show_validation == False and junkvar != 77777 and wbpvar != 123456789 and cmvar != 3333 and pingalivevar != 5566 and readervar != 1993 and hardmvar != 1994 and fetchervar != 1995 and shellvar != 1996 and w95var1 != 1997 and w95var != 1998 and sqllvar != 22222 and diagramvar != 2345432 and termadm != 6745 and commandervar != 88888888 and calendarvar != 999000 and allmonitorvar != 999001 and eventvval != 44445555 and assemblyvar != 333333333 and kbbbvar != 5189 and proc_varr != 67766776 and xmleditorvar != 111444555 and MDvar != 777666111 and archVar != 777666012 and expensevar != 777666013 and scrpVar != 777666014 and recoveryVarr != 777666090 and fishervar != 777666091 and muapdash != 777666092 and mindmapvar != 7776660999 and multifilevar != 77766609999 and safevar != 444555000888 and trafficvar != 333344440099 and pwdchkVAR != 9965 and dosboxvar != 3333444400999 and vscodevar != 999955550000 and pdfviewervar != 3333444400997676 and clipboardVAR != 333344440099767667 and filefinderVARR != 5555544443330 and topologyVAR != 555554444333000 and disktoolutilityvar != 99999999995555555555 and calculatorvarrr != 11111111111111111111 and devmgmtvar != 88888888888888888888 and todovar != 8888888888888888888888888888888888888888 and pdftoexcelvar != 666666666666666666666 and csvconvvar != 666666666666666666666666666666666666666666 and docupdfvar != 666666666666666666666666666666666666666666666666666666666666666 and emailvariable != 11002200 and manageextensionsvar != 1100220022 and clpvar != 112200220033000111 and winregvar != 112200220033000111000 and convcalcvar != 11100011100011100011100023 and programmercalcvar != 1110001110001110001110002322 and projmanvar != 111000111000111000111000232222 and regtestvar != 11100011100011100011100023222200 and graphcalcvar != 1110001110001110001110002322220099 and codemergervar != 98099999999999999999999999999999999999999999999999999 and xlcvarrrr != 55555555555555555555555555555555555555555555555555555555555555555555555 and dbmainvarrrr != 77777777777777777777777777777777777777777777777888812 and codeanaliservisvar != 43434343434344444444444433333333333434343 and pdfeditorVARvar != 434343434343444444444444333333333334343435 and wordtoPDFFFVAR != 449000000000000000000000000000000000000000000000000 and timelinevar != 555550009088888866666666666666666666666666666 and forensicvar != 5555500090888888666666666666666666666666666667 and timetrackerVARRR != 55555000908888886666666666666666666666666666678 and dbcompVARRR != 555550009088888866666666666666666666666666666789 and decisiontreeVAR != 5555500090888888666666666666666666666666666667890 and MO95VAR != 55555000908888886666666666666666666666666666678900 and verscontrVAR != 3333333333333333333333333333333333333300000000000000000000000011111111 and plotterVAR != 33333333333333333333333333333333333333000000000000000000000000111111112 and sqldiagramvaR != 777777777777777777777733333333333333333300000000000020202020 and sqlexecwdVAR != 7777777777777777777777333333333333333333000000000000202020209 and icoconvvar != 876523 and pxvar != 9023 and imgedvar != 7845:
     # ═══════════════════════════════════════════════════════════════════════════════════════════════
     # MENU of the other accounts (Copy App) - replaces "def main3(): ... main3()"
     # inside the elif. Everything is inside main3.
@@ -64110,9 +64281,21 @@ if shellvar == 1996:
             set_flag("sqlms", "00 11 45 32 01 83 57 90 xx")
             return ["SQL Management Studio environment variable created."], "response"
 
+        def cmd_games(command):
+            """exec class games:95 / games:0 / games --status (w95_games_command de la inceputul fisierului)."""
+            def run():
+                text = w95_games_command(command)        # noqa: F821  (Bitpack function)
+                return text.splitlines(), "error" if text.startswith("Error") else "response"
+            return run
+
         WIPE = "This DELETES every table of Config/dbo_bitpack.db (accounts, settings, logs...)."
         EXEC = [  # command, help, administrator only, warning before it runs, action
             ("exec class mail_client:95", "Bitpack Mail Express client activation", False, None, cmd_mail),
+            ("exec class games:95", "Bitpack Games activation (Tetris, Snake, Minesweeper, Pong)", False, None,
+             cmd_games("exec class games:95")),
+            ("exec class games:0", "Bitpack Games deactivation", False, None, cmd_games("exec class games:0")),
+            ("exec class games --status", "are Bitpack Games activated?", False, None,
+             cmd_games("exec class games --status")),
             ("exec dbo_bitpack --export", "export the database to Config/init.bpk95", False, None,
              lambda: export_db("init.bpk95")),
             ("exec dbo_bitpack --export --sql", "export the database as SQL to Config/init.sql", False, None,
@@ -65019,6 +65202,7 @@ if shellvar == 1996:
 # repbld                      repbld (+ product_key)
 # stprcd                      stprcd (+ product_key)
 # vided                       vided (+ product_key)
+# shiftpl                     shiftpl (+ product_key)
     # """
 
         # with open(accounts_file_path, "w") as accounts_file:
@@ -66262,6 +66446,747 @@ if w95var == 1998 or w95var1 == 1997:
                 return False
             return True
 
+        import random as _g_random
+        G_FACE, G_SHADOW, G_LIGHT, G_DARK, G_NAVY = "#c0c0c0", "#808080", "#ffffff", "#404040", "#000080"
+        G_FONT = ("MS Sans Serif", 8)
+        G_FONT_B = ("MS Sans Serif", 8, "bold")
+        G_LED = ("Courier New", 16, "bold")
+        W95_GAMES = ("tetris", "snake", "mines", "pong")
+        W95_GAME_TITLES = {"tetris": "Tetris", "snake": "Snake", "mines": "Minesweeper", "pong": "Pong"}
+        ICONS["tetris"] = [(1, 9, 6, 14, "#000000"), (2, 10, 5, 13, "#ff0000"), (6, 9, 11, 14, "#000000"),
+                           (7, 10, 10, 13, "#ff0000"), (11, 9, 16, 14, "#000000"), (12, 10, 15, 13, "#ff0000"),
+                           (6, 4, 11, 9, "#000000"), (7, 5, 10, 8, "#ff0000"), (1, 2, 6, 7, "#000000"),
+                           (2, 3, 5, 6, "#00c0ff"), (11, 2, 16, 7, "#000000"), (12, 3, 15, 6, "#ffd000")]
+        ICONS["snake"] = [(2, 12, 14, 15, "#000000"), (3, 13, 13, 14, "#00b000"), (11, 6, 14, 13, "#000000"),
+                          (12, 7, 13, 12, "#00b000"), (4, 3, 14, 7, "#000000"), (5, 4, 13, 6, "#00b000"),
+                          (2, 2, 6, 7, "#000000"), (3, 3, 5, 6, "#00d000"), (3, 3, 4, 4, "#ffffff"),
+                          (0, 4, 2, 5, "#ff0000")]
+        ICONS["mines"] = [(7, 0, 9, 16, "#000000"), (0, 7, 16, 9, "#000000"), (2, 2, 4, 4, "#000000"),
+                          (12, 2, 14, 4, "#000000"), (2, 12, 4, 14, "#000000"), (12, 12, 14, 14, "#000000"),
+                          (3, 3, 13, 13, "#000000"), (5, 5, 7, 7, "#ffffff")]
+        ICONS["pong"] = [(0, 0, 16, 16, "#000000"), (1, 3, 3, 9, "#ffffff"), (13, 7, 15, 13, "#ffffff"),
+                         (7, 6, 9, 8, "#ffffff"), (8, 1, 9, 2, "#808080"), (8, 4, 9, 5, "#808080"),
+                         (8, 10, 9, 11, "#808080"), (8, 13, 9, 14, "#808080")]
+        ICONS["games"] = [(3, 9, 13, 15, "#000000"), (4, 10, 12, 14, "#c0c0c0"), (7, 3, 9, 10, "#000000"),
+                          (5, 0, 11, 5, "#000000"), (6, 1, 10, 4, "#ff0000"), (10, 11, 12, 13, "#ff0000"),
+                          (4, 11, 6, 13, "#000080")]
+        TASK_ICONS = TASK_ICONS + tuple((W95_GAME_TITLES[k], k) for k in W95_GAMES)
+
+
+        def g_bevel(canvas, x0, y0, x1, y1, fill, raised=True, width=2):
+            """A Windows 95 raised (or sunken) square on a canvas."""
+            canvas.create_rectangle(x0, y0, x1, y1, fill=fill, outline="")
+            a, b = (G_LIGHT, G_SHADOW) if raised else (G_SHADOW, G_LIGHT)
+            for i in range(width):
+                canvas.create_line(x0 + i, y1 - 1 - i, x0 + i, y0 + i, x1 - 1 - i, y0 + i, fill=a)
+                canvas.create_line(x0 + i, y1 - 1 - i, x1 - 1 - i, y1 - 1 - i, x1 - 1 - i, y0 + i, fill=b)
+
+
+        def g_led(parent, digits=3):
+            return tk.Label(parent, text="0" * digits, font=G_LED, bg="#000000", fg="#ff0000", bd=2, relief="sunken",
+                            width=digits, anchor="e")
+
+
+        def g_button(parent, text, command):
+            return tk.Button(parent, text=text, command=command, font=G_FONT, bg=G_FACE, activebackground=G_FACE, bd=2,
+                             relief="raised", highlightthickness=0, takefocus=0, padx=6, pady=0)
+
+
+        class W95GameBase(object):
+            """What the four games share: the key bindings on their window, the timer, the best score."""
+            NAME = "game"
+
+            def __init__(self, parent, top, best_get, best_set):
+                self.parent, self.top = parent, top
+                self.best_get, self.best_set = best_get, best_set
+                self.jobs = {}
+                self.stopped = False
+                self.keys = []
+
+            def bind(self, sequence, handler):
+                self.top.bind(sequence, lambda e: (None if self.stopped else handler(e)) or "break")
+                self.keys.append(sequence)
+
+            def later(self, name, ms, func):
+                self.cancel(name)
+                if not self.stopped:
+                    self.jobs[name] = self.top.after(ms, lambda: (self.jobs.pop(name, None), func()))
+
+            def cancel(self, name):
+                job = self.jobs.pop(name, None)
+                if job is not None:
+                    try:
+                        self.top.after_cancel(job)
+                    except tk.TclError:
+                        pass
+
+            def best(self):
+                try:
+                    return int(self.best_get(self.NAME) or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            def stop(self):
+                """Called when the window closes: no timer keeps running."""
+                self.stopped = True
+                for name in list(self.jobs):
+                    self.cancel(name)
+
+
+        # ───────────────────────────────────────── Minesweeper ──────────────────────────────────────────────
+        class W95Minesweeper(W95GameBase):
+            NAME = "mines"
+            LEVELS = (("Beginner", 9, 9, 10), ("Intermediate", 16, 16, 40), ("Expert", 30, 16, 99))
+            COLOURS = {1: "#0000ff", 2: "#008000", 3: "#ff0000", 4: "#000080", 5: "#800000", 6: "#008080",
+                       7: "#000000", 8: "#808080"}
+            CELL = 16
+
+            def __init__(self, parent, top, best_get, best_set):
+                W95GameBase.__init__(self, parent, top, best_get, best_set)
+                bar = tk.Frame(parent, bg=G_FACE)
+                bar.pack(fill="x", padx=6, pady=(4, 0))
+                self.level_buttons = []
+                for i, (name, _w, _h, _m) in enumerate(self.LEVELS):
+                    b = g_button(bar, name, lambda i=i: self.new_game(i))
+                    b.pack(side="left", padx=(0, 2))
+                    self.level_buttons.append(b)
+                self.best_label = tk.Label(bar, text="", font=G_FONT, bg=G_FACE)
+                self.best_label.pack(side="right")
+                frame = tk.Frame(parent, bg=G_FACE, bd=3, relief="raised")
+                frame.pack(padx=6, pady=6)
+                head = tk.Frame(frame, bg=G_FACE, bd=2, relief="sunken")
+                head.pack(fill="x", padx=6, pady=6)
+                self.mine_led = g_led(head)
+                self.mine_led.pack(side="left", padx=4, pady=4)
+                self.time_led = g_led(head)
+                self.time_led.pack(side="right", padx=4, pady=4)
+                self.face = tk.Canvas(head, width=26, height=26, bg=G_FACE, highlightthickness=0, cursor="hand2")
+                self.face.pack(pady=4)
+                self.face.bind("<Button-1>", lambda e: self.new_game(self.level))
+                box = tk.Frame(frame, bd=3, relief="sunken", bg=G_FACE)
+                box.pack(padx=6, pady=(0, 6))
+                self.canvas = tk.Canvas(box, bg=G_FACE, highlightthickness=0)
+                self.canvas.pack()
+                self.canvas.bind("<ButtonPress-1>", lambda e: self.draw_face("o") if not self.over else None)
+                self.canvas.bind("<ButtonRelease-1>", self.on_left)
+                self.canvas.bind("<Button-3>", self.on_right)
+                self.canvas.bind("<Button-2>", self.on_chord)
+                self.canvas.bind("<Double-Button-1>", self.on_chord)
+                self.bind("<F2>", lambda e: self.new_game(self.level))
+                self.level = 0
+                self.new_game(0)
+
+            def new_game(self, level):
+                self.cancel("tick")
+                self.level = level
+                _name, self.cols, self.rows, self.count = self.LEVELS[level]
+                for i, b in enumerate(self.level_buttons):
+                    b.config(relief="sunken" if i == level else "raised")
+                self.mines = set()
+                self.open = set()
+                self.flags = {}
+                self.over = False
+                self.won = False
+                self.boom = None
+                self.seconds = 0
+                self.started = False
+                self.canvas.config(width=self.cols * self.CELL, height=self.rows * self.CELL)
+                self.update_leds()
+                best = self.best_get("mines_%d" % level)
+                self.best_label.config(text="Best: %s s" % best if best else "Best: -")
+                self.draw_face("smile")
+                self.draw()
+
+            def neighbours(self, c, r):
+                for dc in (-1, 0, 1):
+                    for dr in (-1, 0, 1):
+                        if (dc or dr) and 0 <= c + dc < self.cols and 0 <= r + dr < self.rows:
+                            yield c + dc, r + dr
+
+            def number(self, c, r):
+                return sum(1 for n in self.neighbours(c, r) if n in self.mines)
+
+            def place_mines(self, safe):
+                """The first click never hits a mine (nor its neighbours, when there is room)."""
+                keep = {safe} | set(self.neighbours(*safe))
+                cells = [(c, r) for c in range(self.cols) for r in range(self.rows) if (c, r) not in keep]
+                if len(cells) < self.count:
+                    cells = [(c, r) for c in range(self.cols) for r in range(self.rows) if (c, r) != safe]
+                self.mines = set(_g_random.sample(cells, self.count))
+
+            def cell_at(self, event):
+                c, r = int(event.x // self.CELL), int(event.y // self.CELL)
+                return (c, r) if 0 <= c < self.cols and 0 <= r < self.rows else None
+
+            def on_left(self, event):
+                if self.over:
+                    return
+                self.draw_face("smile")
+                cell = self.cell_at(event)
+                if cell is None or cell in self.open or self.flags.get(cell) == "flag":
+                    return
+                if not self.started:
+                    self.place_mines(cell)
+                    self.started = True
+                    self.later("tick", 1000, self.tick)
+                self.reveal(cell)
+                self.after_move()
+
+            def reveal(self, cell):
+                if cell in self.mines:
+                    self.boom = cell
+                    self.lose()
+                    return
+                todo = [cell]
+                while todo:
+                    c, r = todo.pop()
+                    if (c, r) in self.open or self.flags.get((c, r)) == "flag":
+                        continue
+                    self.open.add((c, r))
+                    self.flags.pop((c, r), None)
+                    if self.number(c, r) == 0:
+                        todo.extend(n for n in self.neighbours(c, r) if n not in self.open)
+
+            def on_right(self, event):
+                cell = self.cell_at(event)
+                if self.over or cell is None or cell in self.open:
+                    return
+                state = self.flags.get(cell)
+                nxt = {None: "flag", "flag": "?", "?": None}[state]
+                if nxt:
+                    self.flags[cell] = nxt
+                else:
+                    self.flags.pop(cell, None)
+                self.update_leds()
+                self.draw()
+
+            def on_chord(self, event):
+                """On an open number with as many flags around: opens the other neighbours."""
+                cell = self.cell_at(event)
+                if self.over or cell is None or cell not in self.open:
+                    return
+                n = self.number(*cell)
+                around = list(self.neighbours(*cell))
+                if n and sum(1 for x in around if self.flags.get(x) == "flag") == n:
+                    for x in around:
+                        if x not in self.open and self.flags.get(x) != "flag":
+                            self.reveal(x)
+                            if self.over:
+                                break
+                    self.after_move()
+
+            def after_move(self):
+                if not self.over and len(self.open) == self.cols * self.rows - self.count:
+                    self.won = self.over = True
+                    self.cancel("tick")
+                    for m in self.mines:
+                        self.flags[m] = "flag"
+                    key = "mines_%d" % self.level
+                    best = self.best_get(key)
+                    if not best or self.seconds < int(best):
+                        self.best_set(key, self.seconds)
+                        self.best_label.config(text="Best: %d s (new!)" % self.seconds)
+                    self.draw_face("cool")
+                self.update_leds()
+                self.draw()
+
+            def lose(self):
+                self.over = True
+                self.cancel("tick")
+                self.draw_face("dead")
+
+            def tick(self):
+                if self.over:
+                    return
+                self.seconds = min(999, self.seconds + 1)
+                self.update_leds()
+                self.later("tick", 1000, self.tick)
+
+            def update_leds(self):
+                left = self.count - sum(1 for v in self.flags.values() if v == "flag")
+                self.mine_led.config(text="%03d" % left if left >= 0 else "-%02d" % min(99, -left))
+                self.time_led.config(text="%03d" % self.seconds)
+
+            def draw_face(self, mood):
+                f = self.face
+                f.delete("all")
+                g_bevel(f, 0, 0, 26, 26, G_FACE)
+                f.create_oval(4, 4, 22, 22, fill="#ffff00", outline="#000000")
+                if mood == "cool":
+                    f.create_rectangle(7, 9, 12, 12, fill="#000000")
+                    f.create_rectangle(14, 9, 19, 12, fill="#000000")
+                    f.create_line(6, 10, 20, 10, fill="#000000")
+                elif mood == "dead":
+                    for x in (8, 15):
+                        f.create_line(x, 8, x + 3, 11, fill="#000000")
+                        f.create_line(x + 3, 8, x, 11, fill="#000000")
+                else:
+                    f.create_rectangle(9, 9, 11, 11, fill="#000000")
+                    f.create_rectangle(15, 9, 17, 11, fill="#000000")
+                if mood == "o":
+                    f.create_oval(11, 15, 15, 19, outline="#000000")
+                elif mood == "dead":
+                    f.create_arc(8, 15, 18, 22, start=0, extent=180, style="arc", outline="#000000")
+                else:
+                    f.create_arc(8, 10, 18, 18, start=200, extent=140, style="arc", outline="#000000")
+
+            def draw(self):
+                cv = self.canvas
+                cv.delete("all")
+                s = self.CELL
+                for c in range(self.cols):
+                    for r in range(self.rows):
+                        x0, y0 = c * s, r * s
+                        cell = (c, r)
+                        shown_mine = self.over and not self.won and cell in self.mines
+                        if cell in self.open or shown_mine or (self.over and self.flags.get(cell) == "flag"
+                                                               and cell not in self.mines):
+                            fill = "#ff0000" if cell == self.boom else G_FACE
+                            cv.create_rectangle(x0, y0, x0 + s, y0 + s, fill=fill, outline=G_SHADOW)
+                            if shown_mine and self.flags.get(cell) == "flag":
+                                self.draw_flag(x0, y0)
+                            elif shown_mine:
+                                self.draw_mine(x0, y0)
+                            elif cell not in self.open:                      # a flag on a cell without a mine
+                                self.draw_mine(x0, y0)
+                                cv.create_line(x0 + 2, y0 + 2, x0 + s - 2, y0 + s - 2, fill="#ff0000", width=2)
+                                cv.create_line(x0 + s - 2, y0 + 2, x0 + 2, y0 + s - 2, fill="#ff0000", width=2)
+                            else:
+                                n = self.number(c, r)
+                                if n:
+                                    cv.create_text(x0 + s / 2, y0 + s / 2 + 1, text=str(n), fill=self.COLOURS[n],
+                                                   font=("Courier New", 11, "bold"))
+                        else:
+                            g_bevel(cv, x0, y0, x0 + s, y0 + s, G_FACE)
+                            mark = self.flags.get(cell)
+                            if mark == "flag":
+                                self.draw_flag(x0, y0)
+                            elif mark == "?":
+                                cv.create_text(x0 + s / 2, y0 + s / 2 + 1, text="?", font=("Courier New", 10, "bold"))
+
+            def draw_mine(self, x0, y0):
+                cv, s = self.canvas, self.CELL
+                cx, cy = x0 + s / 2, y0 + s / 2
+                cv.create_line(cx - 6, cy, cx + 6, cy, fill="#000000")
+                cv.create_line(cx, cy - 6, cx, cy + 6, fill="#000000")
+                cv.create_line(cx - 4, cy - 4, cx + 4, cy + 4, fill="#000000")
+                cv.create_line(cx - 4, cy + 4, cx + 4, cy - 4, fill="#000000")
+                cv.create_oval(cx - 4, cy - 4, cx + 4, cy + 4, fill="#000000")
+                cv.create_rectangle(cx - 2, cy - 2, cx - 1, cy - 1, fill="#ffffff", outline="")
+
+            def draw_flag(self, x0, y0):
+                cv = self.canvas
+                cv.create_polygon(x0 + 4, y0 + 3, x0 + 10, y0 + 6, x0 + 4, y0 + 9, fill="#ff0000")
+                cv.create_line(x0 + 9, y0 + 3, x0 + 9, y0 + 12, fill="#000000")
+                cv.create_line(x0 + 5, y0 + 12, x0 + 13, y0 + 12, fill="#000000", width=2)
+
+
+        # ───────────────────────────────────────── Tetris ───────────────────────────────────────────────────
+        class W95Tetris(W95GameBase):
+            NAME = "tetris"
+            COLS, ROWS, CELL = 10, 20, 20
+            SHAPES = {"I": ([(0, 1), (1, 1), (2, 1), (3, 1)], "#00c0ff"), "O": ([(1, 0), (2, 0), (1, 1), (2, 1)], "#ffd000"),
+                      "T": ([(1, 0), (0, 1), (1, 1), (2, 1)], "#c000c0"), "S": ([(1, 0), (2, 0), (0, 1), (1, 1)], "#00c000"),
+                      "Z": ([(0, 0), (1, 0), (1, 1), (2, 1)], "#ff0000"), "J": ([(0, 0), (0, 1), (1, 1), (2, 1)], "#0000ff"),
+                      "L": ([(2, 0), (0, 1), (1, 1), (2, 1)], "#ff8000")}
+
+            def __init__(self, parent, top, best_get, best_set):
+                W95GameBase.__init__(self, parent, top, best_get, best_set)
+                body = tk.Frame(parent, bg=G_FACE)
+                body.pack(padx=8, pady=8)
+                box = tk.Frame(body, bd=3, relief="sunken", bg="#000000")
+                box.pack(side="left")
+                self.canvas = tk.Canvas(box, width=self.COLS * self.CELL, height=self.ROWS * self.CELL, bg="#000000",
+                                        highlightthickness=0)
+                self.canvas.pack()
+                side = tk.Frame(body, bg=G_FACE)
+                side.pack(side="left", fill="y", padx=(10, 0))
+                tk.Label(side, text="Next", font=G_FONT_B, bg=G_FACE).pack(anchor="w")
+                nb = tk.Frame(side, bd=2, relief="sunken", bg="#000000")
+                nb.pack(anchor="w")
+                self.next_canvas = tk.Canvas(nb, width=4 * 16, height=3 * 16, bg="#000000", highlightthickness=0)
+                self.next_canvas.pack(padx=4, pady=4)
+                self.leds = {}
+                for name in ("Score", "Lines", "Level", "Best"):
+                    tk.Label(side, text=name, font=G_FONT_B, bg=G_FACE).pack(anchor="w", pady=(8, 0))
+                    self.leds[name] = g_led(side, 6)
+                    self.leds[name].pack(anchor="w")
+                tk.Label(side, text="Left / Right - move\nUp - rotate\nDown - faster\nSpace - drop\nP - pause\nF2 - new game",
+                         font=G_FONT, bg=G_FACE, justify="left").pack(anchor="w", pady=(12, 0))
+                self.bind("<Left>", lambda e: self.move(-1, 0))
+                self.bind("<Right>", lambda e: self.move(1, 0))
+                self.bind("<Down>", lambda e: self.soft_drop())
+                self.bind("<Up>", lambda e: self.rotate())
+                self.bind("<space>", lambda e: self.hard_drop())
+                self.bind("<p>", lambda e: self.pause())
+                self.bind("<P>", lambda e: self.pause())
+                self.bind("<F2>", lambda e: self.new_game())
+                self.new_game()
+
+            def new_game(self):
+                self.board = [[None] * self.COLS for _ in range(self.ROWS)]
+                self.score = self.lines = 0
+                self.level = 1
+                self.over = self.paused = False
+                self.bag = []
+                self.next = self.take()
+                self.spawn()
+                self.show()
+                self.later("fall", self.speed(), self.fall)
+
+            def take(self):
+                if not self.bag:
+                    self.bag = list(self.SHAPES)
+                    _g_random.shuffle(self.bag)
+                return self.bag.pop()
+
+            def speed(self):
+                return max(80, 800 - (self.level - 1) * 70)
+
+            def spawn(self):
+                self.kind, self.next = self.next, self.take()
+                self.cells = list(self.SHAPES[self.kind][0])
+                self.x, self.y = 3, 0
+                if not self.fits(self.cells, self.x, self.y):
+                    self.over = True
+                    self.cancel("fall")
+                    best = self.best()
+                    if self.score > best:
+                        self.best_set(self.NAME, self.score)
+
+            def fits(self, cells, x, y):
+                for cx, cy in cells:
+                    bx, by = x + cx, y + cy
+                    if not (0 <= bx < self.COLS and by < self.ROWS) or (by >= 0 and self.board[by][bx]):
+                        return False
+                return True
+
+            def move(self, dx, dy):
+                if self.over or self.paused:
+                    return False
+                if self.fits(self.cells, self.x + dx, self.y + dy):
+                    self.x += dx
+                    self.y += dy
+                    self.show()
+                    return True
+                return False
+
+            def rotate(self):
+                if self.over or self.paused or self.kind == "O":
+                    return
+                size = 4 if self.kind == "I" else 3
+                turned = [(size - 1 - cy, cx) for cx, cy in self.cells]
+                for kick in (0, -1, 1, -2, 2):
+                    if self.fits(turned, self.x + kick, self.y):
+                        self.cells, self.x = turned, self.x + kick
+                        self.show()
+                        return
+
+            def soft_drop(self):
+                if self.move(0, 1):
+                    self.score += 1
+                    self.show()
+
+            def hard_drop(self):
+                if self.over or self.paused:
+                    return
+                n = 0
+                while self.fits(self.cells, self.x, self.y + 1):
+                    self.y += 1
+                    n += 1
+                self.score += 2 * n
+                self.lock()
+
+            def fall(self):
+                if self.over or self.paused:
+                    return
+                if not self.move(0, 1):
+                    self.lock()
+                if not self.over:
+                    self.later("fall", self.speed(), self.fall)
+
+            def lock(self):
+                colour = self.SHAPES[self.kind][1]
+                for cx, cy in self.cells:
+                    if self.y + cy >= 0:
+                        self.board[self.y + cy][self.x + cx] = colour
+                full = [r for r in range(self.ROWS) if all(self.board[r])]
+                for r in full:
+                    del self.board[r]
+                    self.board.insert(0, [None] * self.COLS)
+                if full:
+                    self.lines += len(full)
+                    self.score += (0, 100, 300, 500, 800)[len(full)] * self.level
+                    self.level = self.lines // 10 + 1
+                self.spawn()
+                self.show()
+
+            def pause(self):
+                if self.over:
+                    return
+                self.paused = not self.paused
+                if not self.paused:
+                    self.later("fall", self.speed(), self.fall)
+                self.show()
+
+            def block(self, canvas, x, y, size, colour):
+                g_bevel(canvas, x, y, x + size, y + size, colour, True, 2)
+                canvas.create_rectangle(x, y, x + size, y + size, outline="#000000")
+
+            def show(self):
+                cv, s = self.canvas, self.CELL
+                cv.delete("all")
+                for r in range(self.ROWS):
+                    for c in range(self.COLS):
+                        if self.board[r][c]:
+                            self.block(cv, c * s, r * s, s, self.board[r][c])
+                if not self.over:
+                    gy = self.y
+                    while self.fits(self.cells, self.x, gy + 1):
+                        gy += 1
+                    for cx, cy in self.cells:                                   # where it will land
+                        cv.create_rectangle((self.x + cx) * s + 1, (gy + cy) * s + 1, (self.x + cx + 1) * s - 1,
+                                            (gy + cy + 1) * s - 1, outline="#606060")
+                    for cx, cy in self.cells:
+                        if self.y + cy >= 0:
+                            self.block(cv, (self.x + cx) * s, (self.y + cy) * s, s, self.SHAPES[self.kind][1])
+                nc = self.next_canvas
+                nc.delete("all")
+                cells, colour = self.SHAPES[self.next]
+                for cx, cy in cells:
+                    self.block(nc, cx * 16, cy * 16 + 8, 16, colour)
+                best = max(self.best(), self.score)
+                for name, value in (("Score", self.score), ("Lines", self.lines), ("Level", self.level), ("Best", best)):
+                    self.leds[name].config(text="%06d" % min(value, 999999))
+                if self.over or self.paused:
+                    w, h = self.COLS * s, self.ROWS * s
+                    cv.create_rectangle(10, h / 2 - 34, w - 10, h / 2 + 34, fill=G_FACE, outline="#000000")
+                    cv.create_text(w / 2, h / 2 - 10, text="GAME OVER" if self.over else "PAUSED", font=("Arial", 14, "bold"))
+                    cv.create_text(w / 2, h / 2 + 14, text="F2 - new game" if self.over else "P - continue", font=G_FONT)
+
+
+        # ───────────────────────────────────────── Snake ────────────────────────────────────────────────────
+        class W95Snake(W95GameBase):
+            NAME = "snake"
+            COLS, ROWS, CELL = 28, 20, 18
+
+            def __init__(self, parent, top, best_get, best_set):
+                W95GameBase.__init__(self, parent, top, best_get, best_set)
+                head = tk.Frame(parent, bg=G_FACE)
+                head.pack(fill="x", padx=8, pady=(8, 4))
+                tk.Label(head, text="Score", font=G_FONT_B, bg=G_FACE).pack(side="left")
+                self.score_led = g_led(head, 4)
+                self.score_led.pack(side="left", padx=(4, 12))
+                tk.Label(head, text="Best", font=G_FONT_B, bg=G_FACE).pack(side="left")
+                self.best_led = g_led(head, 4)
+                self.best_led.pack(side="left", padx=4)
+                tk.Label(head, text="Arrows - turn   P - pause   F2 - new game", font=G_FONT, bg=G_FACE).pack(side="right")
+                box = tk.Frame(parent, bd=3, relief="sunken", bg="#000000")
+                box.pack(padx=8, pady=(0, 8))
+                self.canvas = tk.Canvas(box, width=self.COLS * self.CELL, height=self.ROWS * self.CELL, bg="#004000",
+                                        highlightthickness=0)
+                self.canvas.pack()
+                for key, d in (("<Left>", (-1, 0)), ("<Right>", (1, 0)), ("<Up>", (0, -1)), ("<Down>", (0, 1)),
+                               ("<a>", (-1, 0)), ("<d>", (1, 0)), ("<w>", (0, -1)), ("<s>", (0, 1))):
+                    self.bind(key, lambda e, d=d: self.turn(d))
+                self.bind("<p>", lambda e: self.pause())
+                self.bind("<P>", lambda e: self.pause())
+                self.bind("<F2>", lambda e: self.new_game())
+                self.new_game()
+
+            def new_game(self):
+                cx, cy = self.COLS // 2, self.ROWS // 2
+                self.body = [(cx, cy), (cx - 1, cy), (cx - 2, cy)]
+                self.dir = (1, 0)
+                self.turns = []
+                self.score = 0
+                self.delay = 140
+                self.over = self.paused = False
+                self.food = self.free_cell()
+                self.show()
+                self.later("step", self.delay, self.step)
+
+            def free_cell(self):
+                cells = [(c, r) for c in range(self.COLS) for r in range(self.ROWS) if (c, r) not in self.body]
+                return _g_random.choice(cells) if cells else None
+
+            def turn(self, d):
+                last = self.turns[-1] if self.turns else self.dir
+                if (d[0] + last[0], d[1] + last[1]) != (0, 0) and d != last and len(self.turns) < 3:
+                    self.turns.append(d)
+
+            def pause(self):
+                if self.over:
+                    return
+                self.paused = not self.paused
+                if not self.paused:
+                    self.later("step", self.delay, self.step)
+                self.show()
+
+            def step(self):
+                if self.over or self.paused:
+                    return
+                if self.turns:
+                    self.dir = self.turns.pop(0)
+                hx, hy = self.body[0]
+                head = (hx + self.dir[0], hy + self.dir[1])
+                if not (0 <= head[0] < self.COLS and 0 <= head[1] < self.ROWS) or head in self.body[:-1]:
+                    self.over = True
+                    if self.score > self.best():
+                        self.best_set(self.NAME, self.score)
+                    self.show()
+                    return
+                self.body.insert(0, head)
+                if head == self.food:
+                    self.score += 10
+                    self.delay = max(60, self.delay - 3)
+                    self.food = self.free_cell()
+                else:
+                    self.body.pop()
+                self.show()
+                self.later("step", self.delay, self.step)
+
+            def show(self):
+                cv, s = self.canvas, self.CELL
+                cv.delete("all")
+                if self.food:
+                    fx, fy = self.food
+                    cv.create_oval(fx * s + 2, fy * s + 3, fx * s + s - 2, fy * s + s - 1, fill="#ff2020", outline="#800000")
+                    cv.create_line(fx * s + s / 2, fy * s + 1, fx * s + s / 2 + 2, fy * s + 4, fill="#00c000", width=2)
+                for i, (x, y) in enumerate(self.body):
+                    g_bevel(cv, x * s + 1, y * s + 1, x * s + s - 1, y * s + s - 1, "#00e000" if i == 0 else "#00b000")
+                hx, hy = self.body[0]
+                cv.create_rectangle(hx * s + 5, hy * s + 5, hx * s + 8, hy * s + 8, fill="#000000", outline="")
+                self.score_led.config(text="%04d" % self.score)
+                self.best_led.config(text="%04d" % max(self.best(), self.score))
+                if self.over or self.paused:
+                    w, h = self.COLS * s, self.ROWS * s
+                    cv.create_rectangle(w / 2 - 110, h / 2 - 30, w / 2 + 110, h / 2 + 30, fill=G_FACE, outline="#000000")
+                    cv.create_text(w / 2, h / 2 - 8, text="GAME OVER" if self.over else "PAUSED", font=("Arial", 14, "bold"))
+                    cv.create_text(w / 2, h / 2 + 14, text="F2 - new game" if self.over else "P - continue", font=G_FONT)
+
+
+        # ───────────────────────────────────────── Pong ─────────────────────────────────────────────────────
+        class W95Pong(W95GameBase):
+            NAME = "pong"
+            W, H, PAD_H, PAD_W, BALL, WIN = 560, 360, 56, 10, 10, 7
+
+            def __init__(self, parent, top, best_get, best_set):
+                W95GameBase.__init__(self, parent, top, best_get, best_set)
+                head = tk.Frame(parent, bg=G_FACE)
+                head.pack(fill="x", padx=8, pady=(8, 4))
+                self.info = tk.Label(head, text="", font=G_FONT, bg=G_FACE)
+                self.info.pack(side="left")
+                tk.Label(head, text="Up/Down or mouse   P pause   F2 new", font=G_FONT, bg=G_FACE).pack(side="right")
+                box = tk.Frame(parent, bd=3, relief="sunken", bg="#000000")
+                box.pack(padx=8, pady=(0, 8))
+                self.canvas = tk.Canvas(box, width=self.W, height=self.H, bg="#000000", highlightthickness=0)
+                self.canvas.pack()
+                self.canvas.bind("<Motion>", self.mouse)
+                self.held = set()
+                for key in ("Up", "Down", "w", "s"):
+                    self.top.bind("<KeyPress-%s>" % key, lambda e, k=key: self.held.add(k) or "break")
+                    self.top.bind("<KeyRelease-%s>" % key, lambda e, k=key: self.held.discard(k) or "break")
+                self.bind("<p>", lambda e: self.pause())
+                self.bind("<P>", lambda e: self.pause())
+                self.bind("<F2>", lambda e: self.new_game())
+                self.new_game()
+
+            def new_game(self):
+                self.you = self.cpu = 0
+                self.py = self.cy = self.H / 2 - self.PAD_H / 2
+                self.over = self.paused = False
+                self.serve(1)
+                self.later("frame", 16, self.frame)
+
+            def serve(self, direction):
+                self.bx, self.by = self.W / 2, self.H / 2
+                angle = _g_random.uniform(-0.6, 0.6)
+                self.speed = 5.0
+                self.vx, self.vy = direction * self.speed, self.speed * angle
+                self.wait = 40                                       # frames before the ball moves
+
+            def mouse(self, event):
+                if not (self.over or self.paused):
+                    self.py = max(0, min(self.H - self.PAD_H, event.y - self.PAD_H / 2))
+
+            def pause(self):
+                if self.over:
+                    return
+                self.paused = not self.paused
+                if not self.paused:
+                    self.later("frame", 16, self.frame)
+                self.show()
+
+            def frame(self):
+                if self.over or self.paused:
+                    return
+                if self.held & {"Up", "w"}:
+                    self.py = max(0, self.py - 7)
+                if self.held & {"Down", "s"}:
+                    self.py = min(self.H - self.PAD_H, self.py + 7)
+                target = self.by - self.PAD_H / 2 if self.vx > 0 else self.H / 2 - self.PAD_H / 2
+                self.cy += max(-4.2, min(4.2, target - self.cy))      # the computer moves at most 4.2 px a frame
+                self.cy = max(0, min(self.H - self.PAD_H, self.cy))
+                if self.wait:
+                    self.wait -= 1
+                else:
+                    self.bx += self.vx
+                    self.by += self.vy
+                    r = self.BALL / 2
+                    if self.by - r <= 0 or self.by + r >= self.H:
+                        self.vy = -self.vy
+                        self.by = max(r, min(self.H - r, self.by))
+                    for px, py, side in ((20, self.py, 1), (self.W - 20 - self.PAD_W, self.cy, -1)):
+                        inside_x = px - r <= self.bx <= px + self.PAD_W + r
+                        if inside_x and py - r <= self.by <= py + self.PAD_H + r and self.vx * side < 0:
+                            hit = (self.by - (py + self.PAD_H / 2)) / (self.PAD_H / 2)
+                            self.speed = min(12.0, self.speed + 0.35)
+                            self.vx = side * self.speed
+                            self.vy = self.speed * 0.9 * hit
+                    if self.bx < 0:
+                        self.cpu += 1
+                        self.point(1)
+                    elif self.bx > self.W:
+                        self.you += 1
+                        self.point(-1)
+                self.show()
+                if not self.over:
+                    self.later("frame", 16, self.frame)
+
+            def point(self, direction):
+                if self.you >= self.WIN or self.cpu >= self.WIN:
+                    self.over = True
+                    if self.you > self.cpu:
+                        self.best_set(self.NAME, self.best() + 1)          # games won against the computer
+                else:
+                    self.serve(direction)
+
+            def show(self):
+                cv = self.canvas
+                cv.delete("all")
+                for y in range(0, self.H, 18):
+                    cv.create_rectangle(self.W / 2 - 2, y, self.W / 2 + 2, y + 9, fill="#606060", outline="")
+                cv.create_text(self.W / 2 - 50, 30, text=str(self.you), fill="#ffffff", font=("Courier New", 28, "bold"))
+                cv.create_text(self.W / 2 + 50, 30, text=str(self.cpu), fill="#ffffff", font=("Courier New", 28, "bold"))
+                cv.create_rectangle(20, self.py, 20 + self.PAD_W, self.py + self.PAD_H, fill="#ffffff", outline="")
+                cv.create_rectangle(self.W - 20 - self.PAD_W, self.cy, self.W - 20, self.cy + self.PAD_H, fill="#ffffff",
+                                    outline="")
+                r = self.BALL / 2
+                if not self.over:
+                    cv.create_rectangle(self.bx - r, self.by - r, self.bx + r, self.by + r, fill="#ffff00", outline="")
+                self.info.config(text="You %d - %d Computer  (to %d)   Won: %d" % (self.you, self.cpu, self.WIN, self.best()))
+                if self.over or self.paused:
+                    text = "PAUSED" if self.paused else ("YOU WIN!" if self.you > self.cpu else "COMPUTER WINS")
+                    cv.create_rectangle(self.W / 2 - 120, self.H / 2 - 32, self.W / 2 + 120, self.H / 2 + 32, fill=G_FACE,
+                                        outline="#ffffff")
+                    cv.create_text(self.W / 2, self.H / 2 - 9, text=text, font=("Arial", 14, "bold"))
+                    cv.create_text(self.W / 2, self.H / 2 + 14, text="P - continue" if self.paused else "F2 - new game",
+                                   font=G_FONT)
+
+
+        W95_GAME_CLASSES = {"tetris": W95Tetris, "snake": W95Snake, "mines": W95Minesweeper, "pong": W95Pong}
+
         def make_icon(kind, scale):
             image = tk.PhotoImage(width=16 * scale, height=16 * scale)
             for x0, y0, x1, y1, colour in ICONS[kind]:
@@ -66394,9 +67319,13 @@ if w95var == 1998 or w95var1 == 1997:
                     grip.place(relx=1.0, rely=1.0, anchor="se")
                     grip.bind("<ButtonPress-1>", self._grip_press)
                     grip.bind("<B1-Motion>", self._grip_drag)
-                screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
-                x = max(0, (screen_w - width) // 2)
-                y = max(0, (screen_h - height) // 3 if modal else (screen_h - height) // 2 - 40)
+                # screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+                # x = max(0, (screen_w - width) // 2)
+                # y = max(0, (screen_h - height) // 3 if modal else (screen_h - height) // 2 - 40)
+                ax, ay, aw, ah = desk.desk_area()          # inside the Bitpack desktop (as in the Instance Checker)
+                width, height = min(width, aw), min(height, ah)
+                x = ax + max(0, (aw - width) // 2)
+                y = ay + max(0, (ah - height) // 3)
                 self.geometry = [x, y, width, height]
                 self.min_size = (min(width, 260), min(height, 140))
                 self._apply()
@@ -66428,8 +67357,9 @@ if w95var == 1998 or w95var1 == 1997:
                 if self.maximized:
                     return
                 x0, y0, gx, gy = self._drag_from
-                self.geometry[0], self.geometry[1] = gx + event.x_root - x0, max(0, gy + event.y_root - y0)
-                self.top.geometry("+%d+%d" % (self.geometry[0], self.geometry[1]))
+                x, y = self.desk.clamp_xy(self.top, gx + event.x_root - x0, gy + event.y_root - y0)
+                self.geometry[0], self.geometry[1] = x, y
+                self.top.geometry("+%d+%d" % (x, y))
 
             def _grip_press(self, event):
                 self._resize_from = (event.x_root, event.y_root, self.geometry[2], self.geometry[3])
@@ -66438,20 +67368,47 @@ if w95var == 1998 or w95var1 == 1997:
                 if self.maximized:
                     return
                 x0, y0, w, h = self._resize_from
-                self.geometry[2] = max(self.min_size[0], w + event.x_root - x0)
-                self.geometry[3] = max(self.min_size[1], h + event.y_root - y0)
+                ax, ay, aw, ah = self.desk._area_now()          # not wider or taller than the desktop
+                self.geometry[2] = max(self.min_size[0], min(w + event.x_root - x0, ax + aw - self.geometry[0]))
+                self.geometry[3] = max(self.min_size[1], min(h + event.y_root - y0, ay + ah - self.geometry[1]))
                 self._apply()
+            # def _drag(self, event):
+                # if self.maximized:
+                    # return
+                # x0, y0, gx, gy = self._drag_from
+                # self.geometry[0], self.geometry[1] = gx + event.x_root - x0, max(0, gy + event.y_root - y0)
+                # self.top.geometry("+%d+%d" % (self.geometry[0], self.geometry[1]))
+
+            # def _grip_press(self, event):
+                # self._resize_from = (event.x_root, event.y_root, self.geometry[2], self.geometry[3])
+
+            # def _grip_drag(self, event):
+                # if self.maximized:
+                    # return
+                # x0, y0, w, h = self._resize_from
+                # self.geometry[2] = max(self.min_size[0], w + event.x_root - x0)
+                # self.geometry[3] = max(self.min_size[1], h + event.y_root - y0)
+                # self._apply()
 
             def toggle_maximize(self):
                 self.maximized = not self.maximized
                 if hasattr(self, "max_button"):
                     self.max_button.config(text=self.desk.glyphs["restore" if self.maximized else "max"])
-                if self.maximized:
-                    root = self.desk.rootW95dist
-                    self.top.geometry("%dx%d+%d+%d" % (root.winfo_width(), root.winfo_height() - TASKBAR_H,
-                                                       root.winfo_rootx(), root.winfo_rooty()))
+                if self.maximized:                          # the whole Bitpack desktop, above its taskbar
+                    x, y, w, h = self.desk.desk_area()
+                    self.top.geometry("%dx%d+%d+%d" % (w, h, x, y))
                 else:
                     self._apply()
+            # def toggle_maximize(self):
+                # self.maximized = not self.maximized
+                # if hasattr(self, "max_button"):
+                    # self.max_button.config(text=self.desk.glyphs["restore" if self.maximized else "max"])
+                # if self.maximized:
+                    # root = self.desk.rootW95dist
+                    # self.top.geometry("%dx%d+%d+%d" % (root.winfo_width(), root.winfo_height() - TASKBAR_H,
+                                                       # root.winfo_rootx(), root.winfo_rooty()))
+                # else:
+                    # self._apply()
 
             def minimize(self):
                 self.desk.bring_window_to_front(self.top)       # the taskbar's own minimize
@@ -66943,14 +67900,14 @@ if w95var == 1998 or w95var1 == 1997:
                 
                 # Setează fereastra să fie fullscreen fără bara de titlu
                 self.rootW95dist.overrideredirect(True)
-                self.rootW95dist.state('zoomed')  # Pentru Windows - fullscreen
+                #self.rootW95dist.state('zoomed')  # Pentru Windows - fullscreen
                 #self.rootW95dist.tk.call('tk', 'scaling', 1.6)
                 # Pentru Linux/Mac folosește: self.rootW95dist.attributes('-fullscreen', True)
                 
                 self.rootW95dist.configure(bg="#008080")  # Teal background
                 
                 # Variables pentru Start Menu
-                self.start_menu_visible = True
+                self.start_menu_visible = False
                 self.start_menu = None
                 self.show_title_bar = False
 
@@ -66990,6 +67947,13 @@ if w95var == 1998 or w95var1 == 1997:
                 self.last_update_check = None
                 # update checker: dupa 2 - 5 secunde (aleator) anunta ca Bitpack e fara suport
                 self.rootW95dist.after(random.randint(2000, 5000), self.update_check_popup)
+                self.toggle_title_bar()
+                
+                self._maximized = {}
+                self._desk_pos = None
+                self.rootW95dist.bind_all("<ButtonPress-1>", self._start_menu_click, add="+")
+                self.rootW95dist.bind("<Configure>", self._follow_desktop, add="+")
+                self.desktop_frame.bind("<Configure>", self._follow_desktop, add="+")
                 
             # ----- retro helpers (as in the Virtual Instance Checker) -------------------------------------
             def caption_button(self, parent, key, command):
@@ -67088,6 +68052,9 @@ if w95var == 1998 or w95var1 == 1997:
                 self.create_desktop_icon("System Requirements", 0, 0, "sysinfo", side="right")
                 
                 self.create_desktop_icon("Update Manager", 0, 0, "update", side="right")
+                
+                if w95_games_enabled():
+                    self.games_desktop_icons()
 
                 self.desktop_frame.bind("<Configure>", lambda e: self.arrange_desktop_icons())
                 self.desktop_frame.bind("<ButtonPress-1>", lambda e: self.select_desktop_icon(None)
@@ -67205,6 +68172,10 @@ if w95var == 1998 or w95var1 == 1997:
                     row.bind("<Leave>", lambda e, w=row: w.config(bg=FACE, fg=BLACK))
                     row.bind("<ButtonRelease-1>", lambda e, a=action, w=row: (w.config(bg=FACE, fg=BLACK),
                                                                               self.hide_start_menu(), a()))
+                    if text == "Activation Wizard":
+                        activation_row = row
+                # Games > (Tetris, Snake, Minesweeper, Pong): only while exec class games:95 is on
+                self.games_start_row(items, activation_row)
                 if self.start_menu_visible:                       # Start menu deschis la pornire, ca înainte
                     self.rootW95dist.after_idle(self.show_start_menu)
 
@@ -67233,16 +68204,23 @@ if w95var == 1998 or w95var1 == 1997:
                 return self.icons16["window"]
 
             def add_window_to_taskbar(self, title, window):
+                # the window stays above the Bitpack desktop: a click on the desktop (or the end of a message box)
+                # no longer hides it behind the desktop, where its taskbar button needed one click more
+                try:
+                    window.transient(self.rootW95dist)
+                except tk.TclError:
+                    pass
                 # Create taskbar button for the window (icon + title, as in Windows 95)
                 button = tk.Button(self.taskbar_windows_frame, text=" " + title[:22], image=self._task_icon(title),
                                    compound="left", font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
                                    relief="raised", bd=2, padx=4, pady=0, anchor="w", width=150,
                                    highlightthickness=0, takefocus=0,
-                                   command=lambda: self.bring_window_to_front(window))
+                                   command=lambda: self.taskbar_click(window))
                 button.pack(side="left", fill="y", padx=(0, 3))
 
                 # Add to open windows list
                 self.open_windows.append((title, window, button))
+                self.fit_window(window)                    # opens inside the Bitpack desktop
 
                 # Set initial active state
                 self.set_active_window(window)
@@ -67251,7 +68229,267 @@ if w95var == 1998 or w95var1 == 1997:
                 window.bind("<Unmap>", lambda e: self.update_taskbar_button_state(window, "minimized"))
                 window.bind("<Map>", lambda e: self.update_taskbar_button_state(window, "restored"))
                 window.bind("<FocusIn>", lambda e: self.set_active_window(window))
+                window.bind("<Configure>", lambda e: self._keep_inside_later(window) if e.widget is window else None,
+                            add="+")                       # never outside the desktop, whoever moves it
                 self.rootW95dist.after_idle(lambda: self.retro_skin(window))      # Windows 95 look
+                self.rootW95dist.after(80, lambda: self._raise_window(window))   # in front once it is on the screen
+
+            def taskbar_click(self, window):
+                """Taskbar button, as in Windows 95: a minimized window comes back, a window behind another comes to
+                the front, and only the window that is already in front is minimized."""
+                try:
+                    if not window.winfo_viewable():
+                        window.deiconify()
+                        self._raise_window(window)
+                        self.update_taskbar_button_state(window, "restored")
+                        return
+                    order = [str(w) for w in self.rootW95dist.tk.splitlist(
+                        self.rootW95dist.tk.call("wm", "stackorder", self.rootW95dist))]
+                    if order and order[-1] == str(window):
+                        window.withdraw()
+                        self.update_taskbar_button_state(window, "minimized")
+                    else:
+                        self._raise_window(window)
+                except tk.TclError:
+                    pass
+
+            def _raise_window(self, window):
+                try:
+                    if window.winfo_exists() and window.winfo_viewable():
+                        window.lift()
+                        window.focus_force()
+                        self.set_active_window(window)
+                except tk.TclError:
+                    pass
+                    
+            def desk_area(self):
+                """(x, y, width, height) on the screen of the desktop: between the title bar and the taskbar."""
+                desk = self.desktop_frame
+                try:
+                    desk.update_idletasks()
+                    return (desk.winfo_rootx(), desk.winfo_rooty(), max(200, desk.winfo_width()),
+                            max(150, desk.winfo_height()))
+                except tk.TclError:
+                    return 0, 0, self.rootW95dist.winfo_screenwidth(), self.rootW95dist.winfo_screenheight() - 40
+
+            def _w95_of(self, window):
+                return next((w for w in self.w95_windows.values() if w.top is window), None)
+
+            def fit_window(self, window):
+                """A new window opens inside the desktop, one under the other as in the Instance Checker, and is never
+                bigger than the desktop."""
+                try:
+                    window.update_idletasks()
+                    ax, ay, aw, ah = self.desk_area()
+                    size = re.match(r"(\d+)x(\d+)", window.geometry())
+                    w, h = (int(size.group(1)), int(size.group(2))) if size else (1, 1)
+                    if w <= 1 or h <= 1:
+                        w, h = window.winfo_reqwidth(), window.winfo_reqheight()
+                    w, h = min(w, aw), min(h, ah)
+                    offset = 28 * ((len(self.open_windows) - 1) % 6)
+                    x = ax + max(0, min(110 + offset, aw - w))
+                    y = ay + max(0, min(30 + offset, ah - h))
+                    target = "%dx%d+%d+%d" % (w, h, x, y)
+                    window.geometry(target)
+                    window.update_idletasks()             # placed now, before the tool lifts / focuses itself
+                    w95 = self._w95_of(window)
+                    if w95 is not None:
+                        w95.geometry = [x, y, w, h]
+                    # Windows: a lift() or focus_force() right after can put the window back where it was made
+                    # (centred on the screen); the place is set once more when the window is on the screen
+                    window.after(60, lambda: self._refit(window, target))
+                except (tk.TclError, ValueError):
+                    pass
+
+            def _refit(self, window, target):
+                try:
+                    if window.winfo_exists() and str(window) not in self._maximized and window.geometry() != target:
+                        window.geometry(target)
+                except tk.TclError:
+                    pass
+            # def fit_window(self, window):
+                # """A new window opens inside the desktop, one under the other as in the Instance Checker, and is never
+                # bigger than the desktop."""
+                # try:
+                    # window.update_idletasks()
+                    # ax, ay, aw, ah = self.desk_area()
+                    # size = re.match(r"(\d+)x(\d+)", window.geometry())
+                    # w, h = (int(size.group(1)), int(size.group(2))) if size else (1, 1)
+                    # if w <= 1 or h <= 1:
+                        # w, h = window.winfo_reqwidth(), window.winfo_reqheight()
+                    # w, h = min(w, aw), min(h, ah)
+                    # offset = 28 * ((len(self.open_windows) - 1) % 6)
+                    # x = ax + max(0, min(110 + offset, aw - w))
+                    # y = ay + max(0, min(30 + offset, ah - h))
+                    # window.geometry("%dx%d+%d+%d" % (w, h, x, y))
+                    # w95 = self._w95_of(window)
+                    # if w95 is not None:
+                        # w95.geometry = [x, y, w, h]
+                # except (tk.TclError, ValueError):
+                    # pass
+
+            def toggle_window_maximize(self, window):
+                """Maximize / Restore for the windows that had no Maximize button: the size of the desktop."""
+                key = str(window)
+                try:
+                    if key in self._maximized:
+                        normal = self._maximized.pop(key)
+                        window.geometry(normal)
+                        window.after(60, lambda: window.geometry(normal) if key not in self._maximized else None)
+                        glyph = "max"
+                    else:
+                        self._maximized[key] = window.geometry()
+                        x, y, w, h = self.desk_area()
+                        target = "%dx%d+%d+%d" % (w, h, x, y)
+                        window.geometry(target)
+                        window.after(60, lambda: window.geometry(target) if key in self._maximized else None)
+                        glyph = "restore"
+                    button = getattr(window, "_w95_max", None)
+                    if button is not None:
+                        button.config(text=self.glyphs[glyph])
+                    window.lift()
+                except tk.TclError:
+                    self._maximized.pop(key, None)
+            # def toggle_window_maximize(self, window):
+                # """Maximize / Restore for the windows that had no Maximize button: the size of the desktop."""
+                # key = str(window)
+                # try:
+                    # if key in self._maximized:
+                        # window.geometry(self._maximized.pop(key))
+                        # glyph = "max"
+                    # else:
+                        # self._maximized[key] = window.geometry()
+                        # x, y, w, h = self.desk_area()
+                        # target = "%dx%d+%d+%d" % (w, h, x, y)
+                        # window.geometry(target)
+                        # window.after(60, lambda: window.geometry(target) if key in self._maximized else None)
+                        # glyph = "restore"
+                    # button = getattr(window, "_w95_max", None)
+                    # if button is not None:
+                        # button.config(text=self.glyphs[glyph])
+                    # window.lift()
+                # except tk.TclError:
+                    # self._maximized.pop(key, None)
+
+            def _follow_desktop(self, event=None):
+                """When the Bitpack window moves or changes size, its windows go with it and stay inside it; the
+                maximized ones keep the size of the desktop."""
+                if event is not None and event.widget not in (self.rootW95dist, self.desktop_frame):
+                    return
+                area = self.desk_area()
+                old, self._desk_pos = self._desk_pos, area
+                if old is None or old == area:
+                    return
+                ax, ay, aw, ah = area
+                dx, dy = ax - old[0], ay - old[1]
+                for _title, window, _button in list(self.open_windows):
+                    try:
+                        w95 = self._w95_of(window)
+                        if str(window) in self._maximized or (w95 is not None and w95.maximized):
+                            window.geometry("%dx%d+%d+%d" % (aw, ah, ax, ay))
+                            continue
+                        w, h = min(window.winfo_width(), aw), min(window.winfo_height(), ah)
+                        x = min(max(window.winfo_x() + dx, ax), ax + aw - w)
+                        y = min(max(window.winfo_y() + dy, ay), ay + ah - h)
+                        window.geometry("%dx%d+%d+%d" % (w, h, x, y))
+                        if w95 is not None:
+                            w95.geometry = [x, y, w, h]
+                    except tk.TclError:
+                        pass
+            # def _follow_desktop(self, event=None):
+                # """When the Bitpack window moves or changes size, its windows go with it; the maximized ones keep the
+                # size of the desktop."""
+                # if event is not None and event.widget not in (self.rootW95dist, self.desktop_frame):
+                    # return
+                # area = self.desk_area()
+                # old, self._desk_pos = self._desk_pos, area
+                # if old is None or old == area:
+                    # return
+                # dx, dy = area[0] - old[0], area[1] - old[1]
+                # for _title, window, _button in list(self.open_windows):
+                    # try:
+                        # w95 = self._w95_of(window)
+                        # if str(window) in self._maximized or (w95 is not None and w95.maximized):
+                            # window.geometry("%dx%d+%d+%d" % (area[2], area[3], area[0], area[1]))
+                            # continue
+                        # if dx or dy:
+                            # window.geometry("+%d+%d" % (window.winfo_x() + dx, window.winfo_y() + dy))
+                            # if w95 is not None:
+                                # w95.geometry[0] += dx
+                                # w95.geometry[1] += dy
+                    # except tk.TclError:
+                        # pass
+
+            def _start_menu_click(self, event):
+                """A click outside the Start menu closes it (as in Windows 95 and the Instance Checker)."""
+                if not self.start_menu_visible:
+                    return
+                widget = event.widget
+                while isinstance(widget, tk.Misc):
+                    if widget is self.start_menu or widget is self.start_button:
+                        return
+                    widget = getattr(widget, "master", None)
+                self.hide_start_menu()
+            # def add_window_to_taskbar(self, title, window):
+                # # Create taskbar button for the window (icon + title, as in Windows 95)
+                # button = tk.Button(self.taskbar_windows_frame, text=" " + title[:22], image=self._task_icon(title),
+                                   # compound="left", font=FONT, bg=FACE, fg=BLACK, activebackground=FACE,
+                                   # relief="raised", bd=2, padx=4, pady=0, anchor="w", width=150,
+                                   # highlightthickness=0, takefocus=0,
+                                   # command=lambda: self.bring_window_to_front(window))
+                # button.pack(side="left", fill="y", padx=(0, 3))
+
+                # # Add to open windows list
+                # self.open_windows.append((title, window, button))
+
+                # # Set initial active state
+                # self.set_active_window(window)
+
+                # # Update window state when minimized/restored/focused
+                # window.bind("<Unmap>", lambda e: self.update_taskbar_button_state(window, "minimized"))
+                # window.bind("<Map>", lambda e: self.update_taskbar_button_state(window, "restored"))
+                # window.bind("<FocusIn>", lambda e: self.set_active_window(window))
+                # self.rootW95dist.after_idle(lambda: self.retro_skin(window))      # Windows 95 look
+
+            def _area_now(self):
+                """The desktop area on the screen, without waiting for pending changes (safe inside <Configure>)."""
+                desk = self.desktop_frame
+                return (desk.winfo_rootx(), desk.winfo_rooty(), max(200, desk.winfo_width()),
+                        max(150, desk.winfo_height()))
+
+            def clamp_xy(self, window, x, y):
+                """The nearest place to (x, y) where the whole window stays on the desktop."""
+                ax, ay, aw, ah = self._area_now()
+                w, h = window.winfo_width(), window.winfo_height()
+                return min(max(x, ax), max(ax, ax + aw - w)), min(max(y, ay), max(ay, ay + ah - h))
+
+            def _keep_inside_later(self, window):
+                """<Configure> of a window: checked a moment later (a move asked inside <Configure> is lost)."""
+                if getattr(window, "_w95_inside_job", None) is None:
+                    try:
+                        window._w95_inside_job = window.after(15, lambda: self._keep_inside(window))
+                    except tk.TclError:
+                        pass
+
+            def _keep_inside(self, window):
+                """After any move or resize (also by a program's own title bar): back inside the desktop."""
+                window._w95_inside_job = None
+                try:
+                    if not window.winfo_viewable():
+                        return
+                    ax, ay, aw, ah = self._area_now()
+                    x, y, w, h = window.winfo_x(), window.winfo_y(), window.winfo_width(), window.winfo_height()
+                    nw, nh = min(w, aw), min(h, ah)
+                    nx = min(max(x, ax), ax + aw - nw)
+                    ny = min(max(y, ay), ay + ah - nh)
+                    if (nx, ny, nw, nh) == (x, y, w, h):
+                        return
+                    window.geometry("%dx%d+%d+%d" % (nw, nh, nx, ny) if (nw, nh) != (w, h) else "+%d+%d" % (nx, ny))
+                    w95 = self._w95_of(window)
+                    if w95 is not None and not w95.maximized:
+                        w95.geometry = [nx, ny, nw, nh]
+                except tk.TclError:
+                    pass
 
             def _style_task_button(self, button, active):
                 # Windows 95: the active window's button is pressed in, with bold text
@@ -67375,9 +68613,26 @@ if w95var == 1998 or w95var1 == 1997:
                 if close_button is None or getattr(window, "_w95_min", None) is not None:
                     return
                 if any(w is window for _t, w, _b in self.open_windows):
+                    after = close_button
+                    if not window.title().startswith(("Scientific Calculator", "Calculator")):   # _ [] X
+                        window._w95_max = self.caption_button(window._w95_bar, "max",
+                                                              lambda: self.toggle_window_maximize(window))
+                        window._w95_max.pack(side="right", after=close_button)
+                        after = window._w95_max
+                        for part in [window._w95_bar] + [c for c in window._w95_bar.winfo_children()
+                                                         if isinstance(c, tk.Label)]:
+                            part.bind("<Double-Button-1>", lambda e: self.toggle_window_maximize(window))
                     window._w95_min = self.caption_button(window._w95_bar, "min",
                                                           lambda: self.bring_window_to_front(window))
-                    window._w95_min.pack(side="right", after=close_button)
+                    window._w95_min.pack(side="right", after=after)
+            # def _retro_min_button(self, window):
+                # close_button = getattr(window, "_w95_close", None)
+                # if close_button is None or getattr(window, "_w95_min", None) is not None:
+                    # return
+                # if any(w is window for _t, w, _b in self.open_windows):
+                    # window._w95_min = self.caption_button(window._w95_bar, "min",
+                                                          # lambda: self.bring_window_to_front(window))
+                    # window._w95_min.pack(side="right", after=close_button)
 
             def _retro_menu(self, menu):
                 try:
@@ -67482,12 +68737,22 @@ if w95var == 1998 or w95var1 == 1997:
                     window.y = None
 
                 def do_move(event):
+                    if str(window) in getattr(self, "_maximized", {}):    # a maximized window stays in place
+                        return
                     if hasattr(window, 'x') and window.x is not None:
                         deltax = event.x - window.x
                         deltay = event.y - window.y
-                        x = window.winfo_x() + deltax
-                        y = window.winfo_y() + deltay
+                        x, y = self.clamp_xy(window, window.winfo_x() + deltax, window.winfo_y() + deltay)
                         window.geometry(f"+{x}+{y}")
+                # def do_move(event):
+                    # if str(window) in getattr(self, "_maximized", {}):    # a maximized window stays in place
+                        # return
+                    # if hasattr(window, 'x') and window.x is not None:
+                        # deltax = event.x - window.x
+                        # deltay = event.y - window.y
+                        # x = window.winfo_x() + deltax
+                        # y = window.winfo_y() + deltay
+                        # window.geometry(f"+{x}+{y}")
 
                 title_bar.bind("<Button-1>", start_move)
                 title_bar.bind("<ButtonRelease-1>", stop_move)
@@ -67550,6 +68815,8 @@ if w95var == 1998 or w95var1 == 1997:
                         self.create_internet_explorer()
                 elif icon_type == "update":
                     self.create_update_manager()
+                elif icon_type in W95_GAMES:
+                    self.open_game(icon_type)
                 else:
                     self.open_window(name)
             
@@ -68025,6 +69292,8 @@ if w95var == 1998 or w95var1 == 1997:
     
     - Planogram Studio (planogram/studio)
     
+    - Shift Planner (shiftpl/shiftpl)
+    
     - Image Editor (imgeditor/imgeditor)
     
     - Image Resize (imgres/imgres)
@@ -68185,6 +69454,7 @@ if w95var == 1998 or w95var1 == 1997:
     - screenrec/screenrec - Screen recording application
     - script/agent - Script runner for daily tasks
     - shell/integrator - Bitpack manual repair utility
+    - shiftpl/shiftpl - Shift planner
     - sql/comp - SQLite and SQL comparison tool
     - sql/designer - Database designer
     - sql/diagram -  SQLite database manager and SQL query representation with diagram
@@ -69034,16 +70304,24 @@ if w95var == 1998 or w95var1 == 1997:
 
                         def toggle_maximize(self):
                             root = self.rootrecovv
+                            if self.embedded and desk is not None:      # on the w95dist desktop: the desktop keeps it
+                                root._w95_max = getattr(self, "btn_max", None)   # (its button shows [] or restore)
+                                desk.toggle_window_maximize(root)
+                                self.maximized = str(root) in desk._maximized
+                                return
                             if self.maximized:
                                 root.geometry(self.normal_geometry)
                             else:
                                 self.normal_geometry = root.geometry()
                                 if self.embedded:
-                                    parent = root.master
-                                    taskbar = getattr(desk, "taskbar", None)
-                                    height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
-                                    root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
-                                                                   parent.winfo_rooty()))
+                                    x, y, width, height = desk.desk_area()      # the size of the Bitpack desktop
+                                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                                # if self.embedded:
+                                    # parent = root.master
+                                    # taskbar = getattr(desk, "taskbar", None)
+                                    # height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
+                                    # root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
+                                                                   # parent.winfo_rooty()))
                                 else:
                                     x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
                                     if IS_WINDOWS:
@@ -70025,16 +71303,24 @@ if w95var == 1998 or w95var1 == 1997:
 
                         def toggle_maximize(self):
                             root = self.rootfish
+                            if self.embedded and desk is not None:      # on the w95dist desktop: the desktop keeps it
+                                root._w95_max = getattr(self, "btn_max", None)   # (its button shows [] or restore)
+                                desk.toggle_window_maximize(root)
+                                self.maximized = str(root) in desk._maximized
+                                return
                             if self.maximized:
                                 root.geometry(self.normal_geometry)
                             else:
                                 self.normal_geometry = root.geometry()
                                 if self.embedded:
-                                    parent = root.master
-                                    taskbar = getattr(desk, "taskbar", None)
-                                    height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
-                                    root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
-                                                                   parent.winfo_rooty()))
+                                    x, y, width, height = desk.desk_area()      # the size of the Bitpack desktop
+                                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                                # if self.embedded:
+                                    # parent = root.master
+                                    # taskbar = getattr(desk, "taskbar", None)
+                                    # height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
+                                    # root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
+                                                                   # parent.winfo_rooty()))
                                 else:
                                     x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
                                     if IS_WINDOWS:
@@ -70578,7 +71864,92 @@ if w95var == 1998 or w95var1 == 1997:
                 self._update_manager_refresh = refresh
                 window.on_close = lambda: setattr(self, "_update_manager_refresh", None)
                 self.add_window(window)
-                
+            
+            def open_game(self, kind):
+                title = W95_GAME_TITLES[kind]
+                if not w95_games_enabled():
+                    self.message(title, "Bitpack Games are not activated.\n\nOpen the Command Prompt and type:\n"
+                                        "exec class games:95", "info")
+                    return
+                if self._focus_existing(title):                     # already open: brought to the front
+                    return
+                window = W95Window(self, title, title, kind, 320, 240, resizable=False)
+                game = W95_GAME_CLASSES[kind](window.body, window.top,
+                                              lambda name: w95_games_flag("w95games_best_" + name),
+                                              lambda name, value: w95_games_flag("w95games_best_" + name, value))
+                window.on_close = game.stop                             # no timer keeps running after Close
+                window.top.update_idletasks()
+                w, h = window.top.winfo_reqwidth(), window.top.winfo_reqheight()
+                sw, sh = self.rootW95dist.winfo_screenwidth(), self.rootW95dist.winfo_screenheight()
+                window.geometry = [max(0, (sw - w) // 2), max(0, (sh - h) // 2 - 30), w, h]
+                window._apply()
+                self.add_window(window)
+                window.top.focus_force()
+                window.top.bind("<ButtonPress-1>", lambda e: window.top.focus_force(), add="+")
+
+            def games_desktop_icons(self, show=True):
+                """The four icons on the right of the desktop, under Update Manager (or taken away)."""
+                canvas = self.desktop_frame
+                games = [item for item in self.desktop_items if item["type"] in W95_GAMES]
+                if show and not games:
+                    for kind in W95_GAMES:
+                        self.create_desktop_icon(W95_GAME_TITLES[kind], 0, 0, kind, side="right")
+                elif not show:
+                    for item in games:
+                        for key in ("picture", "text", "back"):
+                            canvas.delete(item[key])
+                        self.desktop_items.remove(item)
+                        if getattr(self, "selected_icon", None) is item:
+                            self.selected_icon = None
+                else:
+                    return
+                if canvas.winfo_width() > 1:
+                    self.arrange_desktop_icons()
+
+            def games_start_row(self, items, after):
+                """'Games >' in the Start menu, under Activation Wizard; it opens the list of the four games."""
+                marlett = "Marlett" in tkfont.families(self.rootW95dist)
+                row = tk.Label(items, text="  Games", image=self.icons32["games"], compound="left", font=FONT,
+                               bg=FACE, fg=BLACK, anchor="w", padx=6, pady=3, width=190)
+                arrow = tk.Label(row, text="4" if marlett else ">", font=("Marlett", 9) if marlett else FONT_B,
+                                 bg=FACE, fg=BLACK)
+                arrow.place(relx=1.0, rely=0.5, x=-6, anchor="e")
+                menu = tk.Menu(row, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                for kind in W95_GAMES:
+                    menu.add_command(label="  " + W95_GAME_TITLES[kind], image=self.icons16[kind], compound="left",
+                                     command=lambda k=kind: (self.hide_start_menu(), self.open_game(k)))
+
+                def colour(on):
+                    for widget in (row, arrow):
+                        widget.config(bg=NAVY if on else FACE, fg=LIGHT if on else BLACK)
+
+                def open_list(event=None):
+                    colour(True)
+                    try:
+                        menu.tk_popup(row.winfo_rootx() + row.winfo_width() - 4, row.winfo_rooty())
+                    finally:
+                        menu.grab_release()
+                        colour(False)
+                row.bind("<Enter>", lambda e: colour(True))
+                row.bind("<Leave>", lambda e: colour(False))
+                for widget in (row, arrow):
+                    widget.bind("<ButtonRelease-1>", open_list)
+                self._games_row, self._games_after = row, after
+                self.games_refresh()
+
+            def games_refresh(self):
+                """After exec class games:95 / games:0 the Start menu and the desktop follow the setting at once."""
+                on = w95_games_enabled()
+                row = getattr(self, "_games_row", None)
+                if row is not None:
+                    if on and not row.winfo_manager():
+                        row.pack(fill="x", after=self._games_after)
+                    elif not on and row.winfo_manager():
+                        row.pack_forget()
+                if hasattr(self, "desktop_items"):
+                    self.games_desktop_icons(on)
+            
             def create_about_window(self):
                 if self._focus_existing("About Window"):         # already open: brought to the front
                     return
@@ -70872,16 +72243,24 @@ if w95var == 1998 or w95var1 == 1997:
 
                         def toggle_maximize(self):
                             root = self.root
+                            if self.embedded and desk is not None:      # on the w95dist desktop: the desktop keeps it
+                                root._w95_max = getattr(self, "btn_max", None)   # (its button shows [] or restore)
+                                desk.toggle_window_maximize(root)
+                                self.maximized = str(root) in desk._maximized
+                                return
                             if self.maximized:
                                 root.geometry(self.normal_geometry)
                             else:
                                 self.normal_geometry = root.geometry()
                                 if self.embedded:
-                                    parent = root.master
-                                    taskbar = getattr(desk, "taskbar", None)
-                                    height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
-                                    root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
-                                                                   parent.winfo_rooty()))
+                                    x, y, width, height = desk.desk_area()      # the size of the Bitpack desktop
+                                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                                # if self.embedded:
+                                    # parent = root.master
+                                    # taskbar = getattr(desk, "taskbar", None)
+                                    # height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
+                                    # root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
+                                                                   # parent.winfo_rooty()))
                                 else:
                                     x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
                                     if IS_WINDOWS:
@@ -71964,6 +73343,16 @@ if w95var == 1998 or w95var1 == 1997:
                     # Adăugăm un newline după comandă
                     terminal_text.insert("end", "\n")
                     
+                    games_text = w95_games_command(command)
+                    if games_text is not None:
+                        terminal_text.insert("end", games_text + "\n\n")
+                        self.games_refresh()            # Start > Games and the desktop icons, at once
+                        terminal_text.insert("end", prompt)
+                        input_pos = terminal_text.index("end-1c")
+                        terminal_text.mark_set("input_mark", input_pos)
+                        terminal_text.see("end")
+                        return
+                    
                     # if command.strip() == "exec class mail_client:95":
                         # try:
                             # # Verificăm și creăm folderul Config dacă nu există
@@ -72495,6 +73884,9 @@ if w95var == 1998 or w95var1 == 1997:
                         terminal_text.insert("end", "  dir        - List files and directories\n")
                         terminal_text.insert("end", "  ls         - List files and directories (alternative)\n")
                         terminal_text.insert("end", "  exec class mail_client:95 - Bitpack Email client activation\n")
+                        terminal_text.insert("end", "  exec class games:95 - Bitpack Games activation (Tetris, Snake, Minesweeper, Pong)\n")
+                        terminal_text.insert("end", "  exec class games:0 - Bitpack Games deactivation\n")
+                        terminal_text.insert("end", "  exec class games --status - Are Bitpack Games activated?\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --export - Export database as bpk95 script to Config/init.bpk95\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --export --sql - Export database as SQL script to Config/init.sql\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --import - Rebuild database from Config/init.bpk95\n")
@@ -74172,16 +75564,24 @@ if w95var == 1998 or w95var1 == 1997:
 
                         def toggle_maximize(self):
                             root = self.root
+                            if self.embedded and desk is not None:      # on the w95dist desktop: the desktop keeps it
+                                root._w95_max = getattr(self, "btn_max", None)   # (its button shows [] or restore)
+                                desk.toggle_window_maximize(root)
+                                self.maximized = str(root) in desk._maximized
+                                return
                             if self.maximized:
                                 root.geometry(self.normal_geometry)
                             else:
                                 self.normal_geometry = root.geometry()
                                 if self.embedded:
-                                    parent = root.master
-                                    taskbar = getattr(desk, "taskbar", None)
-                                    height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
-                                    root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
-                                                                   parent.winfo_rooty()))
+                                    x, y, width, height = desk.desk_area()      # the size of the Bitpack desktop
+                                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                                # if self.embedded:
+                                    # parent = root.master
+                                    # taskbar = getattr(desk, "taskbar", None)
+                                    # height = parent.winfo_height() - (taskbar.winfo_height() if taskbar is not None else 0)
+                                    # root.geometry("%dx%d+%d+%d" % (parent.winfo_width(), height, parent.winfo_rootx(),
+                                                                   # parent.winfo_rooty()))
                                 else:
                                     x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
                                     if IS_WINDOWS:
@@ -79479,6 +80879,11 @@ if w95var == 1998 or w95var1 == 1997:
 
                         def toggle_maximize(self):
                             root = self.rootCalendar
+                            if self.embedded and desk is not None:      # on the w95dist desktop: the desktop keeps it
+                                root._w95_max = getattr(self, "btn_max", None)   # (its button shows [] or restore)
+                                desk.toggle_window_maximize(root)
+                                self.maximized = str(root) in desk._maximized
+                                return
                             if self.maximized:
                                 root.geometry(self.normal_geometry)
                             else:
@@ -80140,7 +81545,9 @@ if w95var == 1998 or w95var1 == 1997:
             
             def run(self):
                 # Bind escape key to exit fullscreen
-                self.rootW95dist.bind("<Escape>", lambda e: self.rootW95dist.quit())
+                #self.rootW95dist.bind("<Escape>", lambda e: self.rootW95dist.quit())
+                self.rootW95dist.bind("<Escape>", lambda e: self.toggle_fullscreen()
+                                      if getattr(self, "is_fullscreen", False) else None)
                 #self.rootW95dist.bind("<Escape>", lambda e: self.toggle_fullscreen() if getattr(self, "is_fullscreen", False) else None)
                 
                 # Bind F11 to toggle fullscreen
@@ -100953,7 +102360,7 @@ if muapdash == 777666092:
             pdfeditor:pdfeditor pdfto:excelcsv pdftools:enjoyit pdfviewer:pdfviewer personalstorage:personalstorage
             planogram:studio process:viewer projectmanager:projectmanager px95:px95 pythonlogic:visualizer
             quickfinder:file quizmaker:quizmaker quiz:test recovery:tunnel regextest:regextest renamemanager:renamer
-            repbld:repbld safe:checker screenrec:screenrec script:agent shell:integrator sql:comp sql:designer
+            repbld:repbld safe:checker screenrec:screenrec script:agent shell:integrator shiftpl:shiftpl sql:comp sql:designer
             sql:diagram sql:executor sql:explorer sql:sql sql:querycreator sqlmanagementstudio:sqlmanagementstudio
             sticky:notes stprcd:stprcd system:realtime taskmanager:terminator terminal:terminal textreplace:textfind
             timeline:file timetracker:timetracker todo:manager topology:network traffic:network commander:total
@@ -249359,3 +250766,3055 @@ if videoVAR == 3342109:
 
     if __name__ == "__main__":
         video_editor_95_main()
+        
+if shiftplvar == 333432:
+    bitpack95_validation("333432")
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # WINDOWS 95 DIALOGS - they take the place of the Windows message boxes, input boxes and colour dialog
+    # (messagebox / simpledialog / colorchooser: the same functions, arguments and returned values), and
+    # W95Toplevel gives the other windows of the tool the Windows 95 title bar.
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import tkinter as _w95_tk
+    import tkinter.font as _w95_tkfont
+    import tkinter.messagebox as _w95_native_messagebox
+    import tkinter.simpledialog as _w95_native_simpledialog
+    import tkinter.colorchooser as _w95_native_colorchooser
+
+
+    class _W95Base(object):
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+
+        @staticmethod
+        def parent_of(parent):
+            if parent is not None:
+                try:
+                    return parent.winfo_toplevel()
+                except (_w95_tk.TclError, AttributeError):
+                    pass
+            root = _w95_tk._default_root
+            if root is None:
+                return None
+            try:
+                focus = root.focus_get()
+                if focus is not None:
+                    return focus.winfo_toplevel()
+            except (KeyError, _w95_tk.TclError):
+                pass
+            return root
+
+        def window(self, parent, title, on_close):
+            win = _w95_tk.Toplevel(parent)
+            win.withdraw()
+            win.overrideredirect(True)
+            win.configure(bg=self.FACE, bd=2, relief="raised")
+            try:
+                win.transient(parent)
+            except _w95_tk.TclError:
+                pass
+            win.attributes("-topmost", True)
+            bar = _w95_tk.Frame(win, bg=self.NAVY, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            label = _w95_tk.Label(bar, text=title or "", bg=self.NAVY, fg=self.LIGHT, font=self.FONT_B, anchor="w")
+            label.pack(side="left", padx=4, fill="x", expand=True)
+            win._w95_pixel = _w95_tk.PhotoImage(master=win, width=1, height=1)
+            marlett = "Marlett" in _w95_tkfont.families(win)
+            _w95_tk.Button(bar, text="r" if marlett else "X", font=("Marlett", 7) if marlett else self.FONT_B,
+                           image=win._w95_pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=self.FACE,
+                           fg=self.BLACK, bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                           activebackground=self.FACE, command=on_close).pack(side="right", padx=2)
+
+            def press(event):
+                win._w95_drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+            def drag(event):
+                win.geometry("+%d+%d" % (event.x_root - win._w95_drag[0], event.y_root - win._w95_drag[1]))
+            for widget in (bar, label):
+                widget.bind("<ButtonPress-1>", press)
+                widget.bind("<B1-Motion>", drag)
+            return win
+
+        def icon(self, master, kind):
+            c = _w95_tk.Canvas(master, width=34, height=34, bg=self.FACE, highlightthickness=0)
+            if kind == "error":
+                c.create_oval(2, 2, 32, 32, fill="#ff0000", outline="#800000")
+                c.create_line(11, 11, 23, 23, fill="white", width=3)
+                c.create_line(23, 11, 11, 23, fill="white", width=3)
+            elif kind == "warning":
+                c.create_polygon(17, 2, 32, 30, 2, 30, fill="#ffff00", outline=self.BLACK)
+                c.create_text(17, 20, text="!", fill=self.BLACK, font=("Times New Roman", 15, "bold"))
+            else:
+                c.create_oval(2, 2, 32, 32, fill=self.LIGHT, outline=self.BLACK)
+                c.create_text(17, 17, text="?" if kind == "question" else "i", fill="#0000ff",
+                              font=("Times New Roman", 17, "bold"))
+            return c
+
+        def button(self, master, text, command, default=False, width=9):
+            return _w95_tk.Button(master, text=text, command=command, width=width, font=self.FONT_B if default else self.FONT,
+                                  bg=self.FACE, fg=self.BLACK, activebackground=self.FACE, relief="raised", bd=2,
+                                  highlightthickness=1 if default else 0, highlightbackground=self.BLACK, takefocus=0)
+
+        def run(self, win, parent, focus=None):
+            """Centred over the window that asked, in front, modal; the previous modal window gets its grab back."""
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            try:
+                if parent is not None and parent.winfo_viewable():
+                    x = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+                    y = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 3)
+                else:
+                    raise _w95_tk.TclError("no parent")
+            except _w95_tk.TclError:
+                x, y = (win.winfo_screenwidth() - w) // 2, (win.winfo_screenheight() - h) // 3
+            x = max(0, min(x, win.winfo_screenwidth() - w))
+            y = max(0, min(y, win.winfo_screenheight() - h - 30))
+            win.geometry("+%d+%d" % (x, y))
+            previous = None
+            try:
+                previous = win.grab_current()
+            except (_w95_tk.TclError, KeyError):
+                previous = None
+            win.deiconify()
+            win.lift()
+            (focus or win).focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except _w95_tk.TclError:
+                    pass
+            job = win.after(100, take_clicks)
+            win.bind("<Destroy>", lambda e, w=win, j=job: w.after_cancel(j) if e.widget is w else None, add="+")
+            win.wait_window()
+            if previous is not None:
+                try:
+                    if previous.winfo_exists():
+                        previous.grab_set()
+                        previous.focus_force()
+                except _w95_tk.TclError:
+                    pass
+            elif parent is not None:
+                try:
+                    parent.focus_force()
+                except _w95_tk.TclError:
+                    pass
+
+        def box(self, title, text, kind, buttons, default=0, parent=None, detail=None, entry=None, show=None):
+            """-> (button pressed, text typed)."""
+            parent = self.parent_of(parent)
+            if parent is None:                                    # no window open yet: the Windows box is the only way
+                return None, None
+            result = {"value": buttons[-1], "text": None}
+            field = {}
+
+            def answer(value):
+                result["value"] = value
+                if "entry" in field:
+                    result["text"] = field["entry"].get()
+                win.destroy()
+            win = self.window(parent, title, lambda: answer(buttons[-1]))
+            body = _w95_tk.Frame(win, bg=self.FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            self.icon(body, kind).pack(side="left", anchor="n", padx=(0, 12))
+            right = _w95_tk.Frame(body, bg=self.FACE)
+            right.pack(side="left", fill="both", expand=True)
+            _w95_tk.Label(right, text=text or "", font=self.FONT, bg=self.FACE, justify="left",
+                          wraplength=420).pack(anchor="w")
+            if detail:
+                _w95_tk.Label(right, text=detail, font=self.FONT, bg=self.FACE, fg=self.SHADOW, justify="left",
+                              wraplength=420).pack(anchor="w", pady=(6, 0))
+            if entry is not None:
+                e = _w95_tk.Entry(right, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                                  width=42, show=show or "")
+                e.insert(0, entry)
+                e.select_range(0, "end")
+                e.pack(anchor="w", pady=(8, 0), fill="x")
+                e.bind("<Return>", lambda ev: answer(buttons[0]))
+                field["entry"] = e
+            row = _w95_tk.Frame(win, bg=self.FACE)
+            row.pack(pady=(6, 12))
+            for index, label in enumerate(buttons):
+                self.button(row, label, lambda v=label: answer(v), default=index == default).pack(side="left", padx=4)
+            win.bind("<Return>", lambda ev: answer(buttons[default]))
+            win.bind("<Escape>", lambda ev: answer(buttons[-1]))
+            for index, label in enumerate(buttons):                # Y / N / C ... like the Windows 95 boxes
+                win.bind("<Key-%s>" % label[0].lower(), lambda ev, v=label: answer(v) if "entry" not in field else None)
+            try:
+                win.bell()
+            except _w95_tk.TclError:
+                pass
+            self.run(win, parent, field.get("entry"))
+            return result["value"], result["text"]
+
+
+    class _W95MessageBox(_W95Base):
+        """messagebox.showinfo / showwarning / showerror / askquestion / askyesno / askokcancel / askyesnocancel /
+        askretrycancel with the Windows 95 look."""
+
+        @staticmethod
+        def _args(args, kwargs):
+            title = kwargs.pop("title", args[0] if len(args) > 0 else "")
+            message = kwargs.pop("message", args[1] if len(args) > 1 else "")
+            return title, message, kwargs
+
+        def _ask(self, native, kind, buttons, args, kwargs):
+            title, message, opts = self._args(args, kwargs)
+            default = opts.get("default")
+            index = 0
+            if default is not None:
+                for i, b in enumerate(buttons):
+                    if b.lower() == str(default).lower():
+                        index = i
+            icon = {"error": "error", "warning": "warning", "info": "info", "question": "question"}.get(
+                str(opts.get("icon", "")).lower(), kind)
+            value, _text = self.box(title, message, icon, buttons, index, opts.get("parent"), opts.get("detail"))
+            if value is None:                                      # no Tk window: the Windows one
+                return getattr(_w95_native_messagebox, native)(title, message, **opts)
+            return value
+
+        def showinfo(self, *args, **kwargs):
+            self._ask("showinfo", "info", ("OK",), args, kwargs)
+            return "ok"
+
+        def showwarning(self, *args, **kwargs):
+            self._ask("showwarning", "warning", ("OK",), args, kwargs)
+            return "ok"
+
+        def showerror(self, *args, **kwargs):
+            self._ask("showerror", "error", ("OK",), args, kwargs)
+            return "ok"
+
+        def askquestion(self, *args, **kwargs):
+            value = self._ask("askquestion", "question", ("Yes", "No"), args, kwargs)
+            return value if value in ("yes", "no") else ("yes" if value == "Yes" else "no")
+
+        def askyesno(self, *args, **kwargs):
+            value = self._ask("askyesno", "question", ("Yes", "No"), args, kwargs)
+            return value if isinstance(value, bool) else value == "Yes"
+
+        def askokcancel(self, *args, **kwargs):
+            value = self._ask("askokcancel", "question", ("OK", "Cancel"), args, kwargs)
+            return value if isinstance(value, bool) else value == "OK"
+
+        def askretrycancel(self, *args, **kwargs):
+            value = self._ask("askretrycancel", "warning", ("Retry", "Cancel"), args, kwargs)
+            return value if isinstance(value, bool) else value == "Retry"
+
+        def askyesnocancel(self, *args, **kwargs):
+            value = self._ask("askyesnocancel", "question", ("Yes", "No", "Cancel"), args, kwargs)
+            if value is None or isinstance(value, bool):
+                return value
+            return None if value == "Cancel" else value == "Yes"
+
+        def __getattr__(self, name):                                # constants (YES, OK, WARNING ...) as in tkinter
+            return getattr(_w95_native_messagebox, name)
+
+
+    class _W95SimpleDialog(_W95Base):
+        """simpledialog.askstring / askinteger / askfloat with the Windows 95 look."""
+
+        def _ask(self, title, prompt, kwargs, convert, kind):
+            initial = kwargs.get("initialvalue")
+            low, high = kwargs.get("minvalue"), kwargs.get("maxvalue")
+            text = "" if initial is None else str(initial)
+            while True:
+                value, typed = self.box(title, prompt, "question", ("OK", "Cancel"), 0, kwargs.get("parent"),
+                                        entry=text, show=kwargs.get("show"))
+                if value is None:
+                    return getattr(_w95_native_simpledialog, "ask" + kind)(title, prompt, **kwargs)
+                if value != "OK":
+                    return None
+                if convert is None:
+                    return typed
+                try:
+                    number = convert(typed.strip().replace(",", ".") if kind == "float" else typed.strip())
+                except ValueError:
+                    _W95_MESSAGEBOX.showwarning("Illegal value", "Not %s.\nPlease try again." % (
+                        "an integer" if kind == "integer" else "a number"), parent=kwargs.get("parent"))
+                    text = typed
+                    continue
+                if low is not None and number < low:
+                    _W95_MESSAGEBOX.showwarning("Too small", "The allowed minimum value is %s.\nPlease try again." % low,
+                                                parent=kwargs.get("parent"))
+                    text = typed
+                    continue
+                if high is not None and number > high:
+                    _W95_MESSAGEBOX.showwarning("Too large", "The allowed maximum value is %s.\nPlease try again." % high,
+                                                parent=kwargs.get("parent"))
+                    text = typed
+                    continue
+                return number
+
+        def askstring(self, title, prompt, **kwargs):
+            return self._ask(title, prompt, kwargs, None, "string")
+
+        def askinteger(self, title, prompt, **kwargs):
+            return self._ask(title, prompt, kwargs, int, "integer")
+
+        def askfloat(self, title, prompt, **kwargs):
+            return self._ask(title, prompt, kwargs, float, "float")
+
+        def __getattr__(self, name):
+            return getattr(_w95_native_simpledialog, name)
+
+
+    class _W95ColorChooser(_W95Base):
+        """colorchooser.askcolor with the Windows 95 'Color' dialog: basic and custom colours, the spectrum and the
+        luminance bar, Red / Green / Blue and hex. Returns ((r, g, b), '#rrggbb') or (None, None), as tkinter does.
+        The custom colours are the ones of the Bitpack Color Picker (when its table exists)."""
+        BASIC = ["#ff8080", "#ffff80", "#80ff80", "#00ff80", "#80ffff", "#0080ff", "#ff80c0", "#ff80ff",
+                 "#ff0000", "#ffff00", "#80ff00", "#00ff40", "#00ffff", "#0080c0", "#8080c0", "#ff00ff",
+                 "#804040", "#ff8040", "#00ff00", "#008080", "#004080", "#8080ff", "#800040", "#ff0080",
+                 "#800000", "#ff8000", "#008000", "#008040", "#0000ff", "#0000a0", "#800080", "#8000ff",
+                 "#400000", "#804000", "#004000", "#004040", "#000080", "#000040", "#400040", "#400080",
+                 "#000000", "#808000", "#808040", "#808080", "#408080", "#c0c0c0", "#400040", "#ffffff"]
+        DB = "Config/dbo_bitpack.db"
+
+        def __init__(self):
+            self.custom = None
+            self.spectrum_rows = None
+
+        def _load_custom(self):
+            if self.custom is not None:
+                return
+            self.custom = ["#ffffff"] * 16
+            try:
+                import sqlite3
+                import os as _os
+                if _os.path.exists(self.DB):
+                    conn = sqlite3.connect(self.DB, timeout=3)
+                    try:
+                        for pos, hx in conn.execute("SELECT position, hex FROM color_picker_colors WHERE kind = 'custom'"):
+                            if 0 <= pos < 16:
+                                self.custom[pos] = hx
+                    finally:
+                        conn.close()
+            except Exception:
+                pass
+
+        def _save_custom(self):
+            try:
+                import sqlite3
+                import os as _os
+                if not _os.path.isdir(_os.path.dirname(self.DB)):
+                    return
+                conn = sqlite3.connect(self.DB, timeout=3)
+                try:
+                    with conn:
+                        conn.execute("CREATE TABLE IF NOT EXISTS color_picker_colors (kind TEXT NOT NULL, position INTEGER "
+                                     "NOT NULL, hex TEXT NOT NULL, PRIMARY KEY (kind, position))")
+                        conn.execute("DELETE FROM color_picker_colors WHERE kind = 'custom'")
+                        conn.executemany("INSERT INTO color_picker_colors (kind, position, hex) VALUES ('custom', ?, ?)",
+                                         list(enumerate(self.custom)))
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        @staticmethod
+        def _rgb(colour, widget):
+            try:
+                r, g, b = widget.winfo_rgb(colour)
+                return r // 257, g // 257, b // 257
+            except (_w95_tk.TclError, TypeError):
+                return None
+
+        @staticmethod
+        def _hex(rgb):
+            return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(c)))) for c in rgb)
+
+        def askcolor(self, color=None, **options):
+            import colorsys
+            parent = self.parent_of(options.get("parent"))
+            if parent is None:
+                return _w95_native_colorchooser.askcolor(color, **options)
+            self._load_custom()
+            start = self._rgb(options.get("initialcolor", color) or "#000000", parent) or (0, 0, 0)
+            state = {"rgb": start, "ok": False, "slot": next((i for i, c in enumerate(self.custom) if c == "#ffffff"), 0)}
+            h0, l0, s0 = colorsys.rgb_to_hls(*[c / 255.0 for c in start])
+            hsl = {"h": h0 * 360, "s": s0 * 100, "l": l0 * 100}
+            win = self.window(parent, options.get("title") or "Color", lambda: win.destroy())
+            body = _w95_tk.Frame(win, bg=self.FACE)
+            body.pack(padx=8, pady=8)
+            left = _w95_tk.Frame(body, bg=self.FACE)
+            left.grid(row=0, column=0, sticky="n")
+            SW, SH = 20, 16
+
+            def palette(master, cols, rows):
+                c = _w95_tk.Canvas(master, width=cols * (SW + 4) + 2, height=rows * (SH + 4) + 2, bg=self.FACE,
+                                   highlightthickness=0)
+                c.cols, c.rows = cols, rows
+                return c
+            _w95_tk.Label(left, text="Basic colors:", font=self.FONT, bg=self.FACE, underline=0).pack(anchor="w")
+            basic = palette(left, 8, 6)
+            basic.pack(anchor="w")
+            _w95_tk.Label(left, text="Custom colors:", font=self.FONT, bg=self.FACE, underline=0).pack(anchor="w",
+                                                                                                  pady=(6, 0))
+            custom = palette(left, 8, 2)
+            custom.pack(anchor="w")
+            right = _w95_tk.Frame(body, bg=self.FACE)
+            right.grid(row=0, column=1, sticky="n", padx=(10, 0))
+            SPW, SPH = 150, 120
+            top = _w95_tk.Frame(right, bg=self.FACE)
+            top.pack(anchor="w")
+            frame = _w95_tk.Frame(top, bg=self.FACE, bd=2, relief="sunken")
+            frame.pack(side="left")
+            spec = _w95_tk.Canvas(frame, width=SPW, height=SPH, highlightthickness=0, cursor="crosshair")
+            spec.pack()
+            image = _w95_tk.PhotoImage(master=win, width=SPW, height=SPH)
+            win._w95_image = image
+            if self.spectrum_rows is None:
+                rows = []
+                for y in range(SPH):
+                    s = 1 - y / float(SPH - 1)
+                    rows.append("{" + " ".join(self._hex([v * 255 for v in colorsys.hls_to_rgb(x / float(SPW), 0.5, s)])
+                                               for x in range(SPW)) + "}")
+                self.spectrum_rows = " ".join(rows)
+            image.put(self.spectrum_rows)
+            spec.create_image(0, 0, image=image, anchor="nw")
+            frame = _w95_tk.Frame(top, bg=self.FACE, bd=2, relief="sunken")
+            frame.pack(side="left", padx=(6, 0))
+            lum = _w95_tk.Canvas(frame, width=12, height=SPH, highlightthickness=0)
+            lum.pack()
+            lum_image = _w95_tk.PhotoImage(master=win, width=12, height=SPH)
+            win._w95_lum = lum_image
+            lum.create_image(0, 0, image=lum_image, anchor="nw")
+            arrow = _w95_tk.Canvas(top, width=9, height=SPH + 6, bg=self.FACE, highlightthickness=0)
+            arrow.pack(side="left")
+            row = _w95_tk.Frame(right, bg=self.FACE)
+            row.pack(anchor="w", pady=(6, 0))
+            prev = _w95_tk.Frame(row, bg=self.FACE, bd=2, relief="sunken")
+            prev.pack(side="left", anchor="n")
+            preview = _w95_tk.Canvas(prev, width=56, height=40, highlightthickness=0)
+            preview.pack()
+            fields = _w95_tk.Frame(row, bg=self.FACE)
+            fields.pack(side="left", padx=(8, 0))
+            entries = {}
+            for i, (label, key) in enumerate((("Red:", "r"), ("Green:", "g"), ("Blue:", "b"), ("Hex:", "hex"))):
+                _w95_tk.Label(fields, text=label, font=self.FONT, bg=self.FACE).grid(row=i, column=0, sticky="e")
+                e = _w95_tk.Entry(fields, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                                  width=8 if key == "hex" else 5, justify="right")
+                e.grid(row=i, column=1, sticky="w", pady=1)
+                entries[key] = e
+
+            def draw():
+                rgb = state["rgb"]
+                hx = self._hex(rgb)
+                preview.delete("all")
+                preview.create_rectangle(0, 0, 56, 40, fill=hx, outline="")
+                for key, value in zip("rgb", rgb):
+                    if win.focus_get() is not entries[key]:
+                        entries[key].delete(0, "end")
+                        entries[key].insert(0, str(int(value)))
+                if win.focus_get() is not entries["hex"]:
+                    entries["hex"].delete(0, "end")
+                    entries["hex"].insert(0, hx.upper())
+                for canvas, colours in ((basic, self.BASIC), (custom, self.custom)):
+                    canvas.delete("all")
+                    for i, colour in enumerate(colours):
+                        x, y = 2 + (i % canvas.cols) * (SW + 4), 2 + (i // canvas.cols) * (SH + 4)
+                        canvas.create_line(x - 1, y + SH + 1, x - 1, y - 1, x + SW + 1, y - 1, fill=self.SHADOW)
+                        canvas.create_line(x - 1, y + SH + 1, x + SW + 1, y + SH + 1, x + SW + 1, y - 1, fill=self.LIGHT)
+                        canvas.create_rectangle(x, y, x + SW, y + SH, fill=colour, outline=self.BLACK)
+                        if colour.lower() == hx or (canvas is custom and i == state["slot"]):
+                            canvas.create_rectangle(x - 2, y - 2, x + SW + 2, y + SH + 2, outline=self.BLACK, dash=(1, 1))
+                spec.delete("cross")
+                cx, cy = hsl["h"] / 360.0 * SPW, (100 - hsl["s"]) / 100.0 * (SPH - 1)
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    spec.create_line(cx + dx * 3, cy + dy * 3, cx + dx * 8, cy + dy * 8, fill=self.BLACK, width=3,
+                                     tags="cross")
+                colours = [self._hex([v * 255 for v in colorsys.hls_to_rgb(hsl["h"] / 360.0, 1 - y / float(SPH - 1),
+                                                                             hsl["s"] / 100.0)]) for y in range(SPH)]
+                lum_image.put(" ".join("{" + " ".join([c] * 12) + "}" for c in colours))
+                arrow.delete("all")
+                ay = (100 - hsl["l"]) / 100.0 * (SPH - 1) + 2
+                arrow.create_polygon(1, ay, 8, ay - 5, 8, ay + 5, fill=self.BLACK)
+
+            def set_rgb(rgb):
+                state["rgb"] = tuple(max(0, min(255, int(round(c)))) for c in rgb)
+                h, l, s = colorsys.rgb_to_hls(*[c / 255.0 for c in state["rgb"]])
+                if s > 0 and 0 < l < 1:
+                    hsl["h"] = h * 360
+                hsl["s"], hsl["l"] = s * 100, l * 100
+                draw()
+
+            def set_hsl():
+                state["rgb"] = tuple(int(round(v * 255)) for v in colorsys.hls_to_rgb(hsl["h"] / 360.0, hsl["l"] / 100.0,
+                                                                                     hsl["s"] / 100.0))
+                draw()
+
+            def pick(canvas, colours, event):
+                col, rw = (event.x - 2) // (SW + 4), (event.y - 2) // (SH + 4)
+                if 0 <= col < canvas.cols and 0 <= rw < canvas.rows:
+                    i = rw * canvas.cols + col
+                    if canvas is custom:
+                        state["slot"] = i
+                    set_rgb(self._rgb(colours[i], win))
+
+            def on_spec(event):
+                hsl["h"] = max(0, min(SPW - 1, event.x)) * 360.0 / SPW
+                hsl["s"] = 100 - max(0, min(SPH - 1, event.y)) * 100.0 / (SPH - 1)
+                if not 5 < hsl["l"] < 95:
+                    hsl["l"] = 50.0
+                set_hsl()
+
+            def on_lum(event):
+                hsl["l"] = 100 - max(0, min(SPH - 1, event.y - (2 if event.widget is arrow else 0))) * 100.0 / (SPH - 1)
+                set_hsl()
+
+            def typed(event=None):
+                text = entries["hex"].get().strip()
+                if event is not None and event.widget is entries["hex"]:
+                    value = self._rgb(text if text.startswith("#") else "#" + text, win) if text else None
+                    if value and len(text.lstrip("#")) in (3, 6):
+                        set_rgb(value)
+                    return
+                try:
+                    set_rgb([max(0, min(255, int(entries[k].get() or 0))) for k in "rgb"])
+                except ValueError:
+                    pass
+
+            def add_custom():
+                self.custom[state["slot"]] = self._hex(state["rgb"])
+                state["slot"] = (state["slot"] + 1) % 16
+                self._save_custom()
+                draw()
+
+            def ok():
+                state["ok"] = True
+                win.destroy()
+            basic.bind("<Button-1>", lambda e: pick(basic, self.BASIC, e))
+            basic.bind("<Double-Button-1>", lambda e: (pick(basic, self.BASIC, e), ok()))
+            custom.bind("<Button-1>", lambda e: pick(custom, self.custom, e))
+            for widget, handler in ((spec, on_spec), (lum, on_lum), (arrow, on_lum)):
+                widget.bind("<Button-1>", handler)
+                widget.bind("<B1-Motion>", handler)
+            for key, e in entries.items():
+                e.bind("<KeyRelease>", typed)
+                e.bind("<Return>", lambda ev: (typed(ev), ok()))
+            buttons = _w95_tk.Frame(win, bg=self.FACE)
+            buttons.pack(fill="x", padx=8, pady=(0, 8))
+            self.button(buttons, "OK", ok, default=True, width=8).pack(side="left")
+            self.button(buttons, "Cancel", win.destroy, width=8).pack(side="left", padx=4)
+            self.button(buttons, "Add to Custom Colors", add_custom, width=20).pack(side="right")
+            win.bind("<Escape>", lambda e: win.destroy())
+            set_rgb(start)
+            self.run(win, parent)
+            if not state["ok"]:
+                return None, None
+            return state["rgb"], self._hex(state["rgb"])
+
+        def __getattr__(self, name):
+            return getattr(_w95_native_colorchooser, name)
+
+
+    class W95Toplevel(_w95_tk.Toplevel):
+        """A Toplevel with the Windows 95 title bar instead of the Windows one: the window is built as before, the bar is
+        put on top of what it holds (pack or grid), the close button does what the window's close does."""
+
+        def __init__(self, *args, **kwargs):
+            _w95_tk.Toplevel.__init__(self, *args, **kwargs)
+            self._w95_position_given = False
+            self.overrideredirect(True)
+            try:                                                    # stays above the window that opened it
+                owner = self.master.winfo_toplevel() if self.master is not None else None
+                if owner is not None and owner.winfo_viewable():    # (a hidden owner would keep this window hidden too)
+                    self.transient(owner)
+            except _w95_tk.TclError:
+                pass
+            self.configure(bd=2, relief="raised")
+            self._w95_bar = _w95_tk.Frame(self, bg=_W95Base.NAVY, height=20)
+            self._w95_bar.pack_propagate(False)
+            self._w95_title = _w95_tk.Label(self._w95_bar, text="", bg=_W95Base.NAVY, fg=_W95Base.LIGHT,
+                                            font=_W95Base.FONT_B, anchor="w")
+            self._w95_title.pack(side="left", padx=4, fill="x", expand=True)
+            self._w95_pixel = _w95_tk.PhotoImage(master=self, width=1, height=1)
+            marlett = "Marlett" in _w95_tkfont.families(self)
+            glyphs = {"close": "r", "max": "1", "restore": "2"} if marlett else {"close": "X", "max": "[]", "restore": "="}
+            self._w95_glyphs = glyphs
+            font = ("Marlett", 7) if marlett else _W95Base.FONT_B
+            self._w95_close = _w95_tk.Button(self._w95_bar, text=glyphs["close"], font=font, image=self._w95_pixel,
+                                             compound="center", width=12, height=10, padx=0, pady=0, bg=_W95Base.FACE,
+                                             bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                                             activebackground=_W95Base.FACE, command=self._w95_close_window)
+            self._w95_close.pack(side="right", padx=2)
+            self._w95_max = None
+            self._w95_maximized = None
+            self._w95_bar.place(x=0, y=0, relwidth=1)               # moved into the layout once it is built
+            for widget in (self._w95_bar, self._w95_title):
+                widget.bind("<ButtonPress-1>", self._w95_press)
+                widget.bind("<B1-Motion>", self._w95_drag)
+            self.bind("<ButtonPress-1>", self._w95_focus_click, add="+")
+            self.after_idle(self._w95_settle)
+
+        def title(self, string=None):
+            if string is None:
+                return _w95_tk.Toplevel.title(self)
+            _w95_tk.Toplevel.title(self, string)
+            if "_w95_title" in self.__dict__:                       # (tkinter sets a title before the bar exists)
+                self._w95_title.config(text=string)
+
+        wm_title = title
+
+        def geometry(self, newGeometry=None):
+            if newGeometry is not None and ("+" in str(newGeometry) or "-" in str(newGeometry)):
+                self._w95_position_given = True
+            return _w95_tk.Toplevel.geometry(self, newGeometry)
+
+        wm_geometry = geometry
+
+        def _w95_close_window(self):
+            handler = self.protocol("WM_DELETE_WINDOW")
+            if handler:
+                self.tk.call(handler)
+            else:
+                self.destroy()
+
+        def _w95_press(self, event):
+            self._w95_drag_from = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _w95_drag(self, event):
+            if self._w95_maximized is None:
+                self.geometry("+%d+%d" % (event.x_root - self._w95_drag_from[0], event.y_root - self._w95_drag_from[1]))
+
+        def _w95_focus_click(self, event):
+            """A window without the Windows frame does not take the keyboard by itself: a click gives it."""
+            if isinstance(event.widget, (_w95_tk.Entry, _w95_tk.Text, _w95_tk.Listbox, _w95_tk.Spinbox)):
+                try:
+                    event.widget.focus_force()
+                except _w95_tk.TclError:
+                    pass
+
+        def _w95_settle(self):
+            try:
+                if not self.winfo_exists():
+                    return
+            except _w95_tk.TclError:
+                return
+            bar = self._w95_bar
+            bar.place_forget()
+            packed = [w for w in self.pack_slaves() if w is not bar]
+            gridded = [w for w in self.grid_slaves() if w is not bar]
+            if gridded and not packed:
+                cols, rows = self.grid_size()
+                for r in range(rows - 1, -1, -1):                   # everything one row down
+                    conf = self.grid_rowconfigure(r)
+                    self.grid_rowconfigure(r + 1, weight=conf.get("weight", 0), minsize=conf.get("minsize", 0),
+                                           pad=conf.get("pad", 0))
+                self.grid_rowconfigure(0, weight=0, minsize=0, pad=0)
+                for w in gridded:
+                    info = w.grid_info()
+                    w.grid_configure(row=int(info["row"]) + 1)
+                bar.grid(row=0, column=0, columnspan=max(1, cols), sticky="ew", padx=1, pady=(1, 0))
+            elif packed:
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0), before=packed[0])
+            else:
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self._w95_title.config(text=_w95_tk.Toplevel.title(self))
+            try:
+                resizable = any(self.resizable())
+            except _w95_tk.TclError:
+                resizable = False
+            if resizable:
+                self._w95_max = _w95_tk.Button(bar, text=self._w95_glyphs["max"], font=self._w95_close.cget("font"),
+                                               image=self._w95_pixel, compound="center", width=12, height=10, padx=0,
+                                               pady=0, bg=_W95Base.FACE, bd=2, relief="raised", highlightthickness=0,
+                                               takefocus=0, activebackground=_W95Base.FACE, command=self._w95_toggle_max)
+                self._w95_max.pack(side="right", after=self._w95_close)     # left of Close
+                for widget in (bar, self._w95_title):
+                    widget.bind("<Double-Button-1>", lambda e: self._w95_toggle_max())
+                grip = _w95_tk.Canvas(self, width=13, height=13, bg=_W95Base.FACE, bd=0, highlightthickness=0,
+                                      cursor="size_nw_se" if self.tk.call("tk", "windowingsystem") == "win32"
+                                      else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(12, i, i, 12, fill=_W95Base.LIGHT)
+                    grip.create_line(12, i + 1, i + 1, 12, fill=_W95Base.SHADOW)
+                grip.place(relx=1.0, rely=1.0, anchor="se")
+                grip.bind("<ButtonPress-1>", lambda e: setattr(self, "_w95_resize", (e.x_root, e.y_root,
+                                                                                      self.winfo_width(),
+                                                                                      self.winfo_height())))
+                grip.bind("<B1-Motion>", self._w95_resize_drag)
+            self.update_idletasks()
+            if not self._w95_position_given:                    # centred over the window that opened it
+                master = self.master.winfo_toplevel() if self.master is not None else None
+                w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+                try:
+                    if self.winfo_width() > 1:
+                        w, h = max(w, self.winfo_width()), max(h, self.winfo_height())
+                    x = master.winfo_rootx() + max(0, (master.winfo_width() - w) // 2)
+                    y = master.winfo_rooty() + max(0, (master.winfo_height() - h) // 3)
+                except (_w95_tk.TclError, AttributeError):
+                    x, y = (self.winfo_screenwidth() - w) // 2, (self.winfo_screenheight() - h) // 3
+                _w95_tk.Toplevel.geometry(self, "+%d+%d" % (max(0, x), max(0, y)))
+            try:
+                if self.grab_current() is self:
+                    self.attributes("-topmost", True)          # a modal window stays in front of the tool
+            except (_w95_tk.TclError, KeyError):
+                pass
+            self.lift()
+
+        def _w95_resize_drag(self, event):
+            if self._w95_maximized is None:
+                x0, y0, w0, h0 = self._w95_resize
+                _w95_tk.Toplevel.geometry(self, "%dx%d" % (max(200, w0 + event.x_root - x0), max(120, h0 + event.y_root - y0)))
+
+        def _w95_toggle_max(self):
+            if self._w95_maximized is not None:
+                _w95_tk.Toplevel.geometry(self, self._w95_maximized)
+                self._w95_maximized = None
+                self._w95_max.config(text=self._w95_glyphs["max"])
+                return
+            self._w95_maximized = _w95_tk.Toplevel.geometry(self)
+            x, y, w, h = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+            try:
+                import ctypes
+                from ctypes import wintypes
+                rect = wintypes.RECT()
+                ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                x, y, w, h = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+            except Exception:
+                pass
+            _w95_tk.Toplevel.geometry(self, "%dx%d+%d+%d" % (w, h, x, y))
+            self._w95_max.config(text=self._w95_glyphs["restore"])
+
+
+    def w95_frame(win):
+        """Nothing to do for a window made with W95Toplevel (kept for a window made elsewhere)."""
+        return win
+
+
+    _W95_MESSAGEBOX = _W95MessageBox()
+    _W95_SIMPLEDIALOG = _W95SimpleDialog()
+    _W95_COLORCHOOSER = _W95ColorChooser()
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    messagebox = _W95_MESSAGEBOX
+    simpledialog = _W95_SIMPLEDIALOG
+    colorchooser = _W95_COLORCHOOSER
+
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # WINDOWS 95 MAIN WINDOW - the title bar, the taskbar button, the menu bar and the status bar of the tool
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    class W95App(object):
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+
+        def __init__(self, root, title, on_close, width=900, height=600, min_size=(600, 400), icon_colours=None):
+            import os as _os
+            import tkinter as _tk
+            import tkinter.font as _tkfont
+            self.tk = _tk
+            self.root = root
+            self.app_title = title
+            self.on_close = on_close
+            self.is_windows = _os.name == "nt"
+            self.custom_frame = self.is_windows
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
+            self.min_size = min_size
+            width = min(width, root.winfo_screenwidth() - 40)
+            height = min(height, root.winfo_screenheight() - 80)
+            root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                           max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+            root.minsize(*min_size)
+            root.configure(bg=self.FACE)
+            root.title(title)
+            root.protocol("WM_DELETE_WINDOW", on_close)
+            icon = _tk.PhotoImage(width=16, height=16)
+            a, b = icon_colours or ("#808000", "#ffff00")
+            icon.put(self.BLACK, to=(2, 1, 14, 15))
+            for y0 in (2, 6, 10):
+                icon.put(a, to=(3, y0, 13, y0 + 3))
+                icon.put(b, to=(4, y0 + 1, 12, y0 + 2))
+            self.icon = icon
+            marlett = "Marlett" in _tkfont.families(root)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = _tk.PhotoImage(width=1, height=1)
+            bar = _tk.Frame(root, bg=self.NAVY, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon_label = _tk.Label(bar, image=self.icon, bg=self.NAVY)
+            icon_label.pack(side="left", padx=(2, 3))
+            self.title_label = _tk.Label(bar, text=title, bg=self.NAVY, fg=self.LIGHT, font=self.FONT_B, anchor="w")
+            self.title_label.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, self.title_label, icon_label)
+            self.caption_button(bar, "close", on_close).pack(side="right", padx=(2, 2))
+            self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+            self.btn_max.pack(side="right")
+            self.caption_button(bar, "min", self.minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._press)
+                widget.bind("<B1-Motion>", self._drag)
+                widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._active(True) if e.widget is root else None, add="+")
+            root.bind("<Deactivate>", lambda e: self._active(False) if e.widget is root else None, add="+")
+            root.bind("<Map>", self._on_map, add="+")
+            self.menubar = _tk.Frame(root, bg=self.FACE)
+            self.menubar.pack(side="top", fill="x")
+            status = _tk.Frame(root, bg=self.FACE)
+            status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+            grip = _tk.Canvas(status, width=14, height=14, bg=self.FACE, bd=0, highlightthickness=0,
+                              cursor="size_nw_se" if self.is_windows else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=self.LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=self.SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=self.SHADOW)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.status_frame = status
+            self.status_label = _tk.Label(status, text="Ready", font=self.FONT, bg=self.FACE, relief="sunken", bd=1,
+                                          anchor="w", padx=4)
+            self.status_label.pack(side="left", fill="x", expand=True, padx=1)
+            self.body = _tk.Frame(root, bg=self.FACE)
+            self.body.pack(fill="both", expand=True)
+            if self.custom_frame:
+                root.configure(bd=2, relief="raised")
+                root.after(10, self._enable_custom_frame)
+            root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+
+        # ----- the parts --------------------------------------------------------------------------------
+        def caption_button(self, parent, key, command):
+            return self.tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                  compound="center", width=12, height=10, padx=0, pady=0, bg=self.FACE, fg=self.BLACK,
+                                  activebackground=self.FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def status_field(self, text="", width=20):
+            label = self.tk.Label(self.status_frame, text=text, font=self.FONT, bg=self.FACE, relief="sunken", bd=1,
+                                  width=width)
+            label.pack(side="right", padx=1, before=self.status_label)
+            return label
+
+        def status(self, text):
+            self.status_label.config(text=text)
+
+        def set_title(self, text):
+            self.root.title(text)
+            self.title_label.config(text=text)
+
+        def from_menu(self, action):
+            """Menu commands run after the menu has closed (a box opened inside the menu's click could keep the
+            clicks captured on Windows)."""
+            return lambda: self.root.after(10, action)
+
+        def add_menu(self, text, items):
+            """items: (label, accelerator, command) / None (separator) / ("check", label, variable, command) /
+            ("cascade", label, tk.Menu). Returns the tk.Menu."""
+            tk = self.tk
+            button = tk.Menubutton(self.menubar, text=text, font=self.FONT, bg=self.FACE, fg=self.BLACK,
+                                   activebackground=self.NAVY, activeforeground=self.LIGHT, relief="flat", bd=0, padx=6,
+                                   pady=2, underline=0, takefocus=0, highlightthickness=0)
+            button.pack(side="left")
+            menu = tk.Menu(button, tearoff=0, font=self.FONT, bg=self.FACE, fg=self.BLACK, activebackground=self.NAVY,
+                           activeforeground=self.LIGHT)
+            for item in items:
+                if item is None:
+                    menu.add_separator()
+                elif item[0] == "check":
+                    menu.add_checkbutton(label=item[1], variable=item[2], command=self.from_menu(item[3]))
+                elif item[0] == "cascade":
+                    menu.add_cascade(label=item[1], menu=item[2])
+                else:
+                    menu.add_command(label=item[0], accelerator=item[1], command=self.from_menu(item[2]))
+            button.config(menu=menu)
+            return menu
+
+        def sub_menu(self):
+            return self.tk.Menu(self.menubar, tearoff=0, font=self.FONT, bg=self.FACE, fg=self.BLACK,
+                                activebackground=self.NAVY, activeforeground=self.LIGHT)
+
+        # ----- frame behaviour ---------------------------------------------------------------------------
+        def _active(self, active):
+            for widget in self.caption_parts:
+                widget.config(bg=self.NAVY if active else self.SHADOW)
+            self.title_label.config(fg=self.LIGHT if active else self.FACE)
+
+        def _enable_custom_frame(self):
+            self.root.overrideredirect(True)
+            self.root.update_idletasks()
+            # the taskbar button is set once Tk has finished making the window borderless (set at once, Tk took
+            # it back when it showed the window again, so the program had no button in the taskbar)
+            self.root.after(30, self._apply_taskbar_style)
+
+        def _apply_taskbar_style(self, attempt=0):
+            root = self.root
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+            except (ImportError, AttributeError):
+                return
+            try:
+                hwnd = user32.GetParent(root.winfo_id())
+                if not hwnd:
+                    raise OSError("the window is not there yet")
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                if attempt < 6:
+                    root.after(100, lambda: self._apply_taskbar_style(attempt + 1))
+                return
+            root.withdraw()
+            root.after(20, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+            if attempt < 3:
+                root.after(400, lambda: self._check_taskbar(attempt + 1))
+
+        def _check_taskbar(self, attempt):
+            """Shown again, the window can lose its taskbar button: then the style is set once more."""
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.root.winfo_id())
+                if hwnd and not user32.GetWindowLongW(hwnd, -20) & 0x00040000:
+                    self._apply_taskbar_style(attempt)
+            except Exception:
+                pass
+
+        def _on_map(self, event):
+            if event.widget is self.root and self.minimizing and self.root.state() == "normal":
+                self.minimizing = False
+                self.root.overrideredirect(True)
+                self.root.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.root.overrideredirect(False)
+            self.root.iconify()
+
+        def toggle_maximize(self):
+            root = self.root
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if self.is_windows:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _press(self, event):
+            self._drag_from = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+
+        def _drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.root.geometry("+%d+%d" % (event.x_root - self._drag_from[0], event.y_root - self._drag_from[1]))
+
+        def _grip_press(self, event):
+            self._resize = (event.x_root, event.y_root, self.root.winfo_width(), self.root.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.root.geometry("%dx%d" % (max(self.min_size[0], width + event.x_root - x0),
+                                              max(self.min_size[1], height + event.y_root - y0)))
+
+        def _focus_on_click(self, event):
+            """A window without the Windows title bar does not take the keyboard back by itself: a click in a text
+            field gives it the keyboard again."""
+            if isinstance(event.widget, (self.tk.Entry, self.tk.Text, self.tk.Listbox)):
+                try:
+                    event.widget.focus_force()
+                except self.tk.TclError:
+                    pass
+
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # SHIFT PLANNER 95 - engine: employees, shift types, the plan, holidays, hours, rule checks, export
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import os
+    import sys
+    import sqlite3
+    import calendar
+    import datetime as dt
+    import traceback
+    import tkinter as tk
+    from tkinter import filedialog
+
+    SP_APP_NAME = "Shift Planner"
+    SP_VERSION = "1.0"
+    SP_KINDS = [("work", "Work shift"), ("leave", "Leave (paid hours)"), ("off", "Day off")]
+    SP_DEFAULT_TYPES = [("M", "Morning", "work", "07:00", "15:00", 0, "#ffff80", 0),
+                        ("A", "Afternoon", "work", "15:00", "23:00", 0, "#80c0ff", 0),
+                        ("N", "Night", "work", "23:00", "07:00", 0, "#c0a0ff", 0),
+                        ("D", "Day", "work", "09:00", "17:00", 0, "#a0e0a0", 0),
+                        ("AL", "Annual leave", "leave", "", "", 0, "#ffc080", 0),
+                        ("SL", "Sick leave", "leave", "", "", 0, "#ff9090", 0),
+                        ("X", "Day off", "off", "", "", 0, "#e0e0e0", 0)]
+    SP_WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+
+
+    def _sp_app_dir():
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        try:
+            return os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            return os.getcwd()
+
+
+    SP_DB_PATH = os.path.join(_sp_app_dir(), "Config", "dbo_bitpack.db")
+    SP_SCHEMA = [
+        "CREATE TABLE IF NOT EXISTS shift_planner_employees (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
+        "team TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', hours_per_day REAL NOT NULL DEFAULT 8, "
+        "active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS shift_planner_shift_types (code TEXT PRIMARY KEY, name TEXT NOT NULL, "
+        "kind TEXT NOT NULL DEFAULT 'work', start_time TEXT NOT NULL DEFAULT '', end_time TEXT NOT NULL DEFAULT '', "
+        "break_minutes INTEGER NOT NULL DEFAULT 0, color TEXT NOT NULL DEFAULT '#ffffff', "
+        "min_staff INTEGER NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS shift_planner_entries (employee_id INTEGER NOT NULL, day TEXT NOT NULL, "
+        "code TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', PRIMARY KEY (employee_id, day))",
+        "CREATE TABLE IF NOT EXISTS shift_planner_holidays (day TEXT PRIMARY KEY, name TEXT NOT NULL)",
+        "CREATE TABLE IF NOT EXISTS shift_planner_settings (id INTEGER PRIMARY KEY CHECK (id = 1), "
+        "min_rest_hours REAL NOT NULL DEFAULT 12, max_consecutive_days INTEGER NOT NULL DEFAULT 6, "
+        "max_week_hours REAL NOT NULL DEFAULT 48, "
+        "last_team TEXT NOT NULL DEFAULT '')",
+    ]
+
+
+    # ───────────────────────────────────────── dates and holidays ───────────────────────────────────────
+    def sp_day(d):
+        return d.strftime("%Y-%m-%d")
+
+
+    def sp_parse_day(text):
+        return dt.datetime.strptime(text, "%Y-%m-%d").date()
+
+
+    def sp_month_days(year, month):
+        return [dt.date(year, month, d) for d in range(1, calendar.monthrange(year, month)[1] + 1)]
+
+
+    # ───────────────────────────────────────── the database ─────────────────────────────────────────────
+    class SPStore(object):
+        def __init__(self, path=SP_DB_PATH):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self.conn = sqlite3.connect(path, timeout=10)
+            self.conn.row_factory = sqlite3.Row
+            with self.conn:
+                for sql in SP_SCHEMA:                                   # the same tables as in setup_database_ALL()
+                    self.conn.execute(sql)
+                if not self.conn.execute("SELECT COUNT(*) FROM shift_planner_shift_types").fetchone()[0]:
+                    for i, t in enumerate(SP_DEFAULT_TYPES):
+                        self.conn.execute("INSERT INTO shift_planner_shift_types (code, name, kind, start_time, end_time, "
+                                          "break_minutes, color, min_staff, sort_order) VALUES (?,?,?,?,?,?,?,?,?)",
+                                          t + (i,))
+                self.conn.execute("INSERT OR IGNORE INTO shift_planner_settings (id) VALUES (1)")
+
+        def close(self):
+            try:
+                self.conn.close()
+            except sqlite3.Error:
+                pass
+
+        # ----- employees -----------------------------------------------------------------------------------
+        def employees(self, team=None, include_inactive=False):
+            sql = "SELECT * FROM shift_planner_employees WHERE 1=1"
+            args = []
+            if not include_inactive:
+                sql += " AND active = 1"
+            if team:
+                sql += " AND team = ?"
+                args.append(team)
+            sql += " ORDER BY sort_order, name COLLATE NOCASE"
+            return [dict(r) for r in self.conn.execute(sql, args)]
+
+        def teams(self):
+            return [r[0] for r in self.conn.execute("SELECT DISTINCT team FROM shift_planner_employees WHERE team <> '' "
+                                                    "ORDER BY team COLLATE NOCASE")]
+
+        def save_employee(self, emp):
+            with self.conn:
+                if emp.get("id"):
+                    self.conn.execute("UPDATE shift_planner_employees SET name=?, team=?, role=?, hours_per_day=?, active=? "
+                                      "WHERE id=?", (emp["name"], emp["team"], emp["role"], emp["hours_per_day"],
+                                                     int(emp["active"]), emp["id"]))
+                    return emp["id"]
+                order = self.conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM shift_planner_employees").fetchone()[0]
+                cur = self.conn.execute("INSERT INTO shift_planner_employees (name, team, role, hours_per_day, active, "
+                                        "sort_order) VALUES (?,?,?,?,?,?)", (emp["name"], emp["team"], emp["role"],
+                                                                             emp["hours_per_day"], int(emp["active"]),
+                                                                             order))
+                return cur.lastrowid
+
+        def delete_employee(self, emp_id):
+            with self.conn:
+                self.conn.execute("DELETE FROM shift_planner_entries WHERE employee_id = ?", (emp_id,))
+                self.conn.execute("DELETE FROM shift_planner_employees WHERE id = ?", (emp_id,))
+
+        def reorder_employees(self, ids):
+            with self.conn:
+                for i, emp_id in enumerate(ids):
+                    self.conn.execute("UPDATE shift_planner_employees SET sort_order = ? WHERE id = ?", (i, emp_id))
+
+        # ----- shift types ---------------------------------------------------------------------------------
+        def types(self):
+            return [dict(r) for r in self.conn.execute("SELECT * FROM shift_planner_shift_types ORDER BY sort_order, code")]
+
+        def save_type(self, old_code, t):
+            with self.conn:
+                if old_code:
+                    self.conn.execute("UPDATE shift_planner_shift_types SET code=?, name=?, kind=?, start_time=?, end_time=?, "
+                                      "break_minutes=?, color=?, min_staff=? WHERE code=?",
+                                      (t["code"], t["name"], t["kind"], t["start_time"], t["end_time"],
+                                       t["break_minutes"], t["color"], t["min_staff"], old_code))
+                    if old_code != t["code"]:
+                        self.conn.execute("UPDATE shift_planner_entries SET code = ? WHERE code = ?", (t["code"], old_code))
+                else:
+                    order = self.conn.execute("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM shift_planner_shift_types"
+                                              ).fetchone()[0]
+                    self.conn.execute("INSERT INTO shift_planner_shift_types (code, name, kind, start_time, end_time, "
+                                      "break_minutes, color, min_staff, sort_order) VALUES (?,?,?,?,?,?,?,?,?)",
+                                      (t["code"], t["name"], t["kind"], t["start_time"], t["end_time"],
+                                       t["break_minutes"], t["color"], t["min_staff"], order))
+
+        def type_usage(self, code):
+            return self.conn.execute("SELECT COUNT(*) FROM shift_planner_entries WHERE code = ?", (code,)).fetchone()[0]
+
+        def delete_type(self, code):
+            with self.conn:
+                self.conn.execute("DELETE FROM shift_planner_entries WHERE code = ?", (code,))
+                self.conn.execute("DELETE FROM shift_planner_shift_types WHERE code = ?", (code,))
+
+        def reorder_types(self, codes):
+            with self.conn:
+                for i, code in enumerate(codes):
+                    self.conn.execute("UPDATE shift_planner_shift_types SET sort_order = ? WHERE code = ?", (i, code))
+
+        # ----- the plan ------------------------------------------------------------------------------------
+        def entries(self, first, last):
+            """{(employee id, 'YYYY-MM-DD'): (code, note)} between two dates."""
+            rows = self.conn.execute("SELECT employee_id, day, code, note FROM shift_planner_entries WHERE day BETWEEN ? AND ?",
+                                     (sp_day(first), sp_day(last)))
+            return {(r[0], r[1]): (r[2], r[3]) for r in rows}
+
+        def set_entries(self, changes):
+            """changes: [(employee id, day, code or None, note)] - None removes the day."""
+            with self.conn:
+                for emp_id, day, code, note in changes:
+                    if code:
+                        self.conn.execute("INSERT INTO shift_planner_entries (employee_id, day, code, note) VALUES (?,?,?,?) "
+                                          "ON CONFLICT(employee_id, day) DO UPDATE SET code = excluded.code, "
+                                          "note = excluded.note", (emp_id, day, code, note or ""))
+                    else:
+                        self.conn.execute("DELETE FROM shift_planner_entries WHERE employee_id = ? AND day = ?",
+                                          (emp_id, day))
+
+        # ----- holidays and rules --------------------------------------------------------------------------
+        def custom_holidays(self):
+            return [dict(r) for r in self.conn.execute("SELECT day, name FROM shift_planner_holidays ORDER BY day")]
+
+        def add_holiday(self, day, name):
+            with self.conn:
+                self.conn.execute("INSERT OR REPLACE INTO shift_planner_holidays (day, name) VALUES (?, ?)", (day, name))
+
+        def delete_holiday(self, day):
+            with self.conn:
+                self.conn.execute("DELETE FROM shift_planner_holidays WHERE day = ?", (day,))
+
+        def holidays(self, year):
+            days = {}
+            for h in self.custom_holidays():
+                d = sp_parse_day(h["day"])
+                if d.year == year:
+                    days[d] = h["name"]
+            return days
+
+        def settings(self):
+            return dict(self.conn.execute("SELECT * FROM shift_planner_settings WHERE id = 1").fetchone())
+
+        def save_settings(self, **values):
+            with self.conn:
+                for key, value in values.items():
+                    self.conn.execute("UPDATE shift_planner_settings SET %s = ? WHERE id = 1" % key, (value,))
+
+
+    # ───────────────────────────────────────── hours ────────────────────────────────────────────────────
+    def sp_minutes(text):
+        """'07:30' -> 450, '' or wrong -> None"""
+        try:
+            h, m = str(text).strip().split(":")
+            h, m = int(h), int(m)
+            if 0 <= h <= 24 and 0 <= m < 60 and h * 60 + m <= 1440:
+                return h * 60 + m
+        except (ValueError, AttributeError):
+            pass
+        return None
+
+
+    def sp_shift_hours(t):
+        if t is None or t["kind"] != "work":
+            return 0.0
+        s, e = sp_minutes(t["start_time"]), sp_minutes(t["end_time"])
+        if s is None or e is None:
+            return 0.0
+        if e <= s:
+            e += 1440
+        return max(0.0, (e - s - int(t.get("break_minutes") or 0)) / 60.0)
+
+
+    def sp_shift_span(t, day):
+        """(start, end) of a work shift on `day` as datetimes; a night shift ends the next day."""
+        s, e = sp_minutes(t["start_time"]), sp_minutes(t["end_time"])
+        if s is None or e is None:
+            return None
+        start = dt.datetime.combine(day, dt.time()) + dt.timedelta(minutes=s)
+        end = dt.datetime.combine(day, dt.time()) + dt.timedelta(minutes=e if e > s else e + 1440)
+        return start, end
+
+
+    def sp_fmt_hours(h):
+        text = ("%.2f" % h).rstrip("0").rstrip(".")
+        return text if text not in ("-0", "") else "0"
+
+
+    def sp_is_working_day(d, holidays):
+        return d.weekday() < 5 and d not in holidays
+
+
+    def sp_totals(emp, entries, tmap, days, holidays):
+        """-> {"work", "leave", "total", "norm", "diff", "counts": {code: n}}"""
+        work = leave = 0.0
+        counts = {}
+        hpd = float(emp.get("hours_per_day") or 0)
+        norm = hpd * sum(1 for d in days if sp_is_working_day(d, holidays))
+        for d in days:
+            e = entries.get((emp["id"], sp_day(d)))
+            if not e:
+                continue
+            t = tmap.get(e[0])
+            counts[e[0]] = counts.get(e[0], 0) + 1
+            if t is None:
+                continue
+            if t["kind"] == "work":
+                work += sp_shift_hours(t)
+            elif t["kind"] == "leave" and sp_is_working_day(d, holidays):
+                leave += hpd
+        total = work + leave
+        return {"work": work, "leave": leave, "total": total, "norm": norm, "diff": total - norm, "counts": counts}
+
+
+    def sp_day_segments(emp, entries, tmap, day):
+        """What one employee does during the 24 hours of `day`:
+        [(start minute, end minute, type, carried from the day before)]; leave / day off give (0, 1440, type, False)."""
+        out = []
+        prev = entries.get((emp["id"], sp_day(day - dt.timedelta(days=1))))
+        t = tmap.get(prev[0]) if prev else None
+        if t is not None and t["kind"] == "work":
+            s, e = sp_minutes(t["start_time"]), sp_minutes(t["end_time"])
+            if s is not None and e is not None and e <= s and e > 0:          # a night shift still running
+                out.append((0, e, t, True))
+        cur = entries.get((emp["id"], sp_day(day)))
+        t = tmap.get(cur[0]) if cur else None
+        if t is not None:
+            if t["kind"] == "work":
+                s, e = sp_minutes(t["start_time"]), sp_minutes(t["end_time"])
+                if s is not None and e is not None:
+                    out.append((s, e if e > s else 1440, t, False))
+            else:
+                out.append((0, 1440, t, False))
+        return out
+
+
+    # ───────────────────────────────────────── rule checks ──────────────────────────────────────────────
+    def sp_check(emps, entries, tmap, year, month, settings):
+        """The problems of the month: [{"emp": id or None, "day": date, "text"}]. `entries` must also hold the two
+        weeks before the month and the week after it."""
+        days = sp_month_days(year, month)
+        first, last = days[0], days[-1]
+        min_rest = float(settings.get("min_rest_hours") or 0)
+        max_run = int(settings.get("max_consecutive_days") or 0)
+        max_week = float(settings.get("max_week_hours") or 0)
+        problems = []
+
+        def work_type(emp_id, d):
+            e = entries.get((emp_id, sp_day(d)))
+            t = tmap.get(e[0]) if e else None
+            return t if t is not None and t["kind"] == "work" else None
+        for emp in emps:
+            eid, name = emp["id"], emp["name"]
+            if min_rest > 0:                                             # rest between two shifts
+                d = first - dt.timedelta(days=1)
+                while d < last:
+                    a, b = work_type(eid, d), work_type(eid, d + dt.timedelta(days=1))
+                    if a and b:
+                        span_a, span_b = sp_shift_span(a, d), sp_shift_span(b, d + dt.timedelta(days=1))
+                        if span_a and span_b:
+                            gap = (span_b[0] - span_a[1]).total_seconds() / 3600.0
+                            if gap < min_rest:
+                                problems.append({"emp": eid, "day": d + dt.timedelta(days=1),
+                                                 "text": "%s: only %s h of rest between %s (%s) and %s (%s), minimum %s h"
+                                                 % (name, sp_fmt_hours(gap), a["code"], d.strftime("%d.%m"), b["code"],
+                                                    (d + dt.timedelta(days=1)).strftime("%d.%m"),
+                                                    sp_fmt_hours(min_rest))})
+                    d += dt.timedelta(days=1)
+            if max_run > 0:                                              # working days in a row
+                run = 0
+                d = first - dt.timedelta(days=14)
+                while d <= last:
+                    run = run + 1 if work_type(eid, d) else 0
+                    if run == max_run + 1 and d >= first:
+                        problems.append({"emp": eid, "day": d, "text": "%s: more than %d working days in a row (until %s)"
+                                         % (name, max_run, d.strftime("%d.%m"))})
+                    d += dt.timedelta(days=1)
+            if max_week > 0:                                             # hours in a week (Monday to Sunday)
+                monday = first - dt.timedelta(days=first.weekday())
+                while monday <= last:
+                    hours = sum(sp_shift_hours(work_type(eid, monday + dt.timedelta(days=i)))
+                                for i in range(7) if work_type(eid, monday + dt.timedelta(days=i)))
+                    if hours > max_week + 1e-6:
+                        shown = max(monday, first)
+                        problems.append({"emp": eid, "day": shown, "text": "%s: %s h in the week of %s (maximum %s h)"
+                                         % (name, sp_fmt_hours(hours), monday.strftime("%d.%m"),
+                                            sp_fmt_hours(max_week))})
+                    monday += dt.timedelta(days=7)
+        for d in days:                                                   # people needed on each shift
+            for code, t in tmap.items():
+                need = int(t.get("min_staff") or 0)
+                if t["kind"] != "work" or need <= 0:
+                    continue
+                have = sum(1 for emp in emps if (entries.get((emp["id"], sp_day(d))) or ("",))[0] == code)
+                if have < need:
+                    problems.append({"emp": None, "day": d, "text": "%s (%s) has %d of %d people"
+                                     % (t["name"], code, have, need)})
+        problems.sort(key=lambda p: (p["day"], p["emp"] is not None, p["text"]))
+        return problems
+
+
+    # ───────────────────────────────────────── export ───────────────────────────────────────────────────
+    def sp_export_xlsx(path, title, year, month, emps, entries, types, holidays, problems):
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
+        tmap = {t["code"]: t for t in types}
+        days = sp_month_days(year, month)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Plan"
+        thin = Side(style="thin", color="808080")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        centre = Alignment(horizontal="center", vertical="center")
+        grey = PatternFill("solid", fgColor="D9D9D9")
+        red = PatternFill("solid", fgColor="F4B6B6")
+        ws.cell(row=1, column=1, value=title).font = Font(bold=True, size=14)
+        ws.cell(row=2, column=1, value="Made with %s on %s" % (SP_APP_NAME, dt.date.today().strftime("%d.%m.%Y")))
+        head = 4
+        ws.cell(row=head, column=1, value="Employee").font = Font(bold=True)
+        ws.cell(row=head, column=2, value="Role").font = Font(bold=True)
+        for i, d in enumerate(days):
+            c = ws.cell(row=head, column=3 + i, value="%d\n%s" % (d.day, SP_WEEKDAYS[d.weekday()]))
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            c.font = Font(bold=True)
+            c.border = border
+            if d in holidays:
+                c.fill = red
+            elif d.weekday() >= 5:
+                c.fill = grey
+        tcol = 3 + len(days)
+        for j, label in enumerate(("Work h", "Leave h", "Total h", "Norm h", "+/- h")):
+            c = ws.cell(row=head, column=tcol + j, value=label)
+            c.font = Font(bold=True)
+            c.alignment = centre
+            c.border = border
+        for r, emp in enumerate(emps, start=head + 1):
+            ws.cell(row=r, column=1, value=emp["name"]).border = border
+            ws.cell(row=r, column=2, value=emp.get("role", "")).border = border
+            for i, d in enumerate(days):
+                e = entries.get((emp["id"], sp_day(d)))
+                c = ws.cell(row=r, column=3 + i, value=e[0] if e else None)
+                c.alignment = centre
+                c.border = border
+                t = tmap.get(e[0]) if e else None
+                if t:
+                    c.fill = PatternFill("solid", fgColor=t["color"].lstrip("#").upper())
+                elif d in holidays:
+                    c.fill = red
+                elif d.weekday() >= 5:
+                    c.fill = grey
+            tot = sp_totals(emp, entries, tmap, days, holidays)
+            for j, key in enumerate(("work", "leave", "total", "norm", "diff")):
+                c = ws.cell(row=r, column=tcol + j, value=round(tot[key], 2))
+                c.alignment = centre
+                c.border = border
+        r = head + len(emps) + 2
+        ws.cell(row=r, column=1, value="People per shift").font = Font(bold=True)
+        for t in types:
+            if t["kind"] != "work":
+                continue
+            r += 1
+            ws.cell(row=r, column=1, value="%s - %s" % (t["code"], t["name"]))
+            for i, d in enumerate(days):
+                n = sum(1 for emp in emps if (entries.get((emp["id"], sp_day(d))) or ("",))[0] == t["code"])
+                c = ws.cell(row=r, column=3 + i, value=n)
+                c.alignment = centre
+                if int(t.get("min_staff") or 0) > n:
+                    c.fill = red
+        r += 2
+        ws.cell(row=r, column=1, value="Legend").font = Font(bold=True)
+        for t in types:
+            r += 1
+            c = ws.cell(row=r, column=1, value=t["code"])
+            c.fill = PatternFill("solid", fgColor=t["color"].lstrip("#").upper())
+            c.alignment = centre
+            hours = (" %s-%s, %s h" % (t["start_time"], t["end_time"], sp_fmt_hours(sp_shift_hours(t)))
+                     if t["kind"] == "work" else "")
+            ws.cell(row=r, column=2, value="%s (%s)%s" % (t["name"], dict(SP_KINDS)[t["kind"]], hours))
+        ws.column_dimensions["A"].width = 26
+        ws.column_dimensions["B"].width = 14
+        for i in range(len(days)):
+            ws.column_dimensions[get_column_letter(3 + i)].width = 4.6
+        for j in range(5):
+            ws.column_dimensions[get_column_letter(tcol + j)].width = 8.5
+        ws.row_dimensions[head].height = 30
+        ws.freeze_panes = ws.cell(row=head + 1, column=3)
+        ws2 = wb.create_sheet("Problems")
+        ws2.append(["Day", "Problem"])
+        for p in problems:
+            ws2.append([p["day"].strftime("%d.%m.%Y"), p["text"]])
+        ws2.column_dimensions["A"].width = 12
+        ws2.column_dimensions["B"].width = 100
+        ws3 = wb.create_sheet("Holidays")
+        ws3.append(["Day", "Holiday"])
+        for d in sorted(holidays):
+            if d.month == month:
+                ws3.append([d.strftime("%d.%m.%Y"), holidays[d]])
+        ws3.column_dimensions["A"].width = 12
+        ws3.column_dimensions["B"].width = 40
+        wb.save(path)
+
+
+    _SP_PDF_FONTS = {}
+
+
+    def sp_pdf_fonts():
+        """A font with the Romanian letters when there is one (Arial on Windows), else Helvetica."""
+        if _SP_PDF_FONTS:
+            return _SP_PDF_FONTS["regular"], _SP_PDF_FONTS["bold"]
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        pairs = [("C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/arialbd.ttf"),
+                 ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")]
+        for regular, bold in pairs:
+            if os.path.exists(regular) and os.path.exists(bold):
+                try:
+                    pdfmetrics.registerFont(TTFont("SPFont", regular))
+                    pdfmetrics.registerFont(TTFont("SPFont-Bold", bold))
+                    pdfmetrics.registerFontFamily("SPFont", normal="SPFont", bold="SPFont-Bold", italic="SPFont",
+                                                  boldItalic="SPFont-Bold")
+                    _SP_PDF_FONTS.update(regular="SPFont", bold="SPFont-Bold")
+                    return "SPFont", "SPFont-Bold"
+                except Exception:
+                    continue
+        _SP_PDF_FONTS.update(regular="Helvetica", bold="Helvetica-Bold")
+        return "Helvetica", "Helvetica-Bold"
+
+
+    def sp_export_pdf(path, title, year, month, emps, entries, types, holidays):
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        font, bold = sp_pdf_fonts()
+        tmap = {t["code"]: t for t in types}
+        days = sp_month_days(year, month)
+        page = landscape(A4)
+        doc = SimpleDocTemplate(path, pagesize=page, leftMargin=20, rightMargin=20, topMargin=24, bottomMargin=24,
+                                title=title, author=SP_APP_NAME)
+        name_w, total_w = 118, 32
+        day_w = (page[0] - 40 - name_w - 3 * total_w) / float(len(days))
+        head = ["Employee"] + ["%d\n%s" % (d.day, SP_WEEKDAYS[d.weekday()][0]) for d in days] + ["Hours", "Norm", "+/-"]
+        data = [head]
+        style = [("FONT", (0, 0), (-1, -1), font, 6.5), ("FONT", (0, 0), (-1, 0), bold, 6.5),
+                 ("ALIGN", (1, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                 ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#808080")),
+                 ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#c0c0c0")),
+                 ("LEFTPADDING", (0, 0), (-1, -1), 1.5), ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+                 ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5)]
+        for i, d in enumerate(days):
+            if d in holidays:
+                style.append(("BACKGROUND", (1 + i, 0), (1 + i, 0), colors.HexColor("#f4b6b6")))
+        for r, emp in enumerate(emps, start=1):
+            row = [emp["name"][:30]]
+            for i, d in enumerate(days):
+                e = entries.get((emp["id"], sp_day(d)))
+                row.append(e[0] if e else "")
+                t = tmap.get(e[0]) if e else None
+                if t:
+                    style.append(("BACKGROUND", (1 + i, r), (1 + i, r), colors.HexColor(t["color"])))
+                elif d in holidays:
+                    style.append(("BACKGROUND", (1 + i, r), (1 + i, r), colors.HexColor("#fbe0e0")))
+                elif d.weekday() >= 5:
+                    style.append(("BACKGROUND", (1 + i, r), (1 + i, r), colors.HexColor("#ececec")))
+            tot = sp_totals(emp, entries, tmap, days, holidays)
+            row += [sp_fmt_hours(tot["total"]), sp_fmt_hours(tot["norm"]),
+                    ("+" if tot["diff"] > 0 else "") + sp_fmt_hours(tot["diff"])]
+            data.append(row)
+        table = Table(data, colWidths=[name_w] + [day_w] * len(days) + [total_w] * 3, repeatRows=1)
+        table.setStyle(TableStyle(style))
+        h1 = ParagraphStyle("h1", fontName=bold, fontSize=13, leading=16)
+        small = ParagraphStyle("small", fontName=font, fontSize=7, leading=9)
+        legend = "  ".join("<b>%s</b> %s%s" % (t["code"], t["name"], " %s-%s" % (t["start_time"], t["end_time"])
+                                               if t["kind"] == "work" else "") for t in types)
+        hol = ", ".join("%d %s" % (d.day, holidays[d]) for d in sorted(holidays) if d.month == month)
+        story = [Paragraph(title, h1), Spacer(1, 6), table, Spacer(1, 8), Paragraph("Legend: " + legend, small)]
+        if hol:
+            story.append(Paragraph("Holidays: " + hol, small))
+        story += [Spacer(1, 18), Paragraph("Made by: ____________________        Approved by: ____________________"
+                                           "        Date: %s" % dt.date.today().strftime("%d.%m.%Y"), small)]
+        doc.build(story)
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # SHIFT PLANNER 95 - the window
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import tkinter.font as tkfont
+
+    SP_FACE, SP_SHADOW, SP_LIGHT, SP_NAVY, SP_WHITE = "#c0c0c0", "#808080", "#ffffff", "#000080", "#ffffff"
+    SP_FONT = ("MS Sans Serif", 8)
+    SP_FONT_B = ("MS Sans Serif", 8, "bold")
+    SP_WEEKEND, SP_HOLIDAY = "#e4e4e4", "#f8d0d0"
+
+
+    def sp_button(parent, text, command, width=None, bold=False):
+        b = tk.Button(parent, text=text, command=command, font=SP_FONT_B if bold else SP_FONT, bg=SP_FACE, fg="#000000",
+                      activebackground=SP_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0, padx=6, pady=1)
+        if width:
+            b.config(width=width)
+        return b
+
+
+    def sp_label(parent, text="", **kw):
+        opts = dict(text=text, font=SP_FONT, bg=SP_FACE, fg="#000000", anchor="w")
+        opts.update(kw)
+        return tk.Label(parent, **opts)
+
+
+    def sp_entry(parent, width=20, value=""):
+        e = tk.Entry(parent, font=SP_FONT, bg=SP_WHITE, fg="#000000", relief="sunken", bd=2, highlightthickness=0,
+                     width=width, insertbackground="#000000")
+        e.insert(0, value)
+        return e
+
+
+    def sp_spin(parent, lo, hi, step, value, width=7):
+        s = tk.Spinbox(parent, from_=lo, to=hi, increment=step, width=width, font=SP_FONT, bg=SP_WHITE, relief="sunken",
+                       bd=2, buttonbackground=SP_FACE, highlightthickness=0, justify="right")
+        s.delete(0, "end")
+        s.insert(0, sp_fmt_hours(float(value)))
+        return s
+
+
+    def sp_checkbox(parent, text, variable):
+        return tk.Checkbutton(parent, text=text, variable=variable, font=SP_FONT, bg=SP_FACE, activebackground=SP_FACE,
+                              selectcolor=SP_WHITE, highlightthickness=0, takefocus=0, anchor="w")
+
+
+    def sp_scrollbar(parent, orient, command):
+        return tk.Scrollbar(parent, orient=orient, command=command, bg=SP_FACE, troughcolor="#dfdfdf",
+                            activebackground=SP_FACE, bd=1, relief="raised", highlightthickness=0, width=16)
+
+
+    def sp_group(parent, text):
+        return tk.LabelFrame(parent, text=text, font=SP_FONT, bg=SP_FACE, fg="#000000", bd=2, relief="groove", padx=4,
+                             pady=3)
+
+
+    def sp_listbox(parent, height=10, width=40, font=SP_FONT, multiple=False):
+        frame = tk.Frame(parent, bg=SP_FACE)
+        lb = tk.Listbox(frame, font=font, bg=SP_WHITE, fg="#000000", relief="sunken", bd=2, highlightthickness=0,
+                        selectbackground=SP_NAVY, selectforeground=SP_WHITE, activestyle="none", height=height,
+                        width=width, exportselection=False, selectmode="extended" if multiple else "browse")
+        sb = sp_scrollbar(frame, "vertical", lb.yview)
+        lb.config(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        lb.pack(side="left", fill="both", expand=True)
+        return frame, lb
+
+
+    def sp_modal(win):
+        def grab():
+            try:
+                if win.winfo_exists() and win.winfo_viewable():
+                    win.grab_set()
+                    win.focus_force()
+                elif win.winfo_exists():
+                    win.after(80, grab)
+            except tk.TclError:
+                pass
+        win.after(120, grab)
+
+
+    def sp_dialog(parent, title):
+        win = W95Toplevel(parent)
+        win.title(title)
+        win.configure(bg=SP_FACE)
+        win.resizable(False, False)
+        body = tk.Frame(win, bg=SP_FACE, padx=12, pady=10)
+        body.pack(fill="both", expand=True)
+        return win, body
+
+
+    def sp_text_colour(hex_colour):
+        try:
+            c = hex_colour.lstrip("#")
+            r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+            return "#000000" if r * 0.299 + g * 0.587 + b * 0.114 > 140 else "#ffffff"
+        except (ValueError, IndexError):
+            return "#000000"
+
+
+    class SPCombo(tk.Frame):
+        """A Windows 95 drop-down list."""
+
+        def __init__(self, parent, values, value, command=None, width=18):
+            tk.Frame.__init__(self, parent, bg=SP_WHITE, bd=2, relief="sunken")
+            self.values = list(values)
+            self.command = command
+            self.value = value
+            self.label = tk.Label(self, text=value, bg=SP_WHITE, fg="#000000", font=SP_FONT, anchor="w", width=width,
+                                  padx=2)
+            self.label.pack(side="left", fill="x", expand=True)
+            self._pixel = tk.PhotoImage(master=self, width=1, height=1)
+            marlett = "Marlett" in tkfont.families(self)
+            tk.Button(self, text="6" if marlett else "v", font=("Marlett", 8) if marlett else SP_FONT_B, image=self._pixel,
+                      compound="center", width=13, height=13, padx=0, pady=0, bg=SP_FACE, activebackground=SP_FACE, bd=2,
+                      relief="raised", highlightthickness=0, takefocus=0, command=self.open).pack(side="right")
+            self.label.bind("<Button-1>", lambda e: self.open())
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+            self.label.config(text=value)
+
+        def open(self):
+            menu = tk.Menu(self, tearoff=0, font=SP_FONT, bg=SP_WHITE, fg="#000000", activebackground=SP_NAVY,
+                           activeforeground=SP_WHITE)
+            for v in self.values:
+                menu.add_command(label=v, command=lambda v=v: self.choose(v))
+            menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
+
+        def choose(self, value):
+            self.set(value)
+            if self.command:
+                self.command(value)
+
+
+    # ───────────────────────────────────────── the editor ───────────────────────────────────────────────
+    class SPEditor(object):
+        NAME_W, ROW_H, HEAD_H, TOT_W = 200, 24, 38, 46
+        TOTALS = (("work", "Work"), ("leave", "Leave"), ("total", "Total"), ("norm", "Norm"), ("diff", "+/-"))
+        ALL_TEAMS = "(All teams)"
+
+        def __init__(self, root):
+            self.root = root
+            self.store = SPStore()
+            self.app = W95App(root, SP_APP_NAME, self.on_close, 1400, 860, (1100, 620), ("#000080", "#00c0c0"))
+            today = dt.date.today()
+            self.year, self.month = today.year, today.month
+            self.team = self.store.settings().get("last_team") or ""
+            self.brush = None                                   # None = select, "" = clear, else a shift code
+            self.cursor = (0, 0)                                # (row, day index)
+            self.undo_stack, self.redo_stack = [], []
+            self.stroke = None
+            self.typed = ""
+            self.typed_job = None
+            self.cell_w = 28
+            self.view = "month"                                 # "month" or "hours" (one day, hour by hour)
+            self.day = dt.date.today()
+            self.hour_w = 30.0
+            self.emps, self.types, self.tmap, self.entries, self.problems, self.holidays = [], [], {}, {}, [], {}
+            self.problem_cells = set()
+            root.report_callback_exception = self.on_error
+            self.build_menus()
+            self.build_toolbar()
+            self.build_body()
+            self.st_emps = self.app.status_field("", 16)
+            self.st_probs = self.app.status_field("", 16)
+            self.bind_keys()
+            self.reload()
+            self.set_view("month")
+
+        # ═════════════════════════════════════ building ══════════════════════════════════════════════════
+        def build_menus(self):
+            a = self.app
+            a.add_menu("File", [("Export to Excel...", "Ctrl+E", self.export_xlsx), ("Export to PDF...", "Ctrl+P",
+                                                                                        self.export_pdf), None,
+                                ("Exit", "Alt+F4", self.on_close)])
+            a.add_menu("Edit", [("Undo", "Ctrl+Z", self.undo), ("Redo", "Ctrl+Y", self.redo), None,
+                                ("Note on the day...", "F2", self.edit_note), ("Clear the day", "Del",
+                                                                                lambda: self.paint_cursor("")), None,
+                                ("Fill with a pattern...", "Ctrl+F", self.pattern_dialog),
+                                ("Repeat this week to the end of the month", "Ctrl+R", self.repeat_week),
+                                ("Copy the previous month (same weekdays)", "", self.copy_previous_month),
+                                ("Clear the month of this employee", "", self.clear_row)])
+            a.add_menu("View", [("Previous month", "PgUp", lambda: self.go_month(-1)),
+                                ("Next month", "PgDn", lambda: self.go_month(1)),
+                                ("Today", "Ctrl+Home", self.go_today), None,
+                                ("Month", "F5", lambda: self.set_view("month")),
+                                ("Hours of the day", "F6", lambda: self.set_view("hours"))])
+            a.add_menu("Setup", [("Employees...", "", self.employees_dialog), ("Shift types...", "", self.types_dialog),
+                                 ("Holidays...", "", self.holidays_dialog), ("Rules...", "", self.rules_dialog)])
+            a.add_menu("Help", [("Keyboard and mouse", "F1", self.help_keys), None, ("About " + SP_APP_NAME, "",
+                                                                                     self.about)])
+
+        def build_toolbar(self):
+            bar = tk.Frame(self.app.body, bg=SP_FACE, bd=1, relief="raised")
+            bar.pack(side="top", fill="x", pady=(0, 2))
+            self.toolbar = bar
+            sp_button(bar, "<", lambda: self.go_step(-1), width=2).pack(side="left", padx=(4, 1), pady=3)
+            self.month_label = tk.Label(bar, text="", font=("MS Sans Serif", 10, "bold"), bg=SP_WHITE, relief="sunken",
+                                        bd=2, width=22)
+            self.month_label.pack(side="left", padx=1)
+            sp_button(bar, ">", lambda: self.go_step(1), width=2).pack(side="left", padx=1)
+            sp_button(bar, "Today", self.go_today).pack(side="left", padx=(4, 0))
+            tk.Frame(bar, width=2, bd=1, relief="sunken").pack(side="left", fill="y", padx=8, pady=3)
+            sp_label(bar, "View:").pack(side="left")
+            self.view_buttons = {}
+            for key, text in (("month", "Month"), ("hours", "Hours of the day")):
+                b = sp_button(bar, text, lambda k=key: self.set_view(k))
+                b.pack(side="left", padx=(4 if key == "month" else 1, 0))
+                self.view_buttons[key] = b
+            tk.Frame(bar, width=2, bd=1, relief="sunken").pack(side="left", fill="y", padx=8, pady=3)
+            sp_label(bar, "Team:").pack(side="left")
+            self.team_combo = SPCombo(bar, [self.ALL_TEAMS], self.team or self.ALL_TEAMS, self.set_team, width=18)
+            self.team_combo.pack(side="left", padx=(4, 0))
+            tk.Frame(bar, width=2, bd=1, relief="sunken").pack(side="left", fill="y", padx=8, pady=3)
+            sp_button(bar, "Employees...", self.employees_dialog).pack(side="left", padx=1)
+            sp_button(bar, "Shift types...", self.types_dialog).pack(side="left", padx=1)
+            sp_button(bar, "Pattern...", self.pattern_dialog).pack(side="left", padx=1)
+            sp_button(bar, "Export to PDF...", self.export_pdf).pack(side="right", padx=(1, 4))
+            sp_button(bar, "Export to Excel...", self.export_xlsx).pack(side="right", padx=1)
+            self.palette = tk.Frame(self.app.body, bg=SP_FACE, bd=1, relief="raised")
+            self.palette.pack(side="top", fill="x", pady=(0, 2))
+
+        def build_palette(self):
+            for w in self.palette.winfo_children():
+                w.destroy()
+            sp_label(self.palette, "Brush:").pack(side="left", padx=(6, 4))
+            self.brush_buttons = {}
+            items = [(None, "Select", SP_FACE, "Select a day; then type a shift code")] + \
+                    [(t["code"], t["code"], t["color"], "%s - %s%s" % (t["code"], t["name"], " %s-%s" % (
+                        t["start_time"], t["end_time"]) if t["kind"] == "work" else "")) for t in self.types] + \
+                    [("", "Clear", SP_WHITE, "Clear the days you click")]
+            for key, text, colour, tip in items:
+                b = tk.Button(self.palette, text=text, font=SP_FONT_B, bg=colour, fg=sp_text_colour(colour),
+                              activebackground=colour, relief="raised", bd=2, highlightthickness=0, takefocus=0,
+                              width=max(4, len(text) + 1), command=lambda k=key: self.set_brush(k))
+                b.pack(side="left", padx=1, pady=3)
+                b.bind("<Enter>", lambda e, t=tip: self.app.status(t))
+                b.bind("<Leave>", lambda e: self.app.status("Ready"))
+                self.brush_buttons[key] = b
+            sp_label(self.palette, "   Click or drag over the days to paint them. Right click: more.",
+                     fg="#404040").pack(side="left")
+            if self.brush not in self.brush_buttons:
+                self.brush = None
+            self.set_brush(self.brush)
+
+        def build_body(self):
+            pane = tk.PanedWindow(self.app.body, orient="vertical", bg=SP_FACE, sashwidth=6, sashrelief="raised", bd=0)
+            pane.pack(fill="both", expand=True, padx=2, pady=(0, 2))
+            grid = tk.Frame(pane, bg=SP_FACE, bd=2, relief="sunken")
+            pane.add(grid, minsize=240, stretch="always")
+            self.head = tk.Canvas(grid, height=self.HEAD_H, bg=SP_FACE, highlightthickness=0, bd=0)
+            self.head.pack(side="top", fill="x")
+            mid = tk.Frame(grid, bg=SP_FACE)
+            mid.pack(side="top", fill="both", expand=True)
+            self.canvas = tk.Canvas(mid, bg=SP_WHITE, highlightthickness=0, bd=0, takefocus=1)
+            self.vbar = sp_scrollbar(mid, "vertical", self.canvas.yview)
+            self.canvas.config(yscrollcommand=self.vbar.set)
+            self.vbar.pack(side="right", fill="y")
+            self.canvas.pack(side="left", fill="both", expand=True)
+            self.cover = tk.Canvas(grid, height=40, bg=SP_FACE, highlightthickness=0, bd=0)
+            self.cover.pack(side="top", fill="x")
+            bottom = sp_group(pane, "Problems (double-click to go to the day)")
+            pane.add(bottom, minsize=80, height=140, stretch="never")
+            frame, self.prob_list = sp_listbox(bottom, height=5, width=60)
+            frame.pack(fill="both", expand=True)
+            self.prob_list.bind("<Double-Button-1>", self.goto_problem)
+            self.prob_list.bind("<Return>", self.goto_problem)
+            c = self.canvas
+            c.bind("<Configure>", lambda e: self.draw())
+            c.bind("<ButtonPress-1>", self.on_press)
+            c.bind("<B1-Motion>", self.on_motion)
+            c.bind("<ButtonRelease-1>", self.on_release)
+            c.bind("<Double-Button-1>", self.on_double)
+            c.bind("<Button-3>", self.on_right)
+            c.bind("<Motion>", self.on_hover)
+            c.bind("<MouseWheel>", lambda e: c.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+            c.bind("<Button-4>", lambda e: c.yview_scroll(-1, "units"))
+            c.bind("<Button-5>", lambda e: c.yview_scroll(1, "units"))
+            c.config(yscrollincrement=self.ROW_H)
+            self.head.bind("<Motion>", self.on_head_hover)
+            self.head.bind("<Double-Button-1>", self.on_head_double)
+            for key in ("<Left>", "<Right>", "<Up>", "<Down>", "<Home>", "<End>"):
+                c.bind(key, self.on_arrow)
+            c.bind("<Delete>", lambda e: self.paint_cursor(""))
+            c.bind("<BackSpace>", lambda e: self.paint_cursor(""))
+            c.bind("<KeyPress>", self.on_key, add="+")
+
+        def bind_keys(self):
+            r = self.root
+
+            def key(func, typing_ok=False):
+                def handler(event):
+                    focus = None
+                    try:
+                        focus = r.focus_get()
+                    except (KeyError, tk.TclError):
+                        pass
+                    if not typing_ok and isinstance(focus, (tk.Entry, tk.Text, tk.Spinbox)):
+                        return None
+                    func()
+                    return "break"
+                return handler
+            for seq, func, ok in (("<Control-z>", self.undo, False), ("<Control-y>", self.redo, False),
+                                  ("<Control-e>", self.export_xlsx, True), ("<Control-p>", self.export_pdf, True),
+                                  ("<Control-f>", self.pattern_dialog, True), ("<Control-r>", self.repeat_week, False),
+                                  ("<Prior>", lambda: self.go_step(-1), False), ("<Next>", lambda: self.go_step(1), False),
+                                  ("<Control-Home>", self.go_today, False), ("<F2>", self.edit_note, False),
+                                  ("<F1>", self.help_keys, True), ("<F5>", lambda: self.set_view("month"), True),
+                                  ("<F6>", lambda: self.set_view("hours"), True)):
+                r.bind(seq, key(func, ok))
+                if seq.startswith("<Control-") and len(seq) == 11:
+                    r.bind(seq[:-2] + seq[-2].upper() + ">", key(func, ok))
+
+        # ═════════════════════════════════════ data ══════════════════════════════════════════════════════
+        def days(self):
+            return sp_month_days(self.year, self.month)
+
+        def reload(self):
+            """Everything read again from the database, then drawn."""
+            self.types = self.store.types()
+            self.tmap = {t["code"]: t for t in self.types}
+            teams = self.store.teams()
+            if self.team and self.team not in teams:
+                self.team = ""
+            self.team_combo.values = [self.ALL_TEAMS] + teams
+            self.team_combo.set(self.team or self.ALL_TEAMS)
+            self.emps = self.store.employees(self.team or None)
+            days = self.days()
+            self.holidays = self.store.holidays(self.year)
+            if self.month == 1 or self.month == 12:                 # the days around the month for the checks
+                self.holidays.update(self.store.holidays(self.year + (1 if self.month == 12 else -1)))
+            self.entries = self.store.entries(days[0] - dt.timedelta(days=14), days[-1] + dt.timedelta(days=7))
+            self.build_palette()
+            r, c = self.cursor
+            self.cursor = (max(0, min(r, len(self.emps) - 1)), max(0, min(c, len(days) - 1)))
+            self.recheck()
+
+        def recheck(self):
+            self.problems = sp_check(self.emps, self.entries, self.tmap, self.year, self.month, self.store.settings())
+            self.problem_cells = {(p["emp"], p["day"]) for p in self.problems if p["emp"] is not None}
+            self.prob_list.delete(0, "end")
+            for p in self.problems:
+                self.prob_list.insert("end", "%s   %s" % (p["day"].strftime("%d.%m"), p["text"]))
+            if not self.problems:
+                self.prob_list.insert("end", "No problems: rest, working days in a row, weekly hours and people per "
+                                             "shift are all within the rules.")
+            self.st_probs.config(text="Problems: %d" % len(self.problems))
+            self.st_emps.config(text="Employees: %d" % len(self.emps))
+            self.month_label.config(text=self.day.strftime("%A %d.%m.%Y") if self.view == "hours"
+                                    else dt.date(self.year, self.month, 1).strftime("%B %Y"))
+            self.app.set_title("%s - %s%s" % (SP_APP_NAME, dt.date(self.year, self.month, 1).strftime("%B %Y"),
+                                              " - " + self.team if self.team else ""))
+            self.draw()
+
+        def set_team(self, value):
+            self.team = "" if value == self.ALL_TEAMS else value
+            self.store.save_settings(last_team=self.team)
+            self.cursor = (0, self.cursor[1])
+            self.reload()
+
+        def go_month(self, step):
+            m = self.month + step
+            self.year, self.month = self.year + (m - 1) // 12, (m - 1) % 12 + 1
+            self.reload()
+
+        def go_today(self):
+            today = dt.date.today()
+            self.year, self.month = today.year, today.month
+            self.day = today
+            self.cursor = (self.cursor[0], today.day - 1)
+            self.reload()
+
+        def go_step(self, step):
+            """< and >: a month in the Month view, a day in the Hours view."""
+            if self.view == "hours":
+                self.show_day(self.day + dt.timedelta(days=step))
+            else:
+                self.go_month(step)
+
+        def show_day(self, day):
+            self.day = day
+            self.cursor = (self.cursor[0], day.day - 1)
+            if (day.year, day.month) != (self.year, self.month):
+                self.year, self.month = day.year, day.month
+                self.reload()
+            else:
+                self.recheck()
+
+        def set_view(self, view):
+            if view == "hours" and self.view != "hours":
+                days = self.days()
+                self.day = days[min(self.cursor[1], len(days) - 1)]
+            self.view = view
+            for k, b in self.view_buttons.items():
+                b.config(relief="sunken" if k == view else "raised", font=SP_FONT_B if k == view else SP_FONT)
+            self.palette.pack_forget() if view == "hours" else self.palette.pack(side="top", fill="x", pady=(0, 2),
+                                                                                after=self.toolbar)
+            self.recheck()
+
+        def set_brush(self, key):
+            self.brush = key
+            for k, b in self.brush_buttons.items():
+                b.config(relief="sunken" if k == key else "raised")
+            self.canvas.config(cursor="arrow" if key is None else "pencil")
+
+        # ----- changes and undo ----------------------------------------------------------------------------
+        def apply(self, changes, record=True):
+            """changes: [(emp id, 'YYYY-MM-DD', code or None, note)]. One undo step."""
+            step = []
+            for emp_id, day, code, note in changes:
+                old = self.entries.get((emp_id, day))
+                new = (code, note or "") if code else None
+                if old == new:
+                    continue
+                step.append((emp_id, day, old, new))
+            if not step:
+                return
+            self.store.set_entries([(e, d, n[0] if n else None, n[1] if n else "") for e, d, _o, n in step])
+            for emp_id, day, _old, new in step:
+                if new:
+                    self.entries[(emp_id, day)] = new
+                else:
+                    self.entries.pop((emp_id, day), None)
+            if record:
+                self.undo_stack.append(step)
+                del self.undo_stack[:-200]
+                self.redo_stack = []
+            self.recheck()
+
+        def _replay(self, source, target, use_old):
+            if not source:
+                self.app.status("Nothing to %s." % ("undo" if use_old else "redo"))
+                return
+            step = source.pop()
+            changes = [(e, d, (o if use_old else n) and (o if use_old else n)[0], ((o if use_old else n) or ("", ""))[1])
+                       for e, d, o, n in step]
+            self.apply(changes, record=False)
+            target.append(step)
+
+        def undo(self):
+            self._replay(self.undo_stack, self.redo_stack, True)
+
+        def redo(self):
+            self._replay(self.redo_stack, self.undo_stack, False)
+
+        # ═════════════════════════════════════ drawing ═══════════════════════════════════════════════════
+        def x_of(self, col):
+            return self.NAME_W + col * self.cell_w
+
+        def draw(self):
+            if self.view == "hours":
+                self.draw_hours()
+                return
+            days = self.days()
+            width = max(400, self.canvas.winfo_width())
+            self.cell_w = max(22, int((width - self.NAME_W - 5 * self.TOT_W - 2) / len(days)))
+            self.draw_head(days)
+            self.draw_rows(days)
+            self.draw_cover(days)
+
+        # ----- the hours of one day ------------------------------------------------------------------------
+        def hour_x(self, minute):
+            return self.NAME_W + minute / 60.0 * self.hour_w
+
+        def draw_hours(self):
+            width = max(400, self.canvas.winfo_width())
+            self.hour_w = max(16.0, (width - self.NAME_W - 62) / 24.0)
+            day = self.day
+            h = self.head
+            h.delete("all")
+            h.create_text(6, self.HEAD_H / 2, anchor="w", font=SP_FONT_B,
+                          text="%s %s%s" % (SP_WEEKDAYS[day.weekday()], day.strftime("%d.%m.%Y"),
+                                            "  (%s)" % self.holidays[day] if day in self.holidays else ""))
+            for hour in range(24):
+                x0, x1 = self.hour_x(hour * 60), self.hour_x(hour * 60 + 60)
+                night = hour < 6 or hour >= 22
+                h.create_rectangle(x0, 0, x1, self.HEAD_H, fill="#a8a8c8" if night else SP_FACE, outline=SP_SHADOW)
+                h.create_text((x0 + x1) / 2, self.HEAD_H / 2, text="%02d" % hour, font=SP_FONT_B)
+            xt = self.hour_x(1440)
+            h.create_rectangle(xt, 0, xt + 60, self.HEAD_H, fill=SP_FACE, outline=SP_SHADOW)
+            h.create_text(xt + 30, self.HEAD_H / 2, text="Hours", font=SP_FONT_B)
+            c = self.canvas
+            c.delete("all")
+            rh = self.ROW_H
+            c.config(scrollregion=(0, 0, xt + 60, max(len(self.emps) * rh, 1)))
+            if not self.emps:
+                c.create_text(20, 30, anchor="w", font=SP_FONT, fill="#404040", text="No employees to show.")
+            per_hour = [0] * 24
+            for r, emp in enumerate(self.emps):
+                y0, y1 = r * rh, (r + 1) * rh
+                c.create_rectangle(0, y0, self.NAME_W, y1, fill=SP_FACE if r % 2 == 0 else "#d0d0d0", outline=SP_SHADOW)
+                c.create_text(6, y0 + rh / 2, text=emp["name"][:24], anchor="w", font=SP_FONT_B)
+                if emp.get("role"):
+                    c.create_text(self.NAME_W - 4, y0 + rh / 2, text=emp["role"][:12], anchor="e", font=SP_FONT,
+                                  fill="#404040")
+                c.create_rectangle(self.NAME_W, y0, xt, y1, fill=SP_WHITE if r % 2 == 0 else "#f4f4f4", outline="")
+                for hour in range(25):
+                    x = self.hour_x(hour * 60)
+                    c.create_line(x, y0, x, y1, fill="#d8d8d8")
+                c.create_line(self.NAME_W, y1, xt, y1, fill="#c8c8c8")
+                worked = 0.0
+                for start, end, t, carried in sp_day_segments(emp, self.entries, self.tmap, day):
+                    x0, x1 = self.hour_x(start), self.hour_x(end)
+                    if t["kind"] != "work":
+                        c.create_text((self.NAME_W + xt) / 2, y0 + rh / 2, font=SP_FONT, fill="#606060",
+                                      text="%s - %s" % (t["code"], t["name"]))
+                        if t["kind"] == "leave":
+                            c.create_rectangle(self.NAME_W + 2, y0 + 4, xt - 2, y1 - 4, outline=t["color"], width=2)
+                        continue
+                    worked += (end - start) / 60.0
+                    for hour in range(24):
+                        if start < hour * 60 + 60 and end > hour * 60:
+                            per_hour[hour] += 1
+                    c.create_rectangle(x0, y0 + 3, x1, y1 - 3, fill=t["color"], outline="#000000",
+                                       stipple="gray50" if carried else "")
+                    label = "%s %s-%s" % (t["code"], t["start_time"], t["end_time"])
+                    if carried:
+                        label = "%s (from %s)" % (t["code"], (day - dt.timedelta(days=1)).strftime("%d.%m"))
+                    if x1 - x0 > 6 * len(label):
+                        c.create_text((x0 + x1) / 2, y0 + rh / 2, text=label, font=SP_FONT_B,
+                                      fill=sp_text_colour(t["color"]))
+                    elif x1 - x0 > 16:
+                        c.create_text((x0 + x1) / 2, y0 + rh / 2, text=t["code"], font=SP_FONT_B,
+                                      fill=sp_text_colour(t["color"]))
+                c.create_rectangle(xt, y0, xt + 60, y1, fill="#d4d4d4", outline=SP_SHADOW)
+                c.create_text(xt + 55, y0 + rh / 2, text=sp_fmt_hours(worked), anchor="e", font=SP_FONT)
+                if r == self.cursor[0]:
+                    c.create_rectangle(0, y0, self.NAME_W, y1, outline=SP_NAVY, width=2)
+            now = dt.datetime.now()
+            if day == now.date():
+                x = self.hour_x(now.hour * 60 + now.minute)
+                c.create_line(x, 0, x, max(len(self.emps) * rh, c.winfo_height()), fill="#ff0000", width=2)
+            cv = self.cover
+            cv.delete("all")
+            cv.config(height=22)
+            cv.create_text(6, 11, anchor="w", font=SP_FONT, text="People at work, hour by hour")
+            top = max(per_hour) if any(per_hour) else 1
+            for hour, n in enumerate(per_hour):
+                x0, x1 = self.hour_x(hour * 60), self.hour_x(hour * 60 + 60)
+                shade = int(255 - 150 * n / float(top)) if n else 255
+                fill = "#ffc0c0" if n == 0 else "#%02x%02xff" % (shade, shade)
+                cv.create_rectangle(x0, 2, x1, 20, fill=fill, outline="#a0a0a0")
+                cv.create_text((x0 + x1) / 2, 11, text=str(n), font=SP_FONT_B,
+                               fill="#ffffff" if n and shade < 140 else "#000000")
+
+        def day_bg(self, d):
+            if d in self.holidays:
+                return SP_HOLIDAY
+            return SP_WEEKEND if d.weekday() >= 5 else SP_WHITE
+
+        def draw_head(self, days):
+            h = self.head
+            h.delete("all")
+            h.create_text(6, self.HEAD_H / 2, text="Employee", anchor="w", font=SP_FONT_B)
+            today = dt.date.today()
+            for i, d in enumerate(days):
+                x0, x1 = self.x_of(i), self.x_of(i + 1)
+                bg = SP_NAVY if d == today else ("#e8a0a0" if d in self.holidays else ("#a0a0a0" if d.weekday() >= 5
+                                                                                       else SP_FACE))
+                fg = SP_WHITE if d == today else "#000000"
+                h.create_rectangle(x0, 0, x1, self.HEAD_H, fill=bg, outline=SP_SHADOW)
+                h.create_text((x0 + x1) / 2, 12, text=str(d.day), font=SP_FONT_B, fill=fg)
+                h.create_text((x0 + x1) / 2, 27, text=SP_WEEKDAYS[d.weekday()], font=SP_FONT, fill=fg)
+            xt = self.x_of(len(days))
+            for j, (_k, label) in enumerate(self.TOTALS):
+                x0 = xt + j * self.TOT_W
+                h.create_rectangle(x0, 0, x0 + self.TOT_W, self.HEAD_H, fill=SP_FACE, outline=SP_SHADOW)
+                h.create_text(x0 + self.TOT_W / 2, self.HEAD_H / 2, text=label, font=SP_FONT_B)
+
+        def draw_rows(self, days):
+            c = self.canvas
+            c.delete("all")
+            rows = len(self.emps)
+            c.config(scrollregion=(0, 0, self.x_of(len(days)) + 5 * self.TOT_W, max(rows * self.ROW_H, 1)))
+            if not rows:
+                c.create_text(20, 30, anchor="w", font=SP_FONT, fill="#404040",
+                              text="No employees%s yet: add them with Setup > Employees... (or the Employees... button)."
+                              % (" in this team" if self.team else ""))
+                return
+            cw, rh = self.cell_w, self.ROW_H
+            for r, emp in enumerate(self.emps):
+                y0, y1 = r * rh, (r + 1) * rh
+                c.create_rectangle(0, y0, self.NAME_W, y1, fill=SP_FACE if r % 2 == 0 else "#d0d0d0", outline=SP_SHADOW)
+                name = emp["name"] if len(emp["name"]) <= 24 else emp["name"][:23] + ".."
+                c.create_text(6, y0 + rh / 2, text=name, anchor="w", font=SP_FONT_B)
+                if emp.get("role"):
+                    c.create_text(self.NAME_W - 4, y0 + rh / 2, text=emp["role"][:12], anchor="e", font=SP_FONT,
+                                  fill="#404040")
+                for i, d in enumerate(days):
+                    x0 = self.x_of(i)
+                    e = self.entries.get((emp["id"], sp_day(d)))
+                    t = self.tmap.get(e[0]) if e else None
+                    fill = t["color"] if t else (("#ff00ff") if e else self.day_bg(d))
+                    c.create_rectangle(x0, y0, x0 + cw, y1, fill=fill, outline="#a0a0a0")
+                    if e:
+                        c.create_text(x0 + cw / 2, y0 + rh / 2, text=e[0], font=SP_FONT_B, fill=sp_text_colour(fill))
+                        if e[1]:
+                            c.create_polygon(x0 + cw - 7, y0 + 1, x0 + cw - 1, y0 + 1, x0 + cw - 1, y0 + 7, fill="#000000")
+                    if (emp["id"], d) in self.problem_cells:
+                        c.create_rectangle(x0 + 1, y0 + 1, x0 + cw - 1, y1 - 1, outline="#ff0000", width=2)
+                tot = sp_totals(emp, self.entries, self.tmap, days, self.holidays)
+                xt = self.x_of(len(days))
+                for j, (key, _label) in enumerate(self.TOTALS):
+                    x0 = xt + j * self.TOT_W
+                    value = tot[key]
+                    text = ("+" if key == "diff" and value > 0.005 else "") + sp_fmt_hours(value)
+                    fg = "#000000"
+                    if key == "diff":
+                        fg = "#c00000" if value > 0.005 else ("#0000c0" if value < -0.005 else "#008000")
+                    c.create_rectangle(x0, y0, x0 + self.TOT_W, y1, fill=SP_FACE if j % 2 else "#d4d4d4",
+                                       outline=SP_SHADOW)
+                    c.create_text(x0 + self.TOT_W - 5, y0 + rh / 2, text=text, anchor="e", font=SP_FONT, fill=fg)
+            r, col = self.cursor
+            if 0 <= r < rows:
+                x0, y0 = self.x_of(col), r * rh
+                c.create_rectangle(x0 + 1, y0 + 1, x0 + cw - 1, y0 + rh - 1, outline="#000000", width=2)
+                c.create_rectangle(x0 + 2, y0 + 2, x0 + cw - 2, y0 + rh - 2, outline="#ffffff", dash=(2, 2))
+                c.create_rectangle(0, y0, self.NAME_W, y0 + rh, outline=SP_NAVY, width=2)
+
+        def draw_cover(self, days):
+            cv = self.cover
+            cv.delete("all")
+            work = [t for t in self.types if t["kind"] == "work"]
+            rh = 16
+            cv.config(height=max(18, rh * len(work) + 4))
+            for r, t in enumerate(work):
+                y0 = 2 + r * rh
+                need = int(t.get("min_staff") or 0)
+                cv.create_text(6, y0 + rh / 2, anchor="w", font=SP_FONT,
+                               text="%s %s%s" % (t["code"], t["name"], "  (min %d)" % need if need else ""))
+                for i, d in enumerate(days):
+                    n = sum(1 for emp in self.emps if (self.entries.get((emp["id"], sp_day(d))) or ("",))[0] == t["code"])
+                    x0 = self.x_of(i)
+                    bad = need > 0 and n < need
+                    cv.create_rectangle(x0, y0, x0 + self.cell_w, y0 + rh, fill="#ff9090" if bad else SP_FACE,
+                                        outline="#a0a0a0")
+                    if n or need:
+                        cv.create_text(x0 + self.cell_w / 2, y0 + rh / 2, text=str(n), font=SP_FONT)
+            if work:
+                cv.create_text(self.x_of(len(days)) + 6, 2 + rh / 2, anchor="w", font=SP_FONT, fill="#404040",
+                               text="People per shift")
+
+        # ═════════════════════════════════════ mouse and keyboard ════════════════════════════════════════
+        def cell_at(self, event):
+            x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+            r = int(y // self.ROW_H)
+            if not 0 <= r < len(self.emps):
+                return None, None
+            if x < self.NAME_W:
+                return r, None
+            col = int((x - self.NAME_W) // self.cell_w)
+            return (r, col) if 0 <= col < len(self.days()) else (r, None)
+
+        def on_press(self, event):
+            self.canvas.focus_set()
+            if self.view == "hours":
+                r = int(self.canvas.canvasy(event.y) // self.ROW_H)
+                if 0 <= r < len(self.emps):
+                    self.cursor = (r, self.day.day - 1)
+                    self.draw()
+                    self.show_cell_status()
+                return
+            r, col = self.cell_at(event)
+            if r is None:
+                return
+            if col is None:
+                self.cursor = (r, self.cursor[1])
+                self.draw()
+                return
+            self.cursor = (r, col)
+            if self.brush is not None:
+                self.stroke = {}
+                self.paint_stroke(r, col)
+            else:
+                self.draw()
+                self.show_cell_status()
+
+        def on_motion(self, event):
+            if self.stroke is None or self.view == "hours":
+                return
+            r, col = self.cell_at(event)
+            if r is not None and col is not None:
+                self.paint_stroke(r, col)
+
+        def paint_stroke(self, r, col):
+            emp, d = self.emps[r], self.days()[col]
+            key = (emp["id"], sp_day(d))
+            if key in self.stroke:
+                return
+            old = self.entries.get(key)
+            self.stroke[key] = old
+            code = self.brush or None
+            note = old[1] if (old and code) else ""
+            self.store.set_entries([(emp["id"], sp_day(d), code, note)])
+            if code:
+                self.entries[key] = (code, note)
+            else:
+                self.entries.pop(key, None)
+            self.cursor = (r, col)
+            self.draw()
+
+        def on_release(self, event):
+            if self.stroke is None:
+                return
+            step = [(k[0], k[1], old, self.entries.get(k)) for k, old in self.stroke.items()
+                    if old != self.entries.get(k)]
+            self.stroke = None
+            if step:
+                self.undo_stack.append(step)
+                self.redo_stack = []
+            self.recheck()
+
+        def on_double(self, event):
+            if self.view == "hours":
+                return
+            r, col = self.cell_at(event)
+            if r is not None and col is None:
+                self.edit_employee(self.emps[r])
+
+        def on_right(self, event):
+            if self.view == "hours":
+                r = int(self.canvas.canvasy(event.y) // self.ROW_H)
+                if not 0 <= r < len(self.emps):
+                    return
+                col = self.day.day - 1
+            else:
+                r, col = self.cell_at(event)
+            if r is None or col is None:
+                return
+            self.cursor = (r, col)
+            self.draw()
+            menu = tk.Menu(self.canvas, tearoff=0, font=SP_FONT, bg=SP_FACE, activebackground=SP_NAVY,
+                           activeforeground=SP_WHITE)
+            for t in self.types:
+                menu.add_command(label="%s  %s" % (t["code"], t["name"]), command=lambda c=t["code"]: self.paint_cursor(c))
+            menu.add_command(label="Clear", accelerator="Del", command=lambda: self.paint_cursor(""))
+            menu.add_separator()
+            menu.add_command(label="Note...", accelerator="F2", command=self.edit_note)
+            menu.add_command(label="Fill with a pattern from here...", command=self.pattern_dialog)
+            menu.add_command(label="Repeat this week to the end of the month", command=self.repeat_week)
+            menu.tk_popup(event.x_root, event.y_root)
+
+        def on_hover(self, event):
+            if self.view == "hours":
+                r = int(self.canvas.canvasy(event.y) // self.ROW_H)
+                if 0 <= r < len(self.emps):
+                    self.show_cell_status((r, self.day.day - 1))
+                return
+            r, col = self.cell_at(event)
+            if r is None:
+                return
+            emp = self.emps[r]
+            if col is None:
+                self.app.status("%s  -  %s  -  %s, %s h/day (double-click to edit)" % (
+                    emp["name"], emp.get("team") or "no team", emp.get("role") or "no role",
+                    sp_fmt_hours(emp["hours_per_day"])))
+                return
+            self.show_cell_status((r, col))
+
+        def show_cell_status(self, cell=None):
+            r, col = cell or self.cursor
+            if not self.emps:
+                return
+            emp, d = self.emps[r], self.days()[col]
+            e = self.entries.get((emp["id"], sp_day(d)))
+            t = self.tmap.get(e[0]) if e else None
+            text = "%s  -  %s %s" % (emp["name"], SP_WEEKDAYS[d.weekday()], d.strftime("%d.%m.%Y"))
+            if d in self.holidays:
+                text += " (%s)" % self.holidays[d]
+            if e:
+                text += "  -  %s %s" % (e[0], t["name"] if t else "(unknown code)")
+                if t and t["kind"] == "work":
+                    text += " %s-%s" % (t["start_time"], t["end_time"])
+                if e[1]:
+                    text += "  -  Note: " + e[1]
+            self.app.status(text)
+
+        def on_head_hover(self, event):
+            if self.view == "hours":
+                return
+            col = int((event.x - self.NAME_W) // self.cell_w) if event.x >= self.NAME_W else -1
+            days = self.days()
+            if 0 <= col < len(days):
+                d = days[col]
+                self.app.status("%s %s%s" % (SP_WEEKDAYS[d.weekday()], d.strftime("%d.%m.%Y"),
+                                             "  -  " + self.holidays[d] if d in self.holidays else ""))
+
+        def on_head_double(self, event):
+            """Double-click on a day in the Month view: its hours."""
+            if self.view != "month" or event.x < self.NAME_W:
+                return
+            col = int((event.x - self.NAME_W) // self.cell_w)
+            days = self.days()
+            if 0 <= col < len(days):
+                self.cursor = (self.cursor[0], col)
+                self.set_view("hours")
+
+        def on_arrow(self, event):
+            if not self.emps:
+                return "break"
+            if self.view == "hours":
+                if event.keysym in ("Left", "Right"):
+                    self.show_day(self.day + dt.timedelta(days=-1 if event.keysym == "Left" else 1))
+                elif event.keysym in ("Up", "Down"):
+                    r = self.cursor[0] + (-1 if event.keysym == "Up" else 1)
+                    self.cursor = (max(0, min(len(self.emps) - 1, r)), self.cursor[1])
+                    self.see_cursor()
+                    self.draw()
+                return "break"
+            r, col = self.cursor
+            n = len(self.days())
+            if event.keysym == "Left":
+                col = max(0, col - 1)
+            elif event.keysym == "Right":
+                col = min(n - 1, col + 1)
+            elif event.keysym == "Up":
+                r = max(0, r - 1)
+            elif event.keysym == "Down":
+                r = min(len(self.emps) - 1, r + 1)
+            elif event.keysym == "Home":
+                col = 0
+            elif event.keysym == "End":
+                col = n - 1
+            self.cursor = (r, col)
+            self.see_cursor()
+            self.draw()
+            self.show_cell_status()
+            return "break"
+
+        def see_cursor(self):
+            c = self.canvas
+            r = self.cursor[0]
+            top, bottom = c.canvasy(0), c.canvasy(c.winfo_height())
+            total = max(1, len(self.emps) * self.ROW_H)
+            if r * self.ROW_H < top:
+                c.yview_moveto(r * self.ROW_H / float(total))
+            elif (r + 1) * self.ROW_H > bottom:
+                c.yview_moveto(max(0.0, ((r + 1) * self.ROW_H - c.winfo_height()) / float(total)))
+
+        def on_key(self, event):
+            """Typing a shift code fills the selected day and moves to the next one ('A' then 'L' gives AL)."""
+            ch = event.char
+            if self.view == "hours" or not ch or not (ch.isalnum()) or event.state & 0x0004:
+                return None
+            self.typed += ch.upper()
+            codes = [t["code"].upper() for t in self.types]
+            if not any(c.startswith(self.typed) for c in codes):
+                self.typed = ch.upper() if any(c.startswith(ch.upper()) for c in codes) else ""
+                if not self.typed:
+                    self.app.status("No shift type has the code '%s'." % ch.upper())
+                    return "break"
+            if self.typed_job:
+                self.root.after_cancel(self.typed_job)
+            longer = [c for c in codes if c.startswith(self.typed) and c != self.typed]
+            if self.typed in codes and not longer:
+                self.finish_typing()
+            else:
+                self.typed_job = self.root.after(650, self.finish_typing)
+                self.app.status("Code: %s..." % self.typed)
+            return "break"
+
+        def finish_typing(self):
+            self.typed_job = None
+            typed, self.typed = self.typed, ""
+            match = next((t["code"] for t in self.types if t["code"].upper() == typed), None)
+            if match is None:
+                self.app.status("No shift type has the code '%s'." % typed)
+                return
+            self.paint_cursor(match)
+            r, col = self.cursor
+            self.cursor = (r, min(len(self.days()) - 1, col + 1))
+            self.draw()
+
+        def paint_cursor(self, code):
+            if not self.emps:
+                return
+            r, col = self.cursor
+            emp, d = self.emps[r], self.days()[col]
+            old = self.entries.get((emp["id"], sp_day(d)))
+            self.apply([(emp["id"], sp_day(d), code or None, old[1] if (old and code) else "")])
+
+        # ═════════════════════════════════════ edit commands ═════════════════════════════════════════════
+        def edit_note(self):
+            if not self.emps:
+                return
+            r, col = self.cursor
+            emp, d = self.emps[r], self.days()[col]
+            e = self.entries.get((emp["id"], sp_day(d)))
+            if not e:
+                messagebox.showinfo("Note", "Put a shift or a leave on the day first; the note belongs to it.",
+                                    parent=self.root)
+                return
+            text = simpledialog.askstring("Note", "Note for %s, %s:" % (emp["name"], d.strftime("%d.%m.%Y")),
+                                          initialvalue=e[1], parent=self.root)
+            if text is not None:
+                self.apply([(emp["id"], sp_day(d), e[0], text.strip())])
+
+        def repeat_week(self):
+            if not self.emps:
+                return
+            r, col = self.cursor
+            emp = self.emps[r]
+            days = self.days()
+            start = days[col] - dt.timedelta(days=days[col].weekday())
+            week = [self.entries.get((emp["id"], sp_day(start + dt.timedelta(days=i)))) for i in range(7)]
+            if not any(week):
+                messagebox.showinfo("Repeat the week", "The week of %s is empty for %s." % (start.strftime("%d.%m"),
+                                                                                         emp["name"]), parent=self.root)
+                return
+            changes = []
+            d = start + dt.timedelta(days=7)
+            while d <= days[-1]:
+                e = week[(d - start).days % 7]
+                changes.append((emp["id"], sp_day(d), e[0] if e else None, ""))
+                d += dt.timedelta(days=1)
+            self.apply(changes)
+            self.app.status("The week of %s was repeated to the end of the month for %s." % (start.strftime("%d.%m"),
+                                                                                             emp["name"]))
+
+        def copy_previous_month(self):
+            if not self.emps:
+                return
+            days = self.days()
+            first_prev = (days[0] - dt.timedelta(days=1)).replace(day=1)
+            prev = self.store.entries(first_prev, days[0] - dt.timedelta(days=1))
+            if not any(k[0] in {e["id"] for e in self.emps} for k in prev):
+                messagebox.showinfo("Copy the previous month", "The previous month is empty for these employees.",
+                                    parent=self.root)
+                return
+            filled = any((e["id"], sp_day(d)) in self.entries for e in self.emps for d in days)
+            if not messagebox.askyesno("Copy the previous month", "Copy the plan of %s to %s for the %d employee(s) shown?"
+                                       "\nEach day takes the shift of the same weekday, the same number of weeks "
+                                       "earlier.%s" % (first_prev.strftime("%B"), days[0].strftime("%B"), len(self.emps),
+                                                        "\n\nDays already filled in this month are replaced."
+                                                        if filled else ""), parent=self.root):
+                return
+            weeks = 4 if (days[0] - dt.timedelta(days=28)).month == first_prev.month else 5
+            changes = []
+            for emp in self.emps:
+                for d in days:
+                    src = d - dt.timedelta(days=7 * weeks)
+                    while src >= days[0]:
+                        src -= dt.timedelta(days=7)
+                    e = prev.get((emp["id"], sp_day(src)))
+                    changes.append((emp["id"], sp_day(d), e[0] if e else None, ""))
+            self.apply(changes)
+
+        def clear_row(self):
+            if not self.emps:
+                return
+            emp = self.emps[self.cursor[0]]
+            if not messagebox.askyesno("Clear the month", "Clear all of %s for %s?" % (
+                    dt.date(self.year, self.month, 1).strftime("%B %Y"), emp["name"]), parent=self.root):
+                return
+            self.apply([(emp["id"], sp_day(d), None, "") for d in self.days()])
+
+        def goto_problem(self, event=None):
+            sel = self.prob_list.curselection()
+            if not sel or sel[0] >= len(self.problems):
+                return
+            p = self.problems[sel[0]]
+            col = (p["day"] - self.days()[0]).days
+            row = next((i for i, e in enumerate(self.emps) if e["id"] == p["emp"]), self.cursor[0])
+            self.cursor = (row, max(0, col))
+            self.see_cursor()
+            self.draw()
+            self.canvas.focus_set()
+            self.show_cell_status()
+
+        # ═════════════════════════════════════ dialogs ═══════════════════════════════════════════════════
+        def pattern_dialog(self):
+            if not self.emps:
+                messagebox.showinfo("Pattern", "Add employees first.", parent=self.root)
+                return
+            days = self.days()
+            win, body = sp_dialog(self.root, "Fill with a pattern")
+            sp_label(body, "Employees:").grid(row=0, column=0, sticky="nw")
+            frame, lb = sp_listbox(body, height=8, width=34, multiple=True)
+            frame.grid(row=0, column=1, columnspan=2, sticky="w", pady=2)
+            for e in self.emps:
+                lb.insert("end", e["name"])
+            lb.selection_set(self.cursor[0])
+            lb.see(self.cursor[0])
+            sp_label(body, "From (dd.mm.yyyy):").grid(row=1, column=0, sticky="w")
+            e_from = sp_entry(body, 12, days[self.cursor[1]].strftime("%d.%m.%Y"))
+            e_from.grid(row=1, column=1, sticky="w", pady=2)
+            sp_label(body, "To (dd.mm.yyyy):").grid(row=2, column=0, sticky="w")
+            e_to = sp_entry(body, 12, days[-1].strftime("%d.%m.%Y"))
+            e_to.grid(row=2, column=1, sticky="w", pady=2)
+            sp_label(body, "Pattern:").grid(row=3, column=0, sticky="w")
+            e_pat = sp_entry(body, 40, "M M M M M X X")
+            e_pat.grid(row=3, column=1, columnspan=2, sticky="w", pady=2)
+            codes = "  ".join("%s=%s" % (t["code"], t["name"]) for t in self.types)
+            sp_label(body, "Codes separated by spaces, repeated from the first day. A dash (-) leaves the day empty.\n"
+                           "For example M M A A N N X X for a rotation.  Codes: " + codes, fg="#404040", justify="left",
+                     wraplength=420).grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 2))
+            keep = tk.BooleanVar(value=False)
+            sp_checkbox(body, "Keep the days that are already filled", keep).grid(row=5, column=0, columnspan=3, sticky="w")
+
+            def ok():
+                try:
+                    d0 = dt.datetime.strptime(e_from.get().strip(), "%d.%m.%Y").date()
+                    d1 = dt.datetime.strptime(e_to.get().strip(), "%d.%m.%Y").date()
+                except ValueError:
+                    messagebox.showwarning("Pattern", "Write the dates as dd.mm.yyyy.", parent=win)
+                    return
+                if d1 < d0 or (d1 - d0).days > 400:
+                    messagebox.showwarning("Pattern", "The period is not right (at most 400 days).", parent=win)
+                    return
+                parts = e_pat.get().replace(",", " ").split()
+                known = {t["code"].upper(): t["code"] for t in self.types}
+                bad = [p for p in parts if p != "-" and p.upper() not in known]
+                if not parts or bad:
+                    messagebox.showwarning("Pattern", "Unknown code(s): %s" % ", ".join(bad) if bad else
+                                           "Write the pattern.", parent=win)
+                    return
+                chosen = [self.emps[i] for i in lb.curselection()]
+                if not chosen:
+                    messagebox.showwarning("Pattern", "Select at least one employee.", parent=win)
+                    return
+                existing = self.store.entries(d0, d1)
+                changes = []
+                for emp in chosen:
+                    d, i = d0, 0
+                    while d <= d1:
+                        p = parts[i % len(parts)]
+                        if not (keep.get() and (emp["id"], sp_day(d)) in existing):
+                            changes.append((emp["id"], sp_day(d), None if p == "-" else known[p.upper()], ""))
+                        d += dt.timedelta(days=1)
+                        i += 1
+                win.destroy()
+                outside = [c for c in changes if c[1] not in {sp_day(x) for x in days}]
+                self.store.set_entries(outside)                     # days outside this month: no undo for them
+                self.apply([c for c in changes if c not in outside])
+                if outside:
+                    self.reload()
+                self.app.status("Pattern applied to %d employee(s), %s - %s." % (len(chosen), d0.strftime("%d.%m"),
+                                                                                 d1.strftime("%d.%m.%Y")))
+            row = tk.Frame(body, bg=SP_FACE)
+            row.grid(row=6, column=0, columnspan=3, sticky="e", pady=(10, 0))
+            sp_button(row, "OK", ok, width=9, bold=True).pack(side="left")
+            sp_button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=(4, 0))
+            win.bind("<Escape>", lambda e: win.destroy())
+            sp_modal(win)
+
+        def employees_dialog(self):
+            win, body = sp_dialog(self.root, "Employees")
+            frame, lb = sp_listbox(body, height=16, width=64, font=("Courier New", 9))
+            frame.grid(row=0, column=0, rowspan=8, sticky="nsew")
+            state = {"emps": []}
+
+            def fill(select_id=None):
+                state["emps"] = self.store.employees(include_inactive=True)
+                lb.delete(0, "end")
+                for e in state["emps"]:
+                    lb.insert("end", "%-26s %-14s %-12s %4sh%s" % (e["name"][:26], (e["team"] or "-")[:14],
+                                                                  (e["role"] or "-")[:12], sp_fmt_hours(e["hours_per_day"]),
+                                                                  "" if e["active"] else "  (inactive)"))
+                for i, e in enumerate(state["emps"]):
+                    if e["id"] == select_id:
+                        lb.selection_set(i)
+                        lb.see(i)
+
+            def chosen():
+                sel = lb.curselection()
+                return state["emps"][sel[0]] if sel else None
+
+            def add():
+                emp_id = self.edit_employee(None, parent=win)
+                if emp_id:
+                    fill(emp_id)
+
+            def edit(event=None):
+                e = chosen()
+                if e and self.edit_employee(e, parent=win):
+                    fill(e["id"])
+
+            def delete():
+                e = chosen()
+                if e and messagebox.askyesno("Delete employee", "Delete %s and all the days planned for this person?\n"
+                                             "(To keep the history, untick Active instead.)" % e["name"], parent=win):
+                    self.store.delete_employee(e["id"])
+                    fill()
+
+            def move(step):
+                e = chosen()
+                if not e:
+                    return
+                ids = [x["id"] for x in state["emps"]]
+                i = ids.index(e["id"])
+                j = i + step
+                if 0 <= j < len(ids):
+                    ids[i], ids[j] = ids[j], ids[i]
+                    self.store.reorder_employees(ids)
+                    fill(e["id"])
+            for i, (text, cmd) in enumerate((("Add...", add), ("Edit...", edit), ("Delete", delete),
+                                             ("Move up", lambda: move(-1)), ("Move down", lambda: move(1)))):
+                sp_button(body, text, cmd, width=11).grid(row=i, column=1, sticky="n", padx=(8, 0), pady=1)
+            lb.bind("<Double-Button-1>", edit)
+
+            def close():
+                win.destroy()
+                self.reload()
+            sp_button(body, "Close", close, width=11, bold=True).grid(row=7, column=1, sticky="s", padx=(8, 0))
+            win.protocol("WM_DELETE_WINDOW", close)
+            win.bind("<Escape>", lambda e: close())
+            fill()
+            sp_modal(win)
+
+        def edit_employee(self, emp, parent=None):
+            """The employee window; returns the id when saved."""
+            parent = parent or self.root
+            win, body = sp_dialog(parent, "Edit employee" if emp else "New employee")
+            emp = dict(emp or {"name": "", "team": self.team, "role": "", "hours_per_day": 8, "active": 1})
+            result = {"id": None}
+            fields = {}
+            for r, (key, label) in enumerate((("name", "Name:"), ("team", "Team / store:"), ("role", "Role:"))):
+                sp_label(body, label).grid(row=r, column=0, sticky="w", pady=2)
+                fields[key] = sp_entry(body, 32, emp.get(key) or "")
+                fields[key].grid(row=r, column=1, sticky="w", pady=2)
+            sp_label(body, "Hours per day (norm):").grid(row=3, column=0, sticky="w", pady=2)
+            hours = sp_spin(body, 1, 12, 0.5, emp.get("hours_per_day") or 8)
+            hours.grid(row=3, column=1, sticky="w", pady=2)
+            active = tk.BooleanVar(value=bool(emp.get("active", 1)))
+            sp_checkbox(body, "Active (shown in the plan)", active).grid(row=4, column=1, sticky="w")
+            teams = self.store.teams()
+            if teams:
+                sp_label(body, "Teams: " + ", ".join(teams), fg="#404040", wraplength=300, justify="left").grid(
+                    row=5, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+            def ok():
+                name = fields["name"].get().strip()
+                if not name:
+                    messagebox.showwarning("Employee", "Write the name.", parent=win)
+                    return
+                try:
+                    h = float(hours.get().replace(",", "."))
+                    if not 0 < h <= 24:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showwarning("Employee", "The hours per day must be a number between 1 and 24.", parent=win)
+                    return
+                emp.update(name=name, team=fields["team"].get().strip(), role=fields["role"].get().strip(),
+                           hours_per_day=h, active=1 if active.get() else 0)
+                result["id"] = self.store.save_employee(emp)
+                win.destroy()
+            row = tk.Frame(body, bg=SP_FACE)
+            row.grid(row=6, column=0, columnspan=2, sticky="e", pady=(10, 0))
+            sp_button(row, "OK", ok, width=9, bold=True).pack(side="left")
+            sp_button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=(4, 0))
+            win.bind("<Return>", lambda e: ok())
+            win.bind("<Escape>", lambda e: win.destroy())
+            fields["name"].focus_set()
+            sp_modal(win)
+            win.wait_window()
+            if result["id"] and parent is self.root:
+                self.reload()
+            return result["id"]
+
+        def types_dialog(self):
+            win, body = sp_dialog(self.root, "Shift types")
+            frame, lb = sp_listbox(body, height=12, width=60, font=("Courier New", 9))
+            frame.grid(row=0, column=0, rowspan=7, sticky="nsew")
+            state = {"types": []}
+
+            def fill(select=None):
+                state["types"] = self.store.types()
+                lb.delete(0, "end")
+                for i, t in enumerate(state["types"]):
+                    times = "%s-%s %sh" % (t["start_time"], t["end_time"], sp_fmt_hours(sp_shift_hours(t))) \
+                        if t["kind"] == "work" else dict(SP_KINDS)[t["kind"]]
+                    lb.insert("end", " %-4s %-16s %-20s%s" % (t["code"], t["name"][:16], times,
+                                                              "  min %d" % t["min_staff"] if t["min_staff"] else ""))
+                    lb.itemconfig(i, background=t["color"], foreground=sp_text_colour(t["color"]),
+                                  selectbackground=SP_NAVY)
+                    if t["code"] == select:
+                        lb.selection_set(i)
+                        lb.see(i)
+
+            def chosen():
+                sel = lb.curselection()
+                return state["types"][sel[0]] if sel else None
+
+            def edit(event=None, new=False):
+                t = None if new else chosen()
+                if not new and t is None:
+                    return
+                code = self.edit_type(t, win)
+                if code:
+                    fill(code)
+
+            def delete():
+                t = chosen()
+                if not t:
+                    return
+                used = self.store.type_usage(t["code"])
+                if not messagebox.askyesno("Delete shift type", "Delete %s (%s)?%s" % (
+                        t["code"], t["name"], "\nIt is used on %d day(s); those days will be cleared." % used if used
+                        else ""), parent=win):
+                    return
+                self.store.delete_type(t["code"])
+                fill()
+
+            def move(step):
+                t = chosen()
+                if not t:
+                    return
+                codes = [x["code"] for x in state["types"]]
+                i = codes.index(t["code"])
+                j = i + step
+                if 0 <= j < len(codes):
+                    codes[i], codes[j] = codes[j], codes[i]
+                    self.store.reorder_types(codes)
+                    fill(t["code"])
+            for i, (text, cmd) in enumerate((("Add...", lambda: edit(new=True)), ("Edit...", edit), ("Delete", delete),
+                                             ("Move up", lambda: move(-1)), ("Move down", lambda: move(1)))):
+                sp_button(body, text, cmd, width=11).grid(row=i, column=1, sticky="n", padx=(8, 0), pady=1)
+            lb.bind("<Double-Button-1>", edit)
+
+            def close():
+                win.destroy()
+                self.reload()
+            sp_button(body, "Close", close, width=11, bold=True).grid(row=6, column=1, sticky="s", padx=(8, 0))
+            win.protocol("WM_DELETE_WINDOW", close)
+            win.bind("<Escape>", lambda e: close())
+            fill()
+            sp_modal(win)
+
+        def edit_type(self, t, parent):
+            win, body = sp_dialog(parent, "Edit shift type" if t else "New shift type")
+            t = dict(t or {"code": "", "name": "", "kind": "work", "start_time": "08:00", "end_time": "16:00",
+                           "break_minutes": 0, "color": "#ffffc0", "min_staff": 0})
+            old_code = t["code"] or None
+            result = {"code": None}
+            sp_label(body, "Code (1-3 letters):").grid(row=0, column=0, sticky="w", pady=2)
+            e_code = sp_entry(body, 6, t["code"])
+            e_code.grid(row=0, column=1, sticky="w", pady=2)
+            sp_label(body, "Name:").grid(row=1, column=0, sticky="w", pady=2)
+            e_name = sp_entry(body, 28, t["name"])
+            e_name.grid(row=1, column=1, sticky="w", pady=2)
+            sp_label(body, "Kind:").grid(row=2, column=0, sticky="w", pady=2)
+            kinds = dict(SP_KINDS)
+            kind = SPCombo(body, [k[1] for k in SP_KINDS], kinds[t["kind"]], width=22)
+            kind.grid(row=2, column=1, sticky="w", pady=2)
+            sp_label(body, "Start - end (hh:mm):").grid(row=3, column=0, sticky="w", pady=2)
+            row = tk.Frame(body, bg=SP_FACE)
+            row.grid(row=3, column=1, sticky="w", pady=2)
+            e_start = sp_entry(row, 7, t["start_time"])
+            e_start.pack(side="left")
+            sp_label(row, " - ").pack(side="left")
+            e_end = sp_entry(row, 7, t["end_time"])
+            e_end.pack(side="left")
+            sp_label(row, "  (an end before the start = night shift)", fg="#404040").pack(side="left")
+            sp_label(body, "Unpaid break (minutes):").grid(row=4, column=0, sticky="w", pady=2)
+            e_break = sp_spin(body, 0, 240, 5, t["break_minutes"])
+            e_break.grid(row=4, column=1, sticky="w", pady=2)
+            sp_label(body, "Colour:").grid(row=5, column=0, sticky="w", pady=2)
+            colour = {"value": t["color"]}
+            cbtn = tk.Button(body, width=6, bg=t["color"], activebackground=t["color"], relief="raised", bd=2,
+                             highlightthickness=0, takefocus=0)
+
+            def pick():
+                _rgb, hx = colorchooser.askcolor(color=colour["value"], parent=win, title="Shift colour")
+                if hx:
+                    colour["value"] = hx
+                    cbtn.config(bg=hx, activebackground=hx)
+            cbtn.config(command=pick)
+            cbtn.grid(row=5, column=1, sticky="w", pady=2)
+            sp_label(body, "People needed per day:").grid(row=6, column=0, sticky="w", pady=2)
+            e_min = sp_spin(body, 0, 99, 1, t["min_staff"])
+            e_min.grid(row=6, column=1, sticky="w", pady=2)
+            sp_label(body, "Work shifts count their hours; leave counts the hours per day of the employee on working "
+                           "days; a day off counts nothing. 0 people needed = no check.", fg="#404040", wraplength=380,
+                     justify="left").grid(row=7, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+            def ok():
+                code = e_code.get().strip().upper()
+                if not code or len(code) > 3 or not code.isalnum():
+                    messagebox.showwarning("Shift type", "The code must have 1 to 3 letters or digits.", parent=win)
+                    return
+                if code != old_code and code in {x["code"] for x in self.store.types()}:
+                    messagebox.showwarning("Shift type", "The code %s is already used." % code, parent=win)
+                    return
+                k = next(k for k, label in SP_KINDS if label == kind.get())
+                start, end = e_start.get().strip(), e_end.get().strip()
+                if k == "work" and (sp_minutes(start) is None or sp_minutes(end) is None or start == end):
+                    messagebox.showwarning("Shift type", "A work shift needs a start and an end as hh:mm.", parent=win)
+                    return
+                try:
+                    brk, need = int(float(e_break.get())), int(float(e_min.get()))
+                except ValueError:
+                    messagebox.showwarning("Shift type", "The break and the people needed must be numbers.", parent=win)
+                    return
+                data = {"code": code, "name": e_name.get().strip() or code, "kind": k,
+                        "start_time": start if k == "work" else "", "end_time": end if k == "work" else "",
+                        "break_minutes": max(0, brk), "color": colour["value"], "min_staff": max(0, need)}
+                self.store.save_type(old_code, data)
+                result["code"] = code
+                win.destroy()
+            row = tk.Frame(body, bg=SP_FACE)
+            row.grid(row=8, column=0, columnspan=2, sticky="e", pady=(10, 0))
+            sp_button(row, "OK", ok, width=9, bold=True).pack(side="left")
+            sp_button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=(4, 0))
+            win.bind("<Escape>", lambda e: win.destroy())
+            sp_modal(win)
+            win.wait_window()
+            return result["code"]
+
+        def holidays_dialog(self):
+            """Holidays: each team keeps its own list (none are built in)."""
+            win, body = sp_dialog(self.root, "Holidays")
+            frame, lb = sp_listbox(body, height=14, width=46, font=("Courier New", 9))
+            frame.grid(row=0, column=0, rowspan=7, sticky="nsew")
+            state = {"rows": []}
+
+            def fill(select_day=None):
+                rows = sorted((sp_parse_day(h["day"]), h["name"]) for h in self.store.custom_holidays())
+                state["rows"] = rows
+                lb.delete(0, "end")
+                for d, n in rows:
+                    lb.insert("end", "%s %s  %s" % (d.strftime("%d.%m.%Y"), SP_WEEKDAYS[d.weekday()], n[:30]))
+                if not rows:
+                    lb.insert("end", "(no holidays - press Add...)")
+                    lb.itemconfig(0, fg="#808080")
+                for i, (d, _n) in enumerate(rows):
+                    if (select_day is not None and d == select_day) or (select_day is None and d.year == self.year):
+                        lb.see(i)
+                        if select_day is not None:
+                            lb.selection_set(i)
+                        break
+
+            def picked():
+                sel = lb.curselection()
+                return state["rows"][sel[0]] if sel and sel[0] < len(state["rows"]) else None
+
+            def ask(title, day=None, name=""):
+                """-> (date, name) or None."""
+                text = simpledialog.askstring(title, "Date (dd.mm.yyyy):", parent=win,
+                                              initialvalue=day.strftime("%d.%m.%Y") if day else "")
+                if not text:
+                    return None
+                try:
+                    d = dt.datetime.strptime(text.strip().replace("/", ".").replace("-", "."), "%d.%m.%Y").date()
+                except ValueError:
+                    messagebox.showwarning(title, "Write the date as dd.mm.yyyy.", parent=win)
+                    return None
+                new_name = simpledialog.askstring(title, "Name (for example: Inventory day):", parent=win,
+                                                  initialvalue=name)
+                if not new_name or not new_name.strip():
+                    return None
+                return d, new_name.strip()
+
+            def add():
+                got = ask("Add a holiday")
+                if got:
+                    self.store.add_holiday(sp_day(got[0]), got[1])
+                    fill(got[0])
+
+            def edit():
+                item = picked()
+                if item is None:
+                    messagebox.showinfo("Edit a holiday", "Select a holiday in the list first.", parent=win)
+                    return
+                got = ask("Edit a holiday", item[0], item[1])
+                if got:
+                    self.store.delete_holiday(sp_day(item[0]))
+                    self.store.add_holiday(sp_day(got[0]), got[1])
+                    fill(got[0])
+
+            def delete():
+                item = picked()
+                if item is not None:
+                    self.store.delete_holiday(sp_day(item[0]))
+                    fill()
+
+            def copy_year():
+                """The holidays of the shown year again in the next year, on the same dates."""
+                year = self.year
+                rows = [(d, n) for d, n in state["rows"] if d.year == year]
+                if not rows:
+                    messagebox.showinfo("Copy to next year", "There are no holidays in %d." % year, parent=win)
+                    return
+                added = 0
+                for d, n in rows:
+                    try:
+                        nd = d.replace(year=year + 1)
+                    except ValueError:                       # 29 February
+                        continue
+                    if not any(x == nd for x, _ in state["rows"]):
+                        self.store.add_holiday(sp_day(nd), n)
+                        added += 1
+                fill()
+                messagebox.showinfo("Copy to next year", "%d holiday(s) copied to %d." % (added, year + 1), parent=win)
+            lb.bind("<Double-Button-1>", lambda e: edit() if picked() else add())
+            lb.bind("<Delete>", lambda e: delete())
+            sp_button(body, "Add...", add, width=14).grid(row=0, column=1, sticky="nw", padx=(8, 0), pady=1)
+            sp_button(body, "Edit...", edit, width=14).grid(row=1, column=1, sticky="nw", padx=(8, 0), pady=1)
+            sp_button(body, "Delete", delete, width=14).grid(row=2, column=1, sticky="nw", padx=(8, 0), pady=1)
+            sp_button(body, "Copy %d to %d" % (self.year, self.year + 1), copy_year, width=14).grid(
+                row=3, column=1, sticky="nw", padx=(8, 0), pady=(8, 1))
+            sp_label(body, "Holidays are shown in red, do not\ncount in the monthly norm and leave\ntaken on them "
+                           "counts no hours.", fg="#404040", justify="left").grid(row=4, column=1, sticky="nw",
+                                                                                 padx=(8, 0), pady=(8, 0))
+
+            def close():
+                win.destroy()
+                self.reload()
+            sp_button(body, "Close", close, width=14, bold=True).grid(row=6, column=1, sticky="s", padx=(8, 0))
+            win.protocol("WM_DELETE_WINDOW", close)
+            win.bind("<Escape>", lambda e: close())
+            fill()
+            sp_modal(win)
+
+        def rules_dialog(self):
+            s = self.store.settings()
+            win, body = sp_dialog(self.root, "Rules")
+            spins = {}
+            for r, (key, label, lo, hi, step) in enumerate((
+                    ("min_rest_hours", "Minimum rest between two shifts (hours):", 0, 48, 0.5),
+                    ("max_consecutive_days", "Most working days in a row:", 0, 31, 1),
+                    ("max_week_hours", "Most hours in a week, Monday to Sunday:", 0, 168, 1))):
+                sp_label(body, label).grid(row=r, column=0, sticky="w", pady=2)
+                spins[key] = sp_spin(body, lo, hi, step, s[key])
+                spins[key].grid(row=r, column=1, sticky="w", pady=2, padx=(8, 0))
+            sp_label(body, "0 turns a rule off. The checks run after every change; the problems appear under the plan "
+                           "and the days are framed in red.", fg="#404040", wraplength=360, justify="left").grid(
+                row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+            def ok():
+                try:
+                    values = {k: float(sp.get().replace(",", ".")) for k, sp in spins.items()}
+                except ValueError:
+                    messagebox.showwarning("Rules", "Write numbers.", parent=win)
+                    return
+                values["max_consecutive_days"] = int(values["max_consecutive_days"])
+                self.store.save_settings(**values)
+                win.destroy()
+                self.recheck()
+            row = tk.Frame(body, bg=SP_FACE)
+            row.grid(row=4, column=0, columnspan=2, sticky="e", pady=(10, 0))
+            sp_button(row, "OK", ok, width=9, bold=True).pack(side="left")
+            sp_button(row, "Cancel", win.destroy, width=9).pack(side="left", padx=(4, 0))
+            win.bind("<Return>", lambda e: ok())
+            win.bind("<Escape>", lambda e: win.destroy())
+            sp_modal(win)
+
+        # ═════════════════════════════════════ export ════════════════════════════════════════════════════
+        def export_title(self):
+            return "Shift plan - %s%s" % (dt.date(self.year, self.month, 1).strftime("%B %Y"),
+                                          " - " + self.team if self.team else "")
+
+        def export(self, kind):
+            if not self.emps:
+                messagebox.showinfo("Export", "There are no employees to export.", parent=self.root)
+                return
+            ext = ".xlsx" if kind == "xlsx" else ".pdf"
+            name = "Shift plan %04d-%02d%s%s" % (self.year, self.month, " " + self.team if self.team else "", ext)
+            for ch in '\\/:*?"<>|':
+                name = name.replace(ch, "_")
+            path = filedialog.asksaveasfilename(parent=self.root, title="Export to " + ("Excel" if kind == "xlsx" else "PDF"),
+                                                defaultextension=ext, initialfile=name,
+                                                filetypes=[("Excel workbook", "*.xlsx")] if kind == "xlsx"
+                                                else [("PDF document", "*.pdf")])
+            if not path:
+                return
+            self.root.config(cursor="watch")
+            self.root.update_idletasks()
+            try:
+                if kind == "xlsx":
+                    sp_export_xlsx(path, self.export_title(), self.year, self.month, self.emps, self.entries, self.types,
+                                   self.holidays, self.problems)
+                else:
+                    sp_export_pdf(path, self.export_title(), self.year, self.month, self.emps, self.entries, self.types,
+                                  self.holidays)
+            except PermissionError:
+                messagebox.showerror("Export", "The file could not be written; it may be open in another program:\n"
+                                     + path, parent=self.root)
+                return
+            except Exception as exc:
+                messagebox.showerror("Export", "The file could not be written:\n%s: %s" % (type(exc).__name__, exc),
+                                     parent=self.root)
+                return
+            finally:
+                self.root.config(cursor="")
+            self.app.status("Saved: " + path)
+            messagebox.showinfo("Export", "The plan was saved:\n" + path, parent=self.root)
+
+        def export_xlsx(self):
+            self.export("xlsx")
+
+        def export_pdf(self):
+            self.export("pdf")
+
+        # ═════════════════════════════════════ help, errors, closing ═════════════════════════════════════
+        def help_keys(self):
+            messagebox.showinfo("Keyboard and mouse",
+                                "Brush Select: click a day, then type the shift code (M, A, AL...). The next day is "
+                                "selected, so a whole week is typed in a few keys.\n"
+                                "Arrows - move;  Home / End - first / last day;  Del - clear the day;  F2 - note\n"
+                                "Brush with a shift: click or drag over the days to paint them.\n"
+                                "Right click on a day: all the shift types, note, pattern, repeat the week.\n"
+                                "Double-click on a name: edit the employee.\n"
+                                "PgUp / PgDn - previous / next month (day in the Hours view);  Ctrl+Home - today\n"
+                                "F5 - Month view;  F6 - Hours of the day (or double-click a day in the header)\n"
+                                "Ctrl+F - fill with a pattern;  Ctrl+R - repeat the week\n"
+                                "Ctrl+Z / Ctrl+Y - undo / redo;  Ctrl+E / Ctrl+P - export to Excel / PDF\n\n"
+                                "Red frame: the day breaks a rule (Setup > Rules). Red count under the plan: fewer "
+                                "people than needed on that shift.", parent=self.root)
+
+        def about(self):
+            messagebox.showinfo("About " + SP_APP_NAME, "%s  version %s\nBitpack\n\nShifts, leave and days off for each "
+                                                         "employee, hours against the monthly norm, rest and staffing "
+                                                         "checks, the hours of each day, days off, export to Excel and PDF."
+                                % (SP_APP_NAME, SP_VERSION), parent=self.root)
+
+        def on_error(self, exc_type, exc, tb):
+            text = "".join(traceback.format_exception(exc_type, exc, tb))
+            try:
+                sys.stderr.write(text)
+            except Exception:
+                pass
+            try:
+                messagebox.showerror(SP_APP_NAME, "Something went wrong:\n%s: %s" % (exc_type.__name__, exc),
+                                     detail="\n".join(text.strip().splitlines()[-4:]), parent=self.root)
+            except Exception:
+                pass
+
+        def on_close(self):
+            self.store.close()
+            self.root.destroy()
+
+
+    def shift_planner_95_main():
+        root = tk.Tk()
+        SPEditor(root)
+        root.mainloop()
+
+
+    if __name__ == "__main__":
+        shift_planner_95_main()

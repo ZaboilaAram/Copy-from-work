@@ -194,7 +194,7 @@
   .facts li { padding: 6px 10px; font-size: 15px; }
 
   .desk { display: grid; gap: 18px; }
-  .icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px 6px; }
+  .icons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 6px; }
   .icon {
     display: flex; flex-direction: column; align-items: center; gap: 6px;
     background: none; border: 0; padding: 6px 4px; cursor: pointer;
@@ -324,7 +324,7 @@
   @media (max-width: 620px) {
     body { font-size: 16px; }
     .hero { padding: 34px 0 46px; }
-    .icons { grid-template-columns: repeat(4, 1fr); }
+    .icons { grid-template-columns: repeat(3, 1fr); }
     .benefits, .steps, .tool-list { grid-template-columns: 1fr; }
     .section-window .window-body { padding: 18px 16px 20px; }
     .nav { display: none; }
@@ -389,6 +389,15 @@
       <rect x="17" y="7" width="12" height="20" fill="#fff" stroke="#000"/>
       <g fill="#808080"><rect x="5" y="9" width="8" height="2"/><rect x="5" y="17" width="8" height="2"/><rect x="19" y="11" width="8" height="2"/><rect x="19" y="19" width="8" height="2"/></g>
       <rect x="5" y="13" width="8" height="2" fill="#c00000"/><rect x="19" y="15" width="8" height="2" fill="#008000"/>
+    </symbol>
+    <symbol id="i-shift" viewBox="0 0 32 32">
+      <rect x="3" y="5" width="26" height="23" fill="#fff" stroke="#000"/>
+      <rect x="3" y="5" width="26" height="5" fill="#000080"/>
+      <rect x="8" y="2" width="2" height="5" fill="#000"/><rect x="22" y="2" width="2" height="5" fill="#000"/>
+      <g stroke="#808080"><path d="M3 16h26M3 22h26M11 10v18M19 10v18"/></g>
+      <rect x="4" y="11" width="6" height="4" fill="#ffd000"/><rect x="12" y="11" width="6" height="4" fill="#4aa0e0"/>
+      <rect x="20" y="17" width="8" height="4" fill="#a050c0"/><rect x="4" y="23" width="6" height="4" fill="#40b040"/>
+      <rect x="12" y="23" width="6" height="4" fill="#ffd000"/>
     </symbol>
     <symbol id="i-merge" viewBox="0 0 32 32">
       <path d="M4 4h11l4 4v13H4z" fill="#fff" stroke="#000"/>
@@ -471,6 +480,7 @@
           <button class="icon" data-tool="video" aria-pressed="true"><svg aria-hidden="true"><use href="#i-video"/></svg><span>Video Editor 95</span></button>
           <button class="icon" data-tool="pdf" aria-pressed="false"><svg aria-hidden="true"><use href="#i-pdf"/></svg><span>PDF Editor 95</span></button>
           <button class="icon" data-tool="merge" aria-pressed="false"><svg aria-hidden="true"><use href="#i-merge"/></svg><span>Document Merge</span></button>
+          <button class="icon" data-tool="shift" aria-pressed="false"><svg aria-hidden="true"><use href="#i-shift"/></svg><span>Shift Planner 95</span></button>
           <button class="icon" data-tool="excel" aria-pressed="false"><svg aria-hidden="true"><use href="#i-compare"/></svg><span>Excel Compare 95</span></button>
           <button class="icon" data-tool="report" aria-pressed="false"><svg aria-hidden="true"><use href="#i-report"/></svg><span>Report Designer 95</span></button>
           <button class="icon" data-tool="steps" aria-pressed="false"><svg aria-hidden="true"><use href="#i-steps"/></svg><span>Step Recorder 95</span></button>
@@ -610,6 +620,7 @@
               <li class="sunken"><b>Bitpack desktop</b><span>A retro desktop that starts every tool, in a single window.</span></li>
               <li class="sunken"><b>Sticky Notes 95</b><span>Notes stuck on the screen, kept from one day to the next.</span></li>
               <li class="sunken"><b>Mail Express</b><span>Send e-mail straight from Bitpack, with no other mail program.</span></li>
+              <li class="sunken"><b>Shift Planner 95</b><span>Monthly shift schedules with an hour-by-hour view, rule checks and export to Excel or PDF.</span></li>
             </ul>
           </div>
           <p class="more">…and many more: over 100 tools in the same program.</p>
@@ -684,6 +695,7 @@
                 <div class="limit-tool"><b>Bitpack desktop</b><ul><li>Starts the Bitpack tools; it does not replace the Windows desktop or start other programs.</li></ul></div>
                 <div class="limit-tool"><b>Sticky Notes 95</b><ul><li>Notes are kept on that computer only.</li></ul></div>
                 <div class="limit-tool"><b>Mail Express</b><ul><li>Needs a network connection and an e-mail account.</li></ul></div>
+                <div class="limit-tool"><b>Shift Planner 95</b><ul><li>One shift per person per day.</li><li>Public holidays are not built in: you add your own once and copy them to the next year.</li><li>It checks rest, days in a row, weekly hours and staffing; it does not calculate pay.</li><li>Plans are exported as Excel or PDF; they cannot be read back from those files.</li></ul></div>
               </div>
             </fieldset>
           </div>
@@ -785,6 +797,9 @@
     merge: ["Document Merge", "Hundreds of personalized documents in one go",
       "Make the template once in Word; the data comes from an Excel or CSV table. Bitpack writes one document for every row, in Word or PDF.",
       "Contracts, certificates, letters or labels ready in minutes, with no copy and paste and no typing mistakes."],
+    shift: ["Shift Planner 95", "The team's schedule for the month, with the rules checked for you",
+      "Type a shift code in a day and Bitpack moves to the next one; patterns fill a whole month. The hours view shows who is at work, hour by hour, and Bitpack flags too little rest between shifts, too many days in a row, too many hours in a week and shifts with too few people.",
+      "A schedule that keeps to the rules is ready in an afternoon and goes out as Excel or PDF – no spreadsheet full of formulas."],
     excel: ["Excel Compare 95", "See at once what changed between two exports",
       "Pick two Excel or CSV files and the column that matches their rows. You get an Excel report of what was added, what disappeared and what changed.",
       "Checking stock, prices or lists no longer means hours of comparing by eye."],
