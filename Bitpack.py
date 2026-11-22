@@ -92,6 +92,3440 @@ except ImportError:    # Python 2 fallback
 import getpass
 #from pygame.locals import *
 
+# ==============================================================================================================
+# Comenzile uzuale cmd / PowerShell fara cmd.exe si powershell.exe, in TOATE tool-urile si terminalele Bitpack.
+# (Inlocuieste w95_network_all.py: pune doar acest fisier.)
+#
+# Unde: in Bitpack.py, la nivelul 0 (fara indentare), la inceputul fisierului, dupa blocurile w95_scrollbar.py si
+# w95_filedialog_all.py, inainte de orice cod de tool. O singura data.
+#
+# 1) In tot Bitpack-ul: subprocess.Popen / run / call / check_output cu una din comenzile de mai jos primeste
+#    raspunsul de la Python si de la functiile Windows (fara proces cmd.exe / powershell.exe / ping.exe ...).
+#    Restul ruleaza ca inainte (comanda reala).
+#      cmd:        dir, type, copy, move, del, ren, mkdir/md, rmdir/rd, tree, find, findstr, sort, more, where,
+#                  echo, set, path, cd, ver, date /t, time /t, cls, exit, rem, title, hostname, whoami, help
+#      retea:      ping (si -t), tracert, arp -a, route print -4, ipconfig (/all, /flushdns), getmac,
+#                  netstat (-a -n -o), nslookup, curl
+#      sistem:     tasklist (/FI /FO /NH), taskkill (/PID /IM /F /T), systeminfo
+#      PowerShell: Get-Location, Get-ChildItem, Get-Content, Get-Process, Stop-Process, Get-Service, Get-Date,
+#                  Write-Output, Test-Connection, Test-NetConnection, Resolve-DnsName, Get-NetAdapter,
+#                  Get-NetIPAddress, Invoke-WebRequest, Invoke-RestMethod, New-Item, Remove-Item, Copy-Item,
+#                  Move-Item, Rename-Item, Clear-Host, Get-Help (si aliasurile: ls, dir, cat, ps, kill, rm, cp,
+#                  mv, iwr, irm, curl, cls ...)
+#
+# 2) In terminalele Bitpack (cu w95_sandbox): NICIO comanda nu mai ajunge in Windows. Ce e in lista e emulat,
+#    restul primeste mesajul "'x' is not recognized ..." / "Not available in this Bitpack terminal ...".
+#      with w95_sandbox("cmd"):            # sau "PowerShell"
+#          proces = subprocess.Popen(...)  # comanda tastata de utilizator
+#    sau:  proces = w95_sandbox_popen(args, "cmd", **optiuni)
+#    W95_SANDBOX_ALLOW = {"python"}  ar lasa totusi un program anume sa porneasca in Windows (gol = niciunul).
+#    w95_commands_help("cmd" | "PowerShell", [comanda], skip=(...)) da textul de HELP (toate comenzile /
+#    optiunile uneia; skip = comenzile pe care terminalul le are el insusi).
+#
+# 3) Ferestrele Tk sterse doar de firul principal (w95_install_tk_guard, la sfarsitul fisierului): opreste
+#    caderea 'Tcl_AsyncDelete: async handler deleted by the wrong thread' cand un scan / ping in fundal
+#    porneste colectorul Python in alt fir. Nu se scoate.
+#
+# Daca vrei inapoi comenzile reale in tot Bitpack-ul: comenteaza linia  w95_install_commands()
+# ==============================================================================================================
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+# COMMANDS WITHOUT CMD.EXE / POWERSHELL.EXE - for ALL the tools and terminals at once (like the scrollbar).
+# subprocess.Popen / run / call / check_output with one of the common commands of cmd and PowerShell (ping,
+# ipconfig, dir, tasklist, Get-Process, Test-NetConnection ...) is answered by Python and the Windows functions:
+# no cmd.exe, powershell.exe, ping.exe ... process, no admin rights, the same answer on a Romanian or an English
+# Windows, and it still works where the company blocks cmd or PowerShell. The output is the text the English
+# commands print (streamed line by line, so live windows and terminals show it as it comes), with the same exit
+# codes. Anything not covered (pipes |, redirections > <, &&, scripts, other programs, other options, another
+# operating system, an unexpected error before the command starts) runs the real command, as before.
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+import codecs as _w95cmd_codecs
+import datetime as _w95cmd_datetime
+import fnmatch as _w95cmd_fnmatch
+import io as _w95cmd_io
+import itertools as _w95cmd_itertools
+import locale as _w95cmd_locale
+import os as _w95cmd_os
+import re as _w95cmd_re
+import shlex as _w95cmd_shlex
+import shutil as _w95cmd_shutil
+import socket as _w95cmd_socket
+import struct as _w95cmd_struct
+import subprocess as _w95cmd_subprocess
+import sys as _w95cmd_sys
+import threading as _w95cmd_threading
+import time as _w95cmd_time
+
+_W95CMD_REAL_POPEN = getattr(_w95cmd_subprocess, "_w95cmd_real_popen", None) or _w95cmd_subprocess.Popen
+_W95CMD_PROCESSES = {}                                       # fake PID -> emulated process (for taskkill)
+_W95CMD_DATA = b"abcdefghijklmnopqrstuvwabcdefghi"           # what ping.exe sends
+
+
+def _w95cmd_enabled():
+    return _w95cmd_os.name == "nt"
+
+
+class _W95CmdNotHere(Exception):
+    """This command (or this form of it) is not emulated: the real one runs."""
+
+
+class _W95CmdUnknown(_W95CmdNotHere):
+    """Not a command known here at all (in a Bitpack terminal: 'is not recognized ...')."""
+
+
+class _W95CmdNeeds(_W95CmdNotHere):
+    """The real command would ask Y/N: in a Bitpack terminal the option that does it without asking is needed."""
+
+
+class _W95CmdStop(Exception):
+    """The emulated command was stopped (kill / terminate / taskkill / the reader went away)."""
+
+
+def _w95cmd_oem():
+    """The code page cmd.exe writes in when its output goes to a pipe (cp852 on a Romanian Windows)."""
+    for name in ("oem", _w95cmd_locale.getpreferredencoding(False), "utf-8"):
+        try:
+            _w95cmd_codecs.lookup(name)
+            return name
+        except (LookupError, TypeError):
+            continue
+    return "utf-8"
+
+
+def _w95cmd_n(value):
+    return "{:,}".format(int(value))
+
+
+# ═════ Windows functions (iphlpapi, kernel32, dnsapi) through ctypes ═════════════════════════════════════════
+def _w95cmd_ip_to_dword(ip):
+    return int.from_bytes(_w95cmd_socket.inet_aton(ip), "little")
+
+
+def _w95cmd_dword_to_ip(value):
+    return _w95cmd_socket.inet_ntoa(int(value & 0xFFFFFFFF).to_bytes(4, "little"))
+
+
+def _w95cmd_icmp(ip, timeout_ms=4000, size=32, ttl=None):
+    """One echo request with IcmpSendEcho -> (status, reply address, round trip ms, reply TTL).
+    status 0 = reply; 11010 = timed out; 11002 / 11003 = net / host unreachable; 11013 = TTL expired in transit."""
+    import ctypes
+    from ctypes import wintypes
+
+    class IP_OPTION_INFORMATION(ctypes.Structure):
+        _fields_ = [("Ttl", ctypes.c_ubyte), ("Tos", ctypes.c_ubyte), ("Flags", ctypes.c_ubyte),
+                    ("OptionsSize", ctypes.c_ubyte), ("OptionsData", ctypes.c_void_p)]
+
+    icmp = ctypes.WinDLL("iphlpapi", use_last_error=True)
+    icmp.IcmpCreateFile.restype = wintypes.HANDLE
+    icmp.IcmpCloseHandle.argtypes = [wintypes.HANDLE]
+    icmp.IcmpSendEcho.argtypes = [wintypes.HANDLE, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ushort,
+                                  ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong]
+    icmp.IcmpSendEcho.restype = ctypes.c_ulong
+    handle = icmp.IcmpCreateFile()
+    if not handle or handle == wintypes.HANDLE(-1).value:
+        raise OSError("IcmpCreateFile failed")
+    try:
+        data = (_W95CMD_DATA * (size // len(_W95CMD_DATA) + 1))[:size]
+        request = ctypes.create_string_buffer(data, max(1, size))
+        options = IP_OPTION_INFORMATION(Ttl=int(ttl)) if ttl else None
+        reply_size = 64 + size + 8
+        reply = ctypes.create_string_buffer(reply_size)
+        count = icmp.IcmpSendEcho(handle, _w95cmd_ip_to_dword(ip), ctypes.addressof(request), size,
+                                  ctypes.addressof(options) if options is not None else None,
+                                  ctypes.addressof(reply), reply_size, int(timeout_ms))
+        if count == 0:
+            return ctypes.get_last_error() or 11010, None, None, None
+        raw = reply.raw
+        address = int.from_bytes(raw[0:4], "little")
+        status = int.from_bytes(raw[4:8], "little")
+        rtt = int.from_bytes(raw[8:12], "little")
+        # the reply's TTL comes after the Data pointer (8 bytes in a 64-bit layout, 4 in a 32-bit one): the pointer
+        # points inside the reply buffer, which tells the layout this Windows returned
+        base = ctypes.addressof(reply)
+        pointer64 = int.from_bytes(raw[16:24], "little")
+        reply_ttl = raw[24] if base <= pointer64 < base + reply_size else raw[20]
+        return status, _w95cmd_dword_to_ip(address), rtt, reply_ttl
+    finally:
+        icmp.IcmpCloseHandle(handle)
+
+
+def _w95cmd_table(function, row_size, row_reader):
+    """Calls a GetIp...Table function (first for the size, then for the data) and reads its rows."""
+    import ctypes
+    size = ctypes.c_ulong(0)
+    function(None, ctypes.byref(size), True)
+    for _attempt in range(3):
+        buffer = ctypes.create_string_buffer(size.value + 1024)
+        size = ctypes.c_ulong(len(buffer))
+        result = function(buffer, ctypes.byref(size), True)
+        if result == 0:
+            raw = buffer.raw
+            count = int.from_bytes(raw[0:4], "little")
+            return [row_reader(raw[4 + i * row_size:4 + (i + 1) * row_size]) for i in range(count)]
+        if result != 122:                                    # 122 = buffer too small: again with the new size
+            raise OSError("iphlpapi error %d" % result)
+    raise OSError("iphlpapi: the table keeps growing")
+
+
+def _w95cmd_address_rows():
+    """GetIpAddrTable -> [(ip, interface index, mask)]."""
+    import ctypes
+
+    def read(row):
+        d = [int.from_bytes(row[i:i + 4], "little") for i in range(0, 16, 4)]
+        return _w95cmd_dword_to_ip(d[0]), d[1], _w95cmd_dword_to_ip(d[2])
+    return _w95cmd_table(ctypes.WinDLL("iphlpapi").GetIpAddrTable, 24, read)
+
+
+def _w95cmd_arp_rows():
+    """GetIpNetTable -> [(interface index, ip, mac 'aa-bb-cc-dd-ee-ff', type 1..4)]."""
+    import ctypes
+
+    def read(row):
+        index = int.from_bytes(row[0:4], "little")
+        length = int.from_bytes(row[4:8], "little")
+        mac = "-".join("%02x" % b for b in row[8:8 + min(length, 8)])
+        return index, _w95cmd_dword_to_ip(int.from_bytes(row[16:20], "little")), mac, int.from_bytes(row[20:24],
+                                                                                                    "little")
+    return _w95cmd_table(ctypes.WinDLL("iphlpapi").GetIpNetTable, 24, read)
+
+
+def _w95cmd_route_rows():
+    """GetIpForwardTable -> [(destination, mask, next hop, interface index, type, metric)]."""
+    import ctypes
+
+    def read(row):
+        d = [int.from_bytes(row[i:i + 4], "little") for i in range(0, 56, 4)]
+        return (_w95cmd_dword_to_ip(d[0]), _w95cmd_dword_to_ip(d[1]), _w95cmd_dword_to_ip(d[3]), d[4], d[5], d[9])
+    return _w95cmd_table(ctypes.WinDLL("iphlpapi").GetIpForwardTable, 56, read)
+
+
+def _w95cmd_network_params():
+    """GetNetworkParams -> (host name, domain name, [DNS servers])."""
+    import ctypes
+
+    class IP_ADDR_STRING(ctypes.Structure):
+        pass
+    IP_ADDR_STRING._fields_ = [("Next", ctypes.POINTER(IP_ADDR_STRING)), ("IpAddress", ctypes.c_char * 16),
+                               ("IpMask", ctypes.c_char * 16), ("Context", ctypes.c_ulong)]
+
+    class FIXED_INFO(ctypes.Structure):
+        _fields_ = [("HostName", ctypes.c_char * 132), ("DomainName", ctypes.c_char * 132),
+                    ("CurrentDnsServer", ctypes.c_void_p), ("DnsServerList", IP_ADDR_STRING),
+                    ("NodeType", ctypes.c_uint), ("ScopeId", ctypes.c_char * 260), ("EnableRouting", ctypes.c_uint),
+                    ("EnableProxy", ctypes.c_uint), ("EnableDns", ctypes.c_uint)]
+    function = ctypes.WinDLL("iphlpapi").GetNetworkParams
+    size = ctypes.c_ulong(0)
+    function(None, ctypes.byref(size))
+    buffer = ctypes.create_string_buffer(size.value + 256)
+    size = ctypes.c_ulong(len(buffer))
+    if function(buffer, ctypes.byref(size)) != 0:
+        raise OSError("GetNetworkParams failed")
+    info = ctypes.cast(buffer, ctypes.POINTER(FIXED_INFO)).contents
+    servers, node = [], info.DnsServerList
+    while True:
+        address = node.IpAddress.decode("ascii", "replace").strip("\x00 ")
+        if address:
+            servers.append(address)
+        if not node.Next:
+            break
+        node = node.Next.contents
+    return info.HostName.decode("ascii", "replace"), info.DomainName.decode("ascii", "replace"), servers
+
+
+def _w95cmd_volume(path):
+    """(label, serial 'XXXX-XXXX') of the drive of a path, or (None, None)."""
+    try:
+        import ctypes
+        root = _w95cmd_os.path.splitdrive(_w95cmd_os.path.abspath(path))[0] + "\\"
+        name = ctypes.create_unicode_buffer(261)
+        serial = ctypes.c_ulong(0)
+        if not ctypes.windll.kernel32.GetVolumeInformationW(ctypes.c_wchar_p(root), name, 261, ctypes.byref(serial),
+                                                            None, None, None, 0):
+            return None, None
+        value = serial.value
+        return name.value, "%04X-%04X" % (value >> 16, value & 0xFFFF)
+    except Exception:
+        return None, None
+
+
+def _w95cmd_session(pid):
+    try:
+        import ctypes
+        session = ctypes.c_ulong(0)
+        if ctypes.windll.kernel32.ProcessIdToSessionId(int(pid), ctypes.byref(session)):
+            return session.value
+    except Exception:
+        pass
+    return 0
+
+
+def _w95cmd_registry(key, name):
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as handle:
+            return winreg.QueryValueEx(handle, name)[0]
+    except Exception:
+        return None
+
+
+def _w95cmd_windows_version():
+    try:
+        v = _w95cmd_sys.getwindowsversion()
+        ubr = _w95cmd_registry(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion", "UBR")
+        return "%d.%d.%d%s" % (v.major, v.minor, v.build, ".%d" % ubr if ubr is not None else "")
+    except Exception:
+        import platform
+        return platform.version()
+
+
+# ═════ the context a command writes in ═══════════════════════════════════════════════════════════════════════
+class _W95CmdContext(object):
+    def __init__(self, cwd, env):
+        self.cwd = _w95cmd_os.path.abspath(cwd or _w95cmd_os.getcwd())
+        self.env = dict(env if env is not None else _w95cmd_os.environ)
+        self.stop = _w95cmd_threading.Event()
+        self.write = None                                    # set by the emulated process: write(data, err=False)
+
+    def out(self, text="", err=False):
+        if self.stop.is_set():
+            raise _W95CmdStop()
+        if text:
+            self.write(text, err)
+
+    def line(self, text="", err=False):
+        self.out(text + "\r\n", err)
+
+    def var(self, name, default=None):
+        for key, value in self.env.items():
+            if key.upper() == name.upper():
+                return value
+        return default
+
+    def path(self, value):
+        value = _w95cmd_os.path.expandvars(_w95cmd_os.path.expanduser(str(value).strip('"')))
+        return _w95cmd_os.path.normpath(value if _w95cmd_os.path.isabs(value) else
+                                        _w95cmd_os.path.join(self.cwd, value))
+
+    def sleep(self, seconds):
+        if self.stop.wait(max(0.0, seconds)):
+            raise _W95CmdStop()
+
+
+def _w95cmd_switches(argv, known):
+    """cmd switches (/B /S /A:H ... also glued: /b/s) -> (switches lowercased, other arguments).
+    A switch not in `known` (prefixes allowed with ':') means: not emulated."""
+    switches, rest = [], []
+    for arg in argv:
+        if arg.startswith("/") and len(arg) > 1:
+            for part in ["/" + p for p in arg[1:].split("/") if p]:
+                low = part.lower()
+                if not any(low == k or (k.endswith("*") and low.startswith(k[:-1])) for k in known):
+                    raise _W95CmdNotHere(part)
+                switches.append(low)
+        else:
+            rest.append(arg)
+    return switches, rest
+
+
+def _w95cmd_is_hidden(entry_path, stat_result=None):
+    try:
+        st = stat_result or _w95cmd_os.stat(entry_path)
+        attrs = getattr(st, "st_file_attributes", None)
+        if attrs is not None:
+            return bool(attrs & 0x6)                         # hidden or system
+    except OSError:
+        return False
+    return _w95cmd_os.path.basename(entry_path).startswith(".")
+
+
+def _w95cmd_expand(ctx, pattern, dirs=True):
+    """A path that may hold * or ? -> the matching paths (sorted), or the path itself."""
+    full = ctx.path(pattern)
+    folder, name = _w95cmd_os.path.split(full)
+    if "*" not in name and "?" not in name:
+        return [full] if _w95cmd_os.path.exists(full) else []
+    try:
+        names = sorted(_w95cmd_os.listdir(folder), key=str.lower)
+    except OSError:
+        return []
+    found = []
+    for n in names:
+        p = _w95cmd_os.path.join(folder, n)
+        if _w95cmd_fnmatch.fnmatch(n.lower(), name.lower()) and (dirs or not _w95cmd_os.path.isdir(p)):
+            found.append(p)
+    return found
+
+
+# ═════ cmd commands ══════════════════════════════════════════════════════════════════════════════════════════
+def _w95cmd_c_echo(argv, ctx, raw=""):
+    text = raw[1:] if raw[:1] in (" ", ".", ":", "(") else raw
+    if not argv and raw[:1] not in (".", ":", "("):
+        return lambda: (ctx.line("ECHO is on."), 0)[1]
+    if raw.strip().lower() in ("on", "off"):
+        return lambda: 0
+    return lambda: (ctx.line(text), 0)[1]
+
+
+def _w95cmd_c_cd(argv, ctx, raw=""):
+    args = [a for a in argv if a.lower() != "/d"]
+    target = " ".join(args).strip('"')
+
+    def run():
+        if not target:
+            ctx.line(ctx.cwd)
+            return 0
+        if not _w95cmd_os.path.isdir(ctx.path(target)):
+            ctx.line("The system cannot find the path specified.", err=True)
+            return 1
+        return 0                                             # (as in cmd /c: the change ends with the command)
+    return run
+
+
+def _w95cmd_c_dir(argv, ctx, raw=""):
+    switches, paths = _w95cmd_switches(argv, ("/b", "/s", "/a*", "/o*", "/-c", "/c", "/q", "/n"))
+    bare, recursive = "/b" in switches, "/s" in switches
+    attr = [s for s in switches if s.startswith("/a")]
+    order = [s for s in switches if s.startswith("/o")]
+    want = attr[-1][2:].lstrip(":") if attr else None        # None = not hidden; "" = all; "d", "-d", "h" ...
+    sort_key = order[-1][2:].lstrip(":") if order else "n"
+    if any(c not in "nesdg-" for c in sort_key) or (want and any(c not in "dhsra-" for c in want)):
+        raise _W95CmdNotHere("dir")
+    targets = paths or ["."]
+
+    def keep(path, st):
+        is_dir = _w95cmd_os.path.isdir(path)
+        if want is None:
+            return not _w95cmd_is_hidden(path, st)
+        i = 0
+        while i < len(want):
+            negate = want[i] == "-"
+            letter = want[i + 1] if negate else want[i]
+            i += 2 if negate else 1
+            attrs = getattr(st, "st_file_attributes", 0) or 0
+            value = {"d": is_dir, "h": bool(attrs & 2) or (not attrs and _w95cmd_os.path.basename(path).startswith(".")),
+                     "s": bool(attrs & 4), "r": bool(attrs & 1), "a": bool(attrs & 32)}[letter]
+            if value == negate:
+                return False
+        return True
+
+    def listing(folder, pattern):
+        rows = []
+        try:
+            names = _w95cmd_os.listdir(folder)
+        except OSError:
+            return None
+        for n in names:
+            if not _w95cmd_fnmatch.fnmatch(n.lower(), pattern.lower()):
+                continue
+            p = _w95cmd_os.path.join(folder, n)
+            try:
+                st = _w95cmd_os.stat(p)
+            except OSError:
+                continue
+            if keep(p, st):
+                rows.append((n, p, st, _w95cmd_os.path.isdir(p)))
+        reverse = sort_key.startswith("-")
+        letters = sort_key.replace("-", "") or "n"
+        if "g" in letters:
+            rows.sort(key=lambda r: not r[3])
+        key = {"n": lambda r: r[0].lower(), "e": lambda r: _w95cmd_os.path.splitext(r[0])[1].lower(),
+               "s": lambda r: 0 if r[3] else r[2].st_size, "d": lambda r: r[2].st_mtime}.get(letters.replace("g", "")[:1]
+                                                                                        or "n")
+        rows.sort(key=key, reverse=reverse)
+        if "g" in letters:
+            rows.sort(key=lambda r: not r[3])
+        return rows
+
+    def stamp(st):
+        return _w95cmd_time.strftime("%d/%m/%Y  %H:%M", _w95cmd_time.localtime(st.st_mtime))
+
+    def run():
+        found_any, total_files, total_bytes, total_dirs, code = False, 0, 0, 0, 0
+        header_done = False
+        for target in targets:
+            full = ctx.path(target)
+            if _w95cmd_os.path.isdir(full):
+                folder, pattern = full, "*"
+            else:
+                folder, pattern = _w95cmd_os.path.split(full)
+                if "*" not in pattern and "?" not in pattern and not _w95cmd_os.path.exists(full):
+                    folder, pattern = full, None
+            if pattern is None or not _w95cmd_os.path.isdir(folder):
+                ctx.line("File Not Found", err=True)
+                code = 1
+                continue
+            stack = [folder]
+            while stack:
+                current = stack.pop(0)
+                rows = listing(current, pattern)
+                if rows is None:
+                    continue
+                if recursive:
+                    try:
+                        subdirs = sorted([_w95cmd_os.path.join(current, n) for n in _w95cmd_os.listdir(current)
+                                          if _w95cmd_os.path.isdir(_w95cmd_os.path.join(current, n))], key=str.lower)
+                    except OSError:
+                        subdirs = []
+                    stack = subdirs + stack
+                if not rows and recursive:
+                    continue
+                found_any = found_any or bool(rows)
+                if bare:
+                    for name, path, st, is_dir in rows:
+                        ctx.line(path if recursive else name)
+                    continue
+                if not header_done:
+                    label, serial = _w95cmd_volume(current)
+                    drive = (_w95cmd_os.path.splitdrive(current)[0] or "/").rstrip(":")
+                    if serial:
+                        ctx.line(" Volume in drive %s %s" % (drive, "is " + label if label else "has no label."))
+                        ctx.line(" Volume Serial Number is %s" % serial)
+                    header_done = True
+                ctx.line("")
+                ctx.line(" Directory of %s" % current)
+                ctx.line("")
+                files = dirs = size = 0
+                if pattern == "*" and _w95cmd_os.path.dirname(current.rstrip("\\/")) not in ("", current.rstrip("\\/")):
+                    st = _w95cmd_os.stat(current)
+                    for dot in (".", ".."):
+                        ctx.line("%s    <DIR>          %s" % (stamp(st), dot))
+                        dirs += 1
+                for name, path, st, is_dir in rows:
+                    if is_dir:
+                        ctx.line("%s    <DIR>          %s" % (stamp(st), name))
+                        dirs += 1
+                    else:
+                        ctx.line("%s %17s %s" % (stamp(st), _w95cmd_n(st.st_size), name))
+                        files += 1
+                        size += st.st_size
+                ctx.line("%16d File(s) %14s bytes" % (files, _w95cmd_n(size)))
+                total_files, total_bytes, total_dirs = total_files + files, total_bytes + size, total_dirs + dirs
+                if not recursive:
+                    ctx.line("%16d Dir(s) %15s bytes free" % (dirs, _w95cmd_n(_w95cmd_shutil.disk_usage(current).free)))
+            if recursive and not bare and found_any:
+                ctx.line("")
+                ctx.line("     Total Files Listed:")
+                ctx.line("%16d File(s) %14s bytes" % (total_files, _w95cmd_n(total_bytes)))
+                ctx.line("%16d Dir(s) %15s bytes free" % (total_dirs, _w95cmd_n(_w95cmd_shutil.disk_usage(folder).free)))
+            if not found_any and code == 0:
+                ctx.line("File Not Found", err=True)
+                code = 1
+        return code
+    return run
+
+
+def _w95cmd_c_type(argv, ctx, raw=""):
+    _switches, names = _w95cmd_switches(argv, ())
+    if not names:
+        raise _W95CmdNotHere("type")
+
+    def run():
+        code = 0
+        for name in names:
+            paths = [p for p in _w95cmd_expand(ctx, name) if _w95cmd_os.path.isfile(p)]
+            if not paths:
+                ctx.line("The system cannot find the file specified.", err=True)
+                code = 1
+            for p in paths:
+                if len(names) > 1 or len(paths) > 1:
+                    ctx.line("\r\n%s\r\n\r\n" % _w95cmd_os.path.basename(p), err=True)
+                with open(p, "rb") as handle:
+                    while True:
+                        chunk = handle.read(65536)
+                        if not chunk:
+                            break
+                        ctx.out(chunk)
+        return code
+    return run
+
+
+def _w95cmd_c_copy_move(argv, ctx, raw="", move=False):
+    _switches, names = _w95cmd_switches(argv, ("/y", "/-y", "/b", "/v", "/a") if not move else ("/y", "/-y"))
+    if not names or len(names) > 2 or any("+" in n for n in names):
+        raise _W95CmdNotHere("copy")
+    source, target = names[0], names[1] if len(names) == 2 else "."
+
+    def run():
+        paths = _w95cmd_expand(ctx, source)
+        if not move:
+            paths = [p for p in paths if _w95cmd_os.path.isfile(p)]
+        if not paths:
+            ctx.line("The system cannot find the file specified.", err=True)
+            if not move:
+                ctx.line("        0 file(s) copied.")
+            return 1
+        dest = ctx.path(target)
+        done = 0
+        many = len(paths) > 1 or "*" in source or "?" in source
+        for p in paths:
+            to = _w95cmd_os.path.join(dest, _w95cmd_os.path.basename(p)) if _w95cmd_os.path.isdir(dest) else dest
+            try:
+                if move:
+                    if _w95cmd_os.path.exists(to) and _w95cmd_os.path.isfile(to) and _w95cmd_os.path.isfile(p):
+                        _w95cmd_os.replace(p, to)
+                    else:
+                        _w95cmd_shutil.move(p, to)
+                else:
+                    _w95cmd_shutil.copyfile(p, to)
+                    _w95cmd_shutil.copystat(p, to)
+            except OSError as exc:
+                ctx.line(exc.strerror or str(exc), err=True)
+                continue
+            if many:
+                ctx.line(p)
+            done += 1
+        dir_moved = move and len(paths) == 1 and _w95cmd_os.path.isdir(dest if not _w95cmd_os.path.isdir(dest) else
+                                                                       _w95cmd_os.path.join(dest, _w95cmd_os.path.basename(paths[0])))
+        ctx.line("%9d %s %s." % (done, "dir(s)" if dir_moved else "file(s)", "moved" if move else "copied"))
+        return 0 if done else 1
+    return run
+
+
+def _w95cmd_c_del(argv, ctx, raw=""):
+    switches, names = _w95cmd_switches(argv, ("/f", "/s", "/q", "/a*"))
+    if not names:
+        raise _W95CmdNotHere("del")
+    quiet, force, recursive = "/q" in switches, "/f" in switches, "/s" in switches
+    for n in names:
+        base = _w95cmd_os.path.basename(n.rstrip("\\/"))
+        if not quiet and (base in ("*", "*.*") or _w95cmd_os.path.isdir(ctx.path(n))):
+            raise _W95CmdNeeds("DEL of all the files of a folder needs /Q here (there is no Y/N question): "
+                               "DEL /Q %s" % n)
+
+    def run():
+        code = 0
+        for n in names:
+            full = ctx.path(n)
+            folder, pattern = (full, "*") if _w95cmd_os.path.isdir(full) else _w95cmd_os.path.split(full)
+            folders = [folder]
+            if recursive:
+                folders = [root for root, _d, _f in _w95cmd_os.walk(folder)]
+            hits = 0
+            for current in folders:
+                try:
+                    entries = sorted(_w95cmd_os.listdir(current), key=str.lower)
+                except OSError:
+                    continue
+                for entry in entries:
+                    p = _w95cmd_os.path.join(current, entry)
+                    if not _w95cmd_os.path.isfile(p) or not _w95cmd_fnmatch.fnmatch(entry.lower(), pattern.lower()):
+                        continue
+                    hits += 1
+                    try:
+                        if force:
+                            _w95cmd_os.chmod(p, 0o666)
+                        _w95cmd_os.remove(p)
+                        if recursive:
+                            ctx.line("Deleted file - %s" % p)
+                    except OSError:
+                        ctx.line("%s\r\nAccess is denied." % p, err=True)
+                        code = 1
+            if not hits:
+                ctx.line("Could Not Find %s" % full, err=True)
+                code = 1
+        return code
+    return run
+
+
+def _w95cmd_c_ren(argv, ctx, raw=""):
+    _switches, names = _w95cmd_switches(argv, ())
+    if len(names) != 2 or any(c in "".join(names) for c in "*?") or any(c in names[1] for c in "\\/"):
+        raise _W95CmdNotHere("ren")
+
+    def run():
+        source = ctx.path(names[0])
+        if not _w95cmd_os.path.exists(source):
+            ctx.line("The system cannot find the file specified.", err=True)
+            return 1
+        target = _w95cmd_os.path.join(_w95cmd_os.path.dirname(source), names[1])
+        if _w95cmd_os.path.exists(target):
+            ctx.line("A duplicate file name exists, or the file\r\ncannot be found.", err=True)
+            return 1
+        _w95cmd_os.rename(source, target)
+        return 0
+    return run
+
+
+def _w95cmd_c_mkdir(argv, ctx, raw=""):
+    _switches, names = _w95cmd_switches(argv, ())
+    if not names:
+        raise _W95CmdNotHere("mkdir")
+
+    def run():
+        code = 0
+        for n in names:
+            p = ctx.path(n)
+            if _w95cmd_os.path.exists(p):
+                ctx.line("A subdirectory or file %s already exists." % n, err=True)
+                code = 1
+                continue
+            try:
+                _w95cmd_os.makedirs(p)
+            except OSError as exc:
+                ctx.line(exc.strerror or str(exc), err=True)
+                code = 1
+        return code
+    return run
+
+
+def _w95cmd_c_rmdir(argv, ctx, raw=""):
+    switches, names = _w95cmd_switches(argv, ("/s", "/q"))
+    if not names or ("/s" in switches and "/q" not in switches):
+        raise _W95CmdNeeds("RD /S needs /Q here (there is no Y/N question): RD /S /Q folder")
+
+    def run():
+        code = 0
+        for n in names:
+            p = ctx.path(n)
+            if not _w95cmd_os.path.isdir(p):
+                ctx.line("The system cannot find the file specified.", err=True)
+                code = 2
+                continue
+            try:
+                if "/s" in switches:
+                    _w95cmd_shutil.rmtree(p)
+                else:
+                    _w95cmd_os.rmdir(p)
+            except OSError:
+                ctx.line("The directory is not empty." if _w95cmd_os.listdir(p) else "Access is denied.", err=True)
+                code = 145
+        return code
+    return run
+
+
+def _w95cmd_c_tree(argv, ctx, raw=""):
+    switches, names = _w95cmd_switches(argv, ("/f", "/a"))
+    files, ascii_ = "/f" in switches, "/a" in switches
+    tee, last, bar = ("+---", "\\---", "|   ") if ascii_ else ("\u251c\u2500\u2500\u2500", "\u2514\u2500\u2500\u2500",
+                                                              "\u2502   ")
+
+    def run():
+        root = ctx.path(names[0]) if names else ctx.cwd
+        if not _w95cmd_os.path.isdir(root):
+            ctx.line("Invalid path - %s" % root.upper(), err=True)
+            return 1
+        label, serial = _w95cmd_volume(root)
+        ctx.line("Folder PATH listing" + (" for volume %s" % label if label else ""))
+        if serial:
+            ctx.line("Volume serial number is %s" % serial)
+        ctx.line(root.upper() if _w95cmd_os.name == "nt" else root)
+
+        def walk(folder, prefix):
+            try:
+                entries = sorted(_w95cmd_os.listdir(folder), key=str.lower)
+            except OSError:
+                return
+            subdirs = [e for e in entries if _w95cmd_os.path.isdir(_w95cmd_os.path.join(folder, e))
+                       and not _w95cmd_is_hidden(_w95cmd_os.path.join(folder, e))]
+            if files:
+                plain = [e for e in entries if _w95cmd_os.path.isfile(_w95cmd_os.path.join(folder, e))
+                         and not _w95cmd_is_hidden(_w95cmd_os.path.join(folder, e))]
+                for e in plain:
+                    ctx.line(prefix + (bar if subdirs else "    ") + e)
+                if plain:
+                    ctx.line(prefix + (bar if subdirs else "    ").rstrip())
+            for i, d in enumerate(subdirs):
+                end = i == len(subdirs) - 1
+                ctx.line(prefix + (last if end else tee) + d)
+                walk(_w95cmd_os.path.join(folder, d), prefix + ("    " if end else bar))
+        walk(root, "")
+        return 0
+    return run
+
+
+def _w95cmd_text_lines(path):
+    with open(path, "rb") as handle:
+        data = handle.read()
+    for encoding in ("utf-8-sig", _w95cmd_locale.getpreferredencoding(False) or "latin-1", "latin-1"):
+        try:
+            return data.decode(encoding).splitlines()
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return data.decode("latin-1").splitlines()
+
+
+def _w95cmd_c_find(argv, ctx, raw=""):
+    switches, rest = _w95cmd_switches(argv, ("/v", "/c", "/n", "/i", "/off*"))
+    if len(rest) < 2:
+        raise _W95CmdNotHere("find reads the keyboard")      # (without files it reads its input)
+    needle, names = rest[0], rest[1:]
+
+    def run():
+        code, matched = 0, False
+        for name in names:
+            paths = [p for p in _w95cmd_expand(ctx, name) if _w95cmd_os.path.isfile(p)]
+            if not paths:
+                ctx.line("File not found - %s" % name.upper(), err=True)
+                code = 2
+            for p in paths:
+                lines = _w95cmd_text_lines(p)
+                hits = []
+                for number, text in enumerate(lines, 1):
+                    found = (needle.lower() in text.lower()) if "/i" in switches else (needle in text)
+                    if found != ("/v" in switches):
+                        hits.append((number, text))
+                matched = matched or bool(hits)
+                if "/c" in switches:
+                    ctx.line("\r\n---------- %s: %d" % (_w95cmd_os.path.basename(p).upper(), len(hits)))
+                    continue
+                ctx.line("\r\n---------- %s" % _w95cmd_os.path.basename(p).upper())
+                for number, text in hits:
+                    ctx.line(("[%d]%s" % (number, text)) if "/n" in switches else text)
+        return code or (0 if matched else 1)
+    return run
+
+
+def _w95cmd_c_findstr(argv, ctx, raw=""):
+    switches, rest = _w95cmd_switches(argv, ("/i", "/n", "/s", "/r", "/l", "/v", "/c:*", "/m", "/b", "/e", "/x"))
+    # (the /c: value keeps its case: taken from the original arguments)
+    literal = [a[3:].strip('"') for a in argv if a.lower().startswith("/c:")]
+    words = literal or (rest[0].split() if rest else [])
+    names = rest if literal else rest[1:]
+    if not words or not names:
+        raise _W95CmdNotHere("findstr reads the keyboard")
+    flags = _w95cmd_re.I if "/i" in switches else 0
+    regex = "/r" in switches and "/l" not in switches
+    parts = []
+    for w in words:
+        body = w if regex else _w95cmd_re.escape(w)
+        if "/x" in switches:
+            body = "^" + body + "$"
+        elif "/b" in switches:
+            body = "^" + body
+        elif "/e" in switches:
+            body = body + "$"
+        parts.append(body)
+    pattern = _w95cmd_re.compile("|".join(parts), flags)
+
+    def run():
+        paths = []
+        for name in names:
+            if "/s" in switches:
+                folder, mask = _w95cmd_os.path.split(ctx.path(name))
+                for root, _d, files in _w95cmd_os.walk(folder):
+                    paths += [_w95cmd_os.path.join(root, f) for f in sorted(files, key=str.lower)
+                              if _w95cmd_fnmatch.fnmatch(f.lower(), mask.lower())]
+            else:
+                paths += [p for p in _w95cmd_expand(ctx, name) if _w95cmd_os.path.isfile(p)]
+        if not paths:
+            ctx.line("FINDSTR: Cannot open %s" % names[0], err=True)
+            return 1
+        prefix_name = len(paths) > 1 or "/s" in switches
+        matched = False
+        for p in paths:
+            shown = _w95cmd_os.path.relpath(p, ctx.cwd) if "/s" in switches else _w95cmd_os.path.basename(p)
+            for number, text in enumerate(_w95cmd_text_lines(p), 1):
+                if bool(pattern.search(text)) == ("/v" in switches):
+                    continue
+                matched = True
+                if "/m" in switches:
+                    ctx.line(shown)
+                    break
+                lead = (shown + ":" if prefix_name else "") + ("%d:" % number if "/n" in switches else "")
+                ctx.line(lead + text)
+        return 0 if matched else 1
+    return run
+
+
+def _w95cmd_c_sort(argv, ctx, raw=""):
+    switches, names = _w95cmd_switches(argv, ("/r",))
+    if len(names) != 1:
+        raise _W95CmdNotHere("sort reads the keyboard")
+
+    def run():
+        p = ctx.path(names[0])
+        if not _w95cmd_os.path.isfile(p):
+            ctx.line("The system cannot find the file specified.", err=True)
+            return 1
+        for text in sorted(_w95cmd_text_lines(p), key=str.lower, reverse="/r" in switches):
+            ctx.line(text)
+        return 0
+    return run
+
+
+def _w95cmd_c_more(argv, ctx, raw=""):
+    _switches, names = _w95cmd_switches(argv, ())
+    if len(names) != 1:
+        raise _W95CmdNotHere("more reads the keyboard")
+
+    def run():
+        p = ctx.path(names[0])
+        if not _w95cmd_os.path.isfile(p):
+            ctx.line("Cannot access file %s" % p, err=True)
+            return 1
+        for text in _w95cmd_text_lines(p):
+            ctx.line(text)
+        return 0
+    return run
+
+
+def _w95cmd_c_where(argv, ctx, raw=""):
+    switches, names = _w95cmd_switches(argv, ("/q",))
+    if not names:
+        raise _W95CmdNotHere("where")
+
+    def run():
+        exts = [""] + [e.lower() for e in (ctx.var("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e]
+        folders = [ctx.cwd] + [p for p in (ctx.var("PATH") or "").split(_w95cmd_os.pathsep) if p]
+        code = 0
+        for name in names:
+            found = []
+            for folder in folders:
+                try:
+                    entries = _w95cmd_os.listdir(folder)
+                except OSError:
+                    continue
+                for entry in sorted(entries, key=str.lower):
+                    low = entry.lower()
+                    for ext in exts:
+                        if _w95cmd_fnmatch.fnmatch(low, (name + ext).lower()) and (ext or "." in name or "*" in name):
+                            p = _w95cmd_os.path.join(folder, entry)
+                            if p not in found and _w95cmd_os.path.isfile(p):
+                                found.append(p)
+            if not found:
+                code = 1
+                if "/q" not in switches:
+                    ctx.line("INFO: Could not find files for the given pattern(s).", err=True)
+            elif "/q" not in switches:
+                for p in found:
+                    ctx.line(p)
+        return code
+    return run
+
+
+def _w95cmd_c_set(argv, ctx, raw=""):
+    text = raw.strip()
+    if text.lower().startswith(("/a", "/p")):
+        raise _W95CmdNotHere("set /a /p")
+
+    def run():
+        if not text:
+            for key in sorted(ctx.env, key=str.upper):
+                ctx.line("%s=%s" % (key, ctx.env[key]))
+            return 0
+        if "=" in text:
+            return 0                                         # (as in cmd /c: the value ends with the command)
+        hits = [k for k in sorted(ctx.env, key=str.upper) if k.upper().startswith(text.upper())]
+        if not hits:
+            ctx.line("Environment variable %s not defined" % text, err=True)
+            return 1
+        for key in hits:
+            ctx.line("%s=%s" % (key, ctx.env[key]))
+        return 0
+    return run
+
+
+def _w95cmd_c_path(argv, ctx, raw=""):
+    return lambda: (ctx.line("PATH=%s" % (ctx.var("PATH") or "")) if not raw.strip() else None, 0)[1]
+
+
+def _w95cmd_c_ver(argv, ctx, raw=""):
+    return lambda: (ctx.line(""), ctx.line("Microsoft Windows [Version %s]" % _w95cmd_windows_version()), 0)[2]
+
+
+def _w95cmd_c_date_time(argv, ctx, raw="", which="date"):
+    if [a.lower() for a in argv] != ["/t"]:
+        raise _W95CmdNotHere("date / time without /t asks for a new value")
+    fmt = "%a %d/%m/%Y" if which == "date" else "%H:%M"
+    return lambda: (ctx.line(_w95cmd_time.strftime(fmt)), 0)[1]
+
+
+def _w95cmd_c_cls(argv, ctx, raw=""):
+    return lambda: (ctx.out("\x0c"), 0)[1]
+
+
+def _w95cmd_c_exit(argv, ctx, raw=""):
+    args = [a for a in argv if a.lower() != "/b"]
+    try:
+        code = int(args[0]) if args else 0
+    except ValueError:
+        code = 0
+    return lambda: code
+
+
+def _w95cmd_c_nothing(argv, ctx, raw=""):
+    return lambda: 0
+
+
+def _w95cmd_c_hostname(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("hostname")
+    return lambda: (ctx.line(_w95cmd_socket.gethostname()), 0)[1]
+
+
+def _w95cmd_c_whoami(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("whoami")
+    import getpass
+    domain = ctx.var("USERDOMAIN") or _w95cmd_socket.gethostname()
+    return lambda: (ctx.line(("%s\\%s" % (domain, getpass.getuser())).lower()), 0)[1]
+
+
+# ═════ network commands ══════════════════════════════════════════════════════════════════════════════════════
+def _w95cmd_resolve(host):
+    try:
+        return _w95cmd_socket.gethostbyname(host)
+    except (OSError, UnicodeError):
+        return None
+
+
+def _w95cmd_c_ping(argv, ctx, raw=""):
+    count, timeout, size, ttl, host = 4, 4000, 32, None, None
+    i = 0
+    while i < len(argv):
+        low = argv[i].lower()
+        if low in ("-n", "/n", "-w", "/w", "-l", "/l", "-i", "/i") and i + 1 < len(argv):
+            try:
+                value = int(argv[i + 1])
+            except ValueError:
+                raise _W95CmdNotHere("ping")
+            if low[1] == "n":
+                count = value
+            elif low[1] == "w":
+                timeout = value
+            elif low[1] == "l":
+                size = value
+            else:
+                ttl = value
+            i += 2
+            continue
+        if low in ("-4", "/4", "-a", "/a"):
+            i += 1
+            continue
+        if low in ("-t", "/t"):                              # until it is stopped (Stop / Ctrl+C / taskkill)
+            count = None
+            i += 1
+            continue
+        if low.startswith(("-", "/")) or host is not None:  # -6, -r ...: the real ping.exe
+            raise _W95CmdNotHere("ping " + argv[i])
+        host = argv[i]
+        i += 1
+    if host is None or (count is not None and count < 1) or not 0 <= size <= 65500:
+        raise _W95CmdNotHere("ping")
+
+    def run():
+        ip = _w95cmd_resolve(host)
+        if ip is None:
+            ctx.line("Ping request could not find host %s. Please check the name and try again." % host)
+            return 1
+        ctx.line("")
+        ctx.line("Pinging %s with %d bytes of data:" % (ip if ip == host else "%s [%s]" % (host, ip), size))
+        times, received = [], 0
+        n = 0
+        while count is None or n < count:
+            n += 1
+            started = _w95cmd_time.time()
+            status, address, rtt, reply_ttl = _w95cmd_icmp(ip, timeout, size, ttl)
+            if status == 0:
+                received += 1
+                times.append(rtt)
+                ctx.line("Reply from %s: bytes=%d time%sms TTL=%d" % (address, size,
+                                                                     "<1" if rtt < 1 else "=%d" % rtt, reply_ttl))
+            elif status in (11002, 11003, 11013) and address:
+                ctx.line("Reply from %s: %s" % (address, {11002: "Destination net unreachable.",
+                                                          11003: "Destination host unreachable.",
+                                                          11013: "TTL expired in transit."}[status]))
+            elif status in (11002, 11003):
+                ctx.line("Destination host unreachable." if status == 11003 else "Destination net unreachable.")
+            elif status == 11010:
+                ctx.line("Request timed out.")
+            else:
+                ctx.line("General failure.")
+            if count is None or n < count:                   # ping.exe waits a second between the requests
+                ctx.sleep(1.0 - (_w95cmd_time.time() - started))
+        lost = count - received
+        ctx.line("")
+        ctx.line("Ping statistics for %s:" % ip)
+        ctx.line("    Packets: Sent = %d, Received = %d, Lost = %d (%d%% loss)," % (count, received, lost,
+                                                                                    lost * 100 // count))
+        if times:
+            ctx.line("Approximate round trip times in milli-seconds:")
+            ctx.line("    Minimum = %dms, Maximum = %dms, Average = %dms" % (
+                min(times), max(times), int(round(sum(times) / float(len(times))))))
+        # (ping.exe also says 0 for "Destination host unreachable"; here only a real reply is a success)
+        return 0 if received else 1
+    return run
+
+
+def _w95cmd_c_tracert(argv, ctx, raw=""):
+    hops, timeout, host = 30, 4000, None
+    i = 0
+    while i < len(argv):
+        low = argv[i].lower()
+        if low in ("-h", "/h", "-w", "/w") and i + 1 < len(argv):
+            if low[1] == "h":
+                hops = int(argv[i + 1])
+            else:
+                timeout = int(argv[i + 1])
+            i += 2
+            continue
+        if low in ("-d", "/d", "-4", "/4"):
+            i += 1
+            continue
+        if low.startswith(("-", "/")) or host is not None:
+            raise _W95CmdNotHere(argv[i])
+        host = argv[i]
+        i += 1
+    if host is None:
+        raise _W95CmdNotHere("tracert")
+
+    def run():
+        ip = _w95cmd_resolve(host)
+        if ip is None:
+            ctx.line("Unable to resolve target system name %s." % host)
+            return 1
+        ctx.line("")
+        ctx.line("Tracing route to %s over a maximum of %d hops" % (ip if ip == host else "%s [%s]" % (host, ip),
+                                                                       hops))
+        ctx.line("")
+        for ttl in range(1, hops + 1):
+            cells, address, reached = [], None, False
+            for _probe in range(3):
+                status, reply, rtt, _t = _w95cmd_icmp(ip, timeout, 32, ttl)
+                if status in (0, 11013) and reply:
+                    cells.append("%6s ms" % ("<1" if rtt < 1 else rtt))
+                    address = reply
+                    reached = reached or status == 0
+                else:
+                    cells.append("     *   ")
+            ctx.line("%3d%s%s%s  %s" % (ttl, cells[0], cells[1], cells[2], address or "Request timed out."))
+            if reached:
+                break
+        ctx.line("")
+        ctx.line("Trace complete.")
+        return 0
+    return run
+
+
+def _w95cmd_c_arp(argv, ctx, raw=""):
+    args = [a.lower() for a in argv]
+    if not args or args[0] not in ("-a", "/a", "-g", "/g") or len(args) > 2:
+        raise _W95CmdNotHere("arp")
+    only = argv[1] if len(argv) == 2 else None
+
+    def run():
+        names = {index: ip for ip, index, _m in _w95cmd_address_rows() if not ip.startswith("127.")}
+        groups = {}
+        for index, ip, mac, kind in _w95cmd_arp_rows():
+            if kind == 2 or index not in names or (only and ip != only):     # 2 = invalid, as arp.exe leaves out
+                continue
+            groups.setdefault(index, []).append((ip, mac, "static" if kind == 4 else "dynamic"))
+        if not groups:
+            ctx.line("No ARP Entries Found.")
+            return 1
+        for index in sorted(groups, key=lambda i: _w95cmd_ip_to_dword(names[i])):
+            ctx.line("")
+            ctx.line("Interface: %s --- 0x%x" % (names[index], index))
+            ctx.line("  Internet Address      Physical Address      Type")
+            for row in sorted(groups[index], key=lambda r: tuple(int(p) for p in r[0].split("."))):
+                ctx.line("  %-21s %-21s %s" % row)
+        return 0
+    return run
+
+
+def _w95cmd_c_route(argv, ctx, raw=""):
+    args = [a.lower() for a in argv]
+    if args[:1] != ["print"] or args[1:] not in (["-4"], ["/4"]):
+        raise _W95CmdNotHere("route")                      # (route print without -4 also lists IPv6)
+
+    def run():
+        names = {index: ip for ip, index, _m in _w95cmd_address_rows()}
+        rule = "=" * 75
+        ctx.line(rule)
+        ctx.line("Interface List")
+        for index in sorted(names):
+            ctx.line("%3d...........................%s" % (index, names[index]))
+        for text in (rule, "", "IPv4 Route Table", rule, "Active Routes:",
+                     "Network Destination        Netmask          Gateway       Interface  Metric"):
+            ctx.line(text)
+        for dest, mask, hop, index, kind, metric in sorted(
+                _w95cmd_route_rows(), key=lambda r: (_w95cmd_ip_to_dword(r[0]).to_bytes(4, "little"), r[5])):
+            gateway = "On-link" if kind == 3 or hop == "0.0.0.0" or hop == names.get(index) else hop
+            ctx.line("%17s %16s %16s %16s %6d" % (dest, mask, gateway, names.get(index, "?"), metric))
+        for text in (rule, "Persistent Routes:", "  None", ""):
+            ctx.line(text)
+        return 0
+    return run
+
+
+def _w95cmd_adapters():
+    """[(name, up, mac, [(ip, mask)], [ipv6], gateway)] from psutil and the route table."""
+    import psutil
+    addrs, stats = psutil.net_if_addrs(), psutil.net_if_stats()
+    gateways = {}
+    try:
+        index_of = {ip: index for ip, index, _m in _w95cmd_address_rows()}
+        default = {index: hop for dest, mask, hop, index, kind, metric in _w95cmd_route_rows()
+                   if dest == "0.0.0.0" and mask == "0.0.0.0"}
+        gateways = {ip: default[index] for ip, index in index_of.items() if index in default}
+    except Exception:
+        pass
+    result = []
+    for name, items in addrs.items():
+        mac, v4, v6 = None, [], []
+        for a in items:
+            if a.family == _w95cmd_socket.AF_INET:
+                v4.append((a.address, a.netmask or ""))
+            elif a.family == getattr(_w95cmd_socket, "AF_INET6", None):
+                v6.append(a.address)
+            elif a.family == getattr(psutil, "AF_LINK", -1):
+                mac = a.address.replace(":", "-").upper()
+        if name.lower().startswith(("loopback", "lo")) and all(ip.startswith("127.") for ip, _m in v4):
+            continue
+        up = stats[name].isup if name in stats else bool(v4)
+        gateway = next((gateways[ip] for ip, _m in v4 if ip in gateways), "")
+        result.append((name, up, mac, v4, v6, gateway))
+    return result
+
+
+def _w95cmd_c_ipconfig(argv, ctx, raw=""):
+    args = [a.lower() for a in argv]
+    if args in ([], ["/all"], ["-all"]):
+        full = bool(args)
+    elif args in (["/flushdns"], ["-flushdns"]):
+        def flush():
+            import ctypes
+            if not ctypes.windll.dnsapi.DnsFlushResolverCache():
+                raise _W95CmdStop()
+            ctx.line("")
+            ctx.line("Windows IP Configuration")
+            ctx.line("")
+            ctx.line("Successfully flushed the DNS Resolver Cache.")
+            return 0
+        return flush
+    else:
+        raise _W95CmdNotHere("ipconfig " + " ".join(argv))   # /release /renew /displaydns ... the real one
+
+    def label(text):
+        """'   IPv4 Address . . . . . . . . . . : ' as ipconfig lines them up (dots on the even columns)."""
+        field = "".join("." if i % 2 == 0 and i > len(text) else " " for i in range(len(text), 35))
+        return "   " + text + field + " : "
+
+    def run():
+        adapters = _w95cmd_adapters()
+        try:
+            host, domain, dns = _w95cmd_network_params()
+        except Exception:
+            host, domain, dns = _w95cmd_socket.gethostname(), "", []
+        ctx.line("")
+        ctx.line("Windows IP Configuration")
+        ctx.line("")
+        if full:
+            ctx.line(label("Host Name") + host)
+            ctx.line(label("Primary Dns Suffix") + domain)
+            ctx.line(label("Node Type") + "Hybrid")
+            ctx.line(label("IP Routing Enabled") + "No")
+            ctx.line("")
+        for name, up, mac, v4, v6, gateway in adapters:
+            kind = "Wireless LAN adapter" if any(w in name.lower() for w in ("wi-fi", "wifi", "wireless", "wlan")) \
+                else "Ethernet adapter"
+            ctx.line("")
+            ctx.line("%s %s:" % (kind, name))
+            ctx.line("")
+            if not up or not v4:
+                ctx.line(label("Media State") + "Media disconnected")
+                ctx.line(label("Connection-specific DNS Suffix") + "")
+                if full and mac:
+                    ctx.line(label("Description") + name)
+                    ctx.line(label("Physical Address") + mac)
+                continue
+            ctx.line(label("Connection-specific DNS Suffix") + "")
+            if full:
+                ctx.line(label("Description") + name)
+                if mac:
+                    ctx.line(label("Physical Address") + mac)
+            for address in v6:
+                ctx.line(label("Link-local IPv6 Address" if address.lower().startswith("fe80") else "IPv6 Address")
+                         + address)
+            for ip, mask in v4:
+                ctx.line(label("IPv4 Address") + ip + ("(Preferred) " if full else ""))
+                ctx.line(label("Subnet Mask") + mask)
+            ctx.line(label("Default Gateway") + gateway)
+            if full and dns:
+                ctx.line(label("DNS Servers") + dns[0])
+                for server in dns[1:]:
+                    ctx.line(" " * 41 + server)
+        return 0
+    return run
+
+
+def _w95cmd_c_getmac(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("getmac")
+
+    def run():
+        ctx.line("")
+        ctx.line("Physical Address    Transport Name")
+        ctx.line("=================== ==========================================================")
+        for name, up, mac, v4, v6, gateway in _w95cmd_adapters():
+            if mac:
+                ctx.line("%-19s %s" % (mac, name if up else "Media disconnected"))
+        return 0
+    return run
+
+
+def _w95cmd_c_netstat(argv, ctx, raw=""):
+    flags = set()
+    for a in argv:
+        if not a.startswith(("-", "/")) or any(c not in "ano" for c in a[1:].lower()):
+            raise _W95CmdNotHere("netstat " + " ".join(argv))
+        flags |= set(a[1:].lower())
+    states = {"LISTEN": "LISTENING", "NONE": "", "ESTABLISHED": "ESTABLISHED", "TIME_WAIT": "TIME_WAIT",
+              "CLOSE_WAIT": "CLOSE_WAIT", "SYN_SENT": "SYN_SENT", "SYN_RECV": "SYN_RECEIVED", "FIN_WAIT1": "FIN_WAIT_1",
+              "FIN_WAIT2": "FIN_WAIT_2", "LAST_ACK": "LAST_ACK", "CLOSING": "CLOSING", "DELETE_TCB": "DELETE_TCB"}
+
+    def run():
+        import psutil
+        rows = []
+        for c in psutil.net_connections(kind="inet"):
+            tcp = c.type == _w95cmd_socket.SOCK_STREAM
+            state = states.get(c.status, c.status)
+            if "a" not in flags and (not tcp or state in ("LISTENING", "")):
+                continue
+            v6 = c.family == getattr(_w95cmd_socket, "AF_INET6", None)
+
+            def fmt(address, empty):
+                if not address:
+                    return empty
+                ip = "[%s]" % address.ip if v6 else address.ip
+                return "%s:%d" % (ip, address.port)
+            local = fmt(c.laddr, "")
+            remote = fmt(c.raddr, ("[::]:0" if v6 else "0.0.0.0:0") if tcp else "*:*")
+            rows.append(("TCP" if tcp else "UDP", local, remote, state if tcp else "", c.pid or 0, v6))
+        rows.sort(key=lambda r: (r[0] != "TCP", r[5], r[1]))
+        ctx.line("")
+        ctx.line("Active Connections")
+        ctx.line("")
+        ctx.line("  Proto  Local Address          Foreign Address        State" + ("           PID" if "o" in flags else ""))
+        for proto, local, remote, state, pid, v6 in rows:
+            line = "  %-6s %-22s %-22s %-15s" % (proto, local, remote, state)
+            ctx.line((line + " %s" % pid) if "o" in flags else line.rstrip())
+        return 0
+    return run
+
+
+def _w95cmd_dns_query(server, name, qtype, timeout=2.0):
+    """A small DNS query over UDP -> [addresses] (qtype 1 = A, 28 = AAAA)."""
+    import random
+    ident = random.randint(0, 65535)
+    question = b"".join(bytes([len(p)]) + p.encode("idna") for p in name.rstrip(".").split(".")) + b"\x00"
+    packet = _w95cmd_struct.pack(">HHHHHH", ident, 0x0100, 1, 0, 0, 0) + question + _w95cmd_struct.pack(">HH", qtype, 1)
+    sock = _w95cmd_socket.socket(_w95cmd_socket.AF_INET, _w95cmd_socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(packet, (server, 53))
+        data, _peer = sock.recvfrom(4096)
+    finally:
+        sock.close()
+    _id, flags, qd, an, _ns, _ar = _w95cmd_struct.unpack(">HHHHHH", data[:12])
+    if flags & 0x000F == 3:
+        raise LookupError("Non-existent domain")
+    pos = 12
+
+    def skip_name(p):
+        while True:
+            length = data[p]
+            if length == 0:
+                return p + 1
+            if length & 0xC0 == 0xC0:
+                return p + 2
+            p += length + 1
+    for _q in range(qd):
+        pos = skip_name(pos) + 4
+    found = []
+    for _a in range(an):
+        pos = skip_name(pos)
+        rtype, _cls, _ttl, length = _w95cmd_struct.unpack(">HHIH", data[pos:pos + 10])
+        pos += 10
+        value = data[pos:pos + length]
+        pos += length
+        if rtype == 1 and qtype == 1:
+            found.append(_w95cmd_socket.inet_ntoa(value))
+        elif rtype == 28 and qtype == 28:
+            found.append(_w95cmd_socket.inet_ntop(_w95cmd_socket.AF_INET6, value))
+    return found
+
+
+def _w95cmd_c_nslookup(argv, ctx, raw=""):
+    if not argv or len(argv) > 2 or any(a.startswith("-") for a in argv):
+        raise _W95CmdNotHere("nslookup")                   # (interactive nslookup or options: the real one)
+    name, server = argv[0], argv[1] if len(argv) == 2 else None
+
+    def run():
+        dns_server = server
+        if dns_server is None:
+            try:
+                dns_server = (_w95cmd_network_params()[2] or [None])[0]
+            except Exception:
+                dns_server = None
+        if dns_server:
+            try:
+                server_name = _w95cmd_socket.gethostbyaddr(dns_server)[0]
+            except (OSError, UnicodeError):
+                server_name = "UnKnown"
+            ctx.line("Server:  %s" % server_name)
+            ctx.line("Address:  %s" % dns_server)
+            ctx.line("")
+        reverse = _w95cmd_re.match(r"^\d+\.\d+\.\d+\.\d+$", name)
+        try:
+            if reverse:
+                answer_name, addresses = _w95cmd_socket.gethostbyaddr(name)[0], [name]
+            elif server:
+                addresses = _w95cmd_dns_query(server, name, 28) + _w95cmd_dns_query(server, name, 1)
+                answer_name = name
+                if not addresses:
+                    raise LookupError("No answer")
+            else:
+                infos = _w95cmd_socket.getaddrinfo(name, None)
+                addresses = []
+                for family in (getattr(_w95cmd_socket, "AF_INET6", None), _w95cmd_socket.AF_INET):
+                    for info in infos:
+                        if info[0] == family and info[4][0] not in addresses:
+                            addresses.append(info[4][0])
+                answer_name = name
+        except (OSError, LookupError, UnicodeError):
+            ctx.line("*** %s can't find %s: Non-existent domain" % (server_name if dns_server else "UnKnown", name),
+                     err=True)
+            return 1
+        if not reverse:
+            ctx.line("Non-authoritative answer:")
+        ctx.line("Name:    %s" % answer_name)
+        if len(addresses) == 1:
+            ctx.line("Address:  %s" % addresses[0])
+        else:
+            ctx.line("Addresses:  %s" % addresses[0])
+            for a in addresses[1:]:
+                ctx.line("          %s" % a)
+        ctx.line("")
+        return 0
+    return run
+
+
+# ═════ processes and system ══════════════════════════════════════════════════════════════════════════════════
+def _w95cmd_c_tasklist(argv, ctx, raw=""):
+    filters, csv, header = [], False, True
+    i = 0
+    while i < len(argv):
+        low = argv[i].lower()
+        if low == "/fi" and i + 1 < len(argv):
+            m = _w95cmd_re.match(r'^\s*(imagename|pid)\s+(eq|ne)\s+(.+?)\s*$', argv[i + 1].strip('"'), _w95cmd_re.I)
+            if not m:
+                raise _W95CmdNotHere("tasklist /fi")
+            filters.append((m.group(1).lower(), m.group(2).lower(), m.group(3)))
+            i += 2
+        elif low == "/fo" and i + 1 < len(argv):
+            fmt = argv[i + 1].lower()
+            if fmt not in ("table", "csv"):
+                raise _W95CmdNotHere("tasklist /fo list")
+            csv = fmt == "csv"
+            i += 2
+        elif low == "/nh":
+            header = False
+            i += 1
+        else:
+            raise _W95CmdNotHere("tasklist " + argv[i])
+
+    def run():
+        import psutil
+        rows = []
+        for p in psutil.process_iter(["pid", "name", "memory_info"]):
+            name = p.info["name"] or ("System Idle Process" if p.info["pid"] == 0 else "System")
+            pid = p.info["pid"]
+            ok = True
+            for field, op, value in filters:
+                hit = (_w95cmd_fnmatch.fnmatch(name.lower(), value.lower()) if field == "imagename"
+                       else str(pid) == value)
+                ok = ok and (hit if op == "eq" else not hit)
+            if not ok:
+                continue
+            mem = p.info["memory_info"].rss // 1024 if p.info["memory_info"] else 0
+            session = _w95cmd_session(pid)
+            rows.append((name, pid, "Services" if session == 0 else "Console", session, mem))
+        if not rows:
+            ctx.line("INFO: No tasks are running which match the specified criteria.")
+            return 0
+        if csv:
+            if header:
+                ctx.line('"Image Name","PID","Session Name","Session#","Mem Usage"')
+            for name, pid, sname, session, mem in rows:
+                ctx.line('"%s","%d","%s","%d","%s K"' % (name, pid, sname, session, _w95cmd_n(mem)))
+            return 0
+        if header:
+            ctx.line("")
+            ctx.line("Image Name                     PID Session Name        Session#    Mem Usage")
+            ctx.line("========================= ======== ================ =========== ============")
+        for name, pid, sname, session, mem in rows:
+            ctx.line("%-25s %8d %-16s %11d %12s" % (name[:25], pid, sname, session, _w95cmd_n(mem) + " K"))
+        return 0
+    return run
+
+
+def _w95cmd_c_taskkill(argv, ctx, raw=""):
+    pids, names, force, tree = [], [], False, False
+    i = 0
+    while i < len(argv):
+        low = argv[i].lower()
+        if low == "/pid" and i + 1 < len(argv):
+            try:
+                pids.append(int(argv[i + 1]))
+            except ValueError:
+                raise _W95CmdNotHere("taskkill")
+            i += 2
+        elif low == "/im" and i + 1 < len(argv):
+            names.append(argv[i + 1].strip('"'))
+            i += 2
+        elif low == "/f":
+            force = True
+            i += 1
+        elif low == "/t":
+            tree = True
+            i += 1
+        else:
+            raise _W95CmdNotHere("taskkill " + argv[i])
+    fake = [p for p in pids if p in _W95CMD_PROCESSES]
+    if not force and (names or len(fake) < len(pids)):
+        raise _W95CmdNeeds("TASKKILL needs /F here: TASKKILL /F /PID number  or  TASKKILL /F /IM name")
+    if not pids and not names:
+        raise _W95CmdNotHere("taskkill")
+
+    def run():
+        code = 0
+        for pid in fake:                                     # a command emulated here: just stop it
+            _W95CMD_PROCESSES[pid].kill()
+            ctx.line("SUCCESS: The process with PID %d has been terminated." % pid)
+        import psutil
+        targets = []
+        for pid in pids:
+            if pid in fake:
+                continue
+            try:
+                targets.append(psutil.Process(pid))
+            except psutil.Error:
+                ctx.line('ERROR: The process "%d" not found.' % pid, err=True)
+                code = 128
+        for name in names:
+            hits = [p for p in psutil.process_iter(["name"])
+                    if p.info["name"] and _w95cmd_fnmatch.fnmatch(p.info["name"].lower(), name.lower())]
+            if not hits:
+                ctx.line('ERROR: The process "%s" not found.' % name, err=True)
+                code = 128
+            targets += hits
+        for proc in targets:
+            children = []
+            if tree:
+                try:
+                    children = proc.children(recursive=True)
+                except psutil.Error:
+                    children = []
+            for child in reversed(children):
+                try:
+                    child.kill()
+                    ctx.line("SUCCESS: The process with PID %d (child process of PID %d) has been terminated."
+                             % (child.pid, proc.pid))
+                except psutil.Error:
+                    pass
+            try:
+                name = proc.name()
+                proc.kill()
+                ctx.line('SUCCESS: The process "%s" with PID %d has been terminated.' % (name, proc.pid) if names
+                         else "SUCCESS: The process with PID %d has been terminated." % proc.pid)
+            except psutil.AccessDenied:
+                ctx.line("ERROR: The process with PID %d could not be terminated.\r\nReason: Access is denied."
+                         % proc.pid, err=True)
+                code = 1
+            except psutil.Error:
+                ctx.line('ERROR: The process "%d" not found.' % proc.pid, err=True)
+                code = 128
+        return code
+    return run
+
+
+def _w95cmd_c_systeminfo(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("systeminfo")
+
+    def run():
+        import platform
+        import psutil
+        key = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+        bios = r"HARDWARE\DESCRIPTION\System\BIOS"
+        vm = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+        boot = _w95cmd_datetime.datetime.fromtimestamp(psutil.boot_time())
+
+        def row(name, value):
+            ctx.line("%-27s%s" % (name + ":", value if value is not None else "N/A"))
+        row("Host Name", _w95cmd_socket.gethostname().upper())
+        row("OS Name", _w95cmd_registry(key, "ProductName") or platform.platform())
+        row("OS Version", _w95cmd_windows_version())
+        row("Registered Owner", _w95cmd_registry(key, "RegisteredOwner"))
+        row("System Boot Time", boot.strftime("%d/%m/%Y, %H:%M:%S"))
+        row("System Manufacturer", _w95cmd_registry(bios, "SystemManufacturer"))
+        row("System Model", _w95cmd_registry(bios, "SystemProductName"))
+        row("System Type", platform.machine() + "-based PC")
+        row("Processor(s)", "%d Processor(s) Installed." % (psutil.cpu_count(logical=False) or 1))
+        ctx.line("%27s[01]: %s" % ("", _w95cmd_registry(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                                                      "ProcessorNameString") or platform.processor()))
+        row("BIOS Version", "%s %s" % (_w95cmd_registry(bios, "BIOSVendor") or "", _w95cmd_registry(bios, "BIOSVersion")
+                                       or ""))
+        row("Windows Directory", ctx.var("SystemRoot"))
+        row("Total Physical Memory", "%s MB" % _w95cmd_n(vm.total // 1048576))
+        row("Available Physical Memory", "%s MB" % _w95cmd_n(vm.available // 1048576))
+        row("Virtual Memory: Max Size", "%s MB" % _w95cmd_n((vm.total + swap.total) // 1048576))
+        row("Domain", ctx.var("USERDNSDOMAIN") or ctx.var("USERDOMAIN"))
+        row("Logon Server", ctx.var("LOGONSERVER"))
+        return 0
+    return run
+
+
+# ═════ PowerShell cmdlets ════════════════════════════════════════════════════════════════════════════════════
+def _w95cmd_ps_params(argv, positional, switches=(), named=()):
+    """-Name value / -Switch / positional values -> {lower name: value}; an unknown parameter: not emulated."""
+    names = {n.lower(): n.lower() for n in tuple(positional) + tuple(named)}
+    values, pos, i = {}, list(positional), 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg.startswith("-") and len(arg) > 1 and not _w95cmd_re.match(r"^-\d", arg):
+            key = arg[1:].rstrip(":").lower()
+            match = [n for n in tuple(names) + tuple(s.lower() for s in switches) if n.startswith(key)]
+            if len(match) != 1:
+                raise _W95CmdNotHere(arg)
+            if match[0] in (s.lower() for s in switches):
+                values[match[0]] = True
+                i += 1
+                continue
+            if i + 1 >= len(argv):
+                raise _W95CmdNotHere(arg)
+            values[match[0]] = argv[i + 1]
+            if match[0] in pos:
+                pos.remove(match[0])
+            i += 2
+            continue
+        if not pos:
+            raise _W95CmdNotHere(arg)
+        values[pos.pop(0).lower()] = arg
+        i += 1
+    return values
+
+
+def _w95cmd_ps_error(ctx, command, text):
+    ctx.line("%s : %s" % (command, text), err=True)
+    return 1
+
+
+def _w95cmd_ps_location(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("Get-Location")
+    return lambda: ([ctx.line(t) for t in ("", "Path", "----", ctx.cwd, "", "")], 0)[1]
+
+
+def _w95cmd_ps_mode(path):
+    is_dir = _w95cmd_os.path.isdir(path)
+    try:
+        attrs = getattr(_w95cmd_os.stat(path), "st_file_attributes", 0) or 0
+    except OSError:
+        attrs = 0
+    return ("d" if is_dir else "-") + ("a" if attrs & 32 or not is_dir else "-") + ("r" if attrs & 1 else "-") + \
+        ("h" if attrs & 2 else "-") + ("s" if attrs & 4 else "-") + "-"
+
+
+def _w95cmd_ps_items_table(ctx, folder, paths):
+    ctx.line("")
+    ctx.line("")
+    ctx.line("    Directory: %s" % folder)
+    ctx.line("")
+    ctx.line("")
+    ctx.line("Mode                 LastWriteTime         Length Name")
+    ctx.line("----                 -------------         ------ ----")
+    for p in paths:
+        try:
+            st = _w95cmd_os.stat(p)
+        except OSError:
+            continue
+        when = _w95cmd_time.strftime("%d/%m/%Y     %H:%M", _w95cmd_time.localtime(st.st_mtime))
+        length = "" if _w95cmd_os.path.isdir(p) else str(st.st_size)
+        ctx.line("%-6s %24s %14s %s" % (_w95cmd_ps_mode(p), when, length, _w95cmd_os.path.basename(p)))
+    ctx.line("")
+
+
+def _w95cmd_ps_childitem(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["path"], switches=("force", "recurse", "file", "directory"))
+
+    def run():
+        target = ctx.path(params.get("path", "."))
+        paths = _w95cmd_expand(ctx, params.get("path", ".")) if not _w95cmd_os.path.isdir(target) else \
+            [_w95cmd_os.path.join(target, n) for n in sorted(_w95cmd_os.listdir(target), key=str.lower)]
+        if not paths and not _w95cmd_os.path.isdir(target):
+            return _w95cmd_ps_error(ctx, "Get-ChildItem", "Cannot find path '%s' because it does not exist." % target)
+        groups = {}
+        stack = list(paths)
+        while stack:
+            p = stack.pop(0)
+            if not params.get("force") and _w95cmd_is_hidden(p):
+                continue
+            is_dir = _w95cmd_os.path.isdir(p)
+            if (params.get("file") and is_dir) or (params.get("directory") and not is_dir):
+                pass
+            else:
+                groups.setdefault(_w95cmd_os.path.dirname(p), []).append(p)
+            if params.get("recurse") and is_dir:
+                try:
+                    stack += [_w95cmd_os.path.join(p, n) for n in sorted(_w95cmd_os.listdir(p), key=str.lower)]
+                except OSError:
+                    pass
+        for folder, items in groups.items():
+            items.sort(key=lambda x: (not _w95cmd_os.path.isdir(x), _w95cmd_os.path.basename(x).lower()))
+            _w95cmd_ps_items_table(ctx, folder, items)
+        return 0
+    return run
+
+
+def _w95cmd_ps_content(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["path"], named=("totalcount", "tail", "encoding"))
+    if "path" not in params:
+        raise _W95CmdNotHere("Get-Content")
+
+    def run():
+        p = ctx.path(params["path"])
+        if not _w95cmd_os.path.isfile(p):
+            return _w95cmd_ps_error(ctx, "Get-Content", "Cannot find path '%s' because it does not exist." % p)
+        lines = _w95cmd_text_lines(p)
+        if "totalcount" in params:
+            lines = lines[:int(params["totalcount"])]
+        if "tail" in params:
+            lines = lines[-int(params["tail"]):]
+        for text in lines:
+            ctx.line(text)
+        return 0
+    return run
+
+
+def _w95cmd_ps_process(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["name"], named=("id",))
+
+    def run():
+        import psutil
+        rows = []
+        for p in psutil.process_iter(["pid", "name", "memory_info", "cpu_times", "num_handles"]
+                                     if _w95cmd_os.name == "nt" else ["pid", "name", "memory_info", "cpu_times"]):
+            name = _w95cmd_os.path.splitext(p.info["name"] or "Idle")[0]
+            if "name" in params and not _w95cmd_fnmatch.fnmatch(name.lower(), params["name"].lower()):
+                continue
+            if "id" in params and str(p.info["pid"]) != str(params["id"]):
+                continue
+            mem = p.info["memory_info"]
+            cpu = p.info["cpu_times"]
+            rows.append((p.info.get("num_handles") or 0, (mem.vms if mem else 0) // 1024, (mem.rss if mem else 0) // 1024,
+                         (cpu.user + cpu.system) if cpu else 0.0, p.info["pid"], _w95cmd_session(p.info["pid"]), name))
+        if not rows:
+            what = params.get("name") or params.get("id")
+            return _w95cmd_ps_error(ctx, "Get-Process", "Cannot find a process with the name \"%s\". Verify the process "
+                                    "name and call the cmdlet again." % what)
+        rows.sort(key=lambda r: r[6].lower())
+        ctx.line("")
+        ctx.line("Handles  NPM(K)    PM(K)      WS(K)     CPU(s)     Id  SI ProcessName")
+        ctx.line("-------  ------    -----      -----     ------     --  -- -----------")
+        for handles, pm, ws, cpu, pid, si, name in rows:
+            ctx.line("%7d %7d %8d %10d %10.2f %6d %3d %s" % (handles, 0, pm, ws, cpu, pid, si, name))
+        ctx.line("")
+        return 0
+    return run
+
+
+def _w95cmd_ps_stop_process(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["name"], switches=("force",), named=("id",))
+    if "name" not in params and "id" not in params:
+        raise _W95CmdNotHere("Stop-Process")
+
+    def run():
+        import psutil
+        if "id" in params:
+            pid = int(params["id"])
+            if pid in _W95CMD_PROCESSES:
+                _W95CMD_PROCESSES[pid].kill()
+                return 0
+            try:
+                psutil.Process(pid).kill()
+                return 0
+            except psutil.Error:
+                return _w95cmd_ps_error(ctx, "Stop-Process", "Cannot find a process with the process identifier %d."
+                                        % pid)
+        hits = [p for p in psutil.process_iter(["name"]) if p.info["name"] and _w95cmd_fnmatch.fnmatch(
+            _w95cmd_os.path.splitext(p.info["name"])[0].lower(), params["name"].lower())]
+        if not hits:
+            return _w95cmd_ps_error(ctx, "Stop-Process", "Cannot find a process with the name \"%s\"." % params["name"])
+        for p in hits:
+            try:
+                p.kill()
+            except psutil.Error:
+                pass
+        return 0
+    return run
+
+
+def _w95cmd_ps_service(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["name"])
+
+    def run():
+        import psutil
+        if not hasattr(psutil, "win_service_iter"):
+            raise _W95CmdStop()
+        rows = []
+        for s in psutil.win_service_iter():
+            try:
+                name, display, status = s.name(), s.display_name(), s.status()
+            except psutil.Error:
+                continue
+            if "name" in params and not (_w95cmd_fnmatch.fnmatch(name.lower(), params["name"].lower()) or
+                                         _w95cmd_fnmatch.fnmatch(display.lower(), params["name"].lower())):
+                continue
+            rows.append(({"running": "Running", "stopped": "Stopped", "paused": "Paused"}.get(status, status.title()),
+                         name, display))
+        if not rows:
+            return _w95cmd_ps_error(ctx, "Get-Service", "Cannot find any service with service name '%s'."
+                                    % params.get("name"))
+        rows.sort(key=lambda r: r[1].lower())
+        ctx.line("")
+        ctx.line("Status   Name               DisplayName")
+        ctx.line("------   ----               -----------")
+        for status, name, display in rows:
+            ctx.line("%-8s %-18s %s" % (status, name[:18], display))
+        ctx.line("")
+        return 0
+    return run
+
+
+def _w95cmd_ps_date(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("Get-Date")
+    return lambda: (ctx.line(""), ctx.line(_w95cmd_time.strftime("%A, %B %d, %Y %I:%M:%S %p").replace(" 0", " ")),
+                    ctx.line(""), 0)[3]
+
+
+def _w95cmd_ps_echo(argv, ctx, raw=""):
+    return lambda: ([ctx.line(a) for a in argv], 0)[1]
+
+
+def _w95cmd_ps_test_connection(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["computername"], switches=("quiet",), named=("count", "buffersize"))
+    if "computername" not in params:
+        raise _W95CmdNotHere("Test-Connection")
+    count, size = int(params.get("count", 4)), int(params.get("buffersize", 32))
+
+    def run():
+        host = params["computername"]
+        ip = _w95cmd_resolve(host)
+        replies = 0
+        if not params.get("quiet"):
+            ctx.line("")
+            ctx.line("Source        Destination     IPV4Address      IPV6Address                              Bytes    Time(ms)")
+            ctx.line("------        -----------     -----------      -----------                              -----    --------")
+        for n in range(count):
+            started = _w95cmd_time.time()
+            status = None
+            if ip:
+                status, _addr, rtt, _ttl = _w95cmd_icmp(ip, 4000, size)
+            if status == 0:
+                replies += 1
+                if not params.get("quiet"):
+                    ctx.line("%-13s %-15s %-16s %-40s %-8d %d" % (_w95cmd_socket.gethostname()[:13], host[:15], ip, "",
+                                                                   size, rtt))
+            elif not params.get("quiet"):
+                ctx.line("Test-Connection : Testing connection to computer '%s' failed: %s" % (
+                    host, "Error due to lack of resources" if ip else "No such host is known"), err=True)
+            if n < count - 1:
+                ctx.sleep(1.0 - (_w95cmd_time.time() - started))
+        if params.get("quiet"):
+            ctx.line("True" if replies else "False")
+        return 0 if replies else 1
+    return run
+
+
+def _w95cmd_ps_test_netconnection(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["computername", "port"], switches=("informationlevel",))
+    if "computername" not in params:
+        raise _W95CmdNotHere("Test-NetConnection")
+
+    def run():
+        host = params["computername"]
+        ip = _w95cmd_resolve(host)
+        if ip is None:
+            ctx.line("WARNING: Name resolution of %s failed" % host)
+        source = ""
+        try:
+            probe = _w95cmd_socket.socket(_w95cmd_socket.AF_INET, _w95cmd_socket.SOCK_DGRAM)
+            probe.connect((ip or "8.8.8.8", 80))
+            source = probe.getsockname()[0]
+            probe.close()
+        except OSError:
+            pass
+        alias = next((name for name, up, mac, v4, v6, gw in _w95cmd_adapters() if any(a == source for a, _m in v4)), "")
+        ctx.line("")
+        ctx.line("ComputerName     : %s" % host)
+        ctx.line("RemoteAddress    : %s" % (ip or ""))
+        if "port" in params:
+            ok = False
+            if ip:
+                try:
+                    with _w95cmd_socket.create_connection((ip, int(params["port"])), timeout=3):
+                        ok = True
+                except OSError:
+                    ok = False
+            ctx.line("RemotePort       : %s" % params["port"])
+            ctx.line("InterfaceAlias   : %s" % alias)
+            ctx.line("SourceAddress    : %s" % source)
+            ctx.line("TcpTestSucceeded : %s" % ok)
+        else:
+            status, _a, rtt, _t = _w95cmd_icmp(ip, 4000) if ip else (None, None, None, None)
+            ok = status == 0
+            ctx.line("InterfaceAlias         : %s" % alias)
+            ctx.line("SourceAddress          : %s" % source)
+            ctx.line("PingSucceeded          : %s" % ok)
+            if ok:
+                ctx.line("PingReplyDetails (RTT) : %d ms" % rtt)
+        ctx.line("")
+        return 0 if ok else 1
+    return run
+
+
+def _w95cmd_ps_resolve_dns(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["name"], named=("server", "type"))
+    if "name" not in params:
+        raise _W95CmdNotHere("Resolve-DnsName")
+
+    def run():
+        name = params["name"]
+        try:
+            if "server" in params:
+                rows = [("AAAA", a) for a in _w95cmd_dns_query(params["server"], name, 28)] + \
+                       [("A", a) for a in _w95cmd_dns_query(params["server"], name, 1)]
+            else:
+                rows = []
+                for info in _w95cmd_socket.getaddrinfo(name, None):
+                    row = ("AAAA" if info[0] == getattr(_w95cmd_socket, "AF_INET6", None) else "A", info[4][0])
+                    if row not in rows:
+                        rows.append(row)
+            if "type" in params:
+                rows = [r for r in rows if r[0] == params["type"].upper()]
+            if not rows:
+                raise LookupError()
+        except (OSError, LookupError, UnicodeError):
+            return _w95cmd_ps_error(ctx, "Resolve-DnsName", "%s : DNS name does not exist" % name)
+        ctx.line("")
+        ctx.line("Name                                           Type   TTL   Section    IPAddress")
+        ctx.line("----                                           ----   ---   -------    ---------")
+        for kind, address in rows:
+            ctx.line("%-46s %-6s %-5s %-10s %s" % (name[:46], kind, "", "Answer", address))
+        ctx.line("")
+        return 0
+    return run
+
+
+def _w95cmd_ps_netadapter(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("Get-NetAdapter")
+
+    def run():
+        import psutil
+        stats = psutil.net_if_stats()
+        ctx.line("")
+        ctx.line("Name                      Status       MacAddress             LinkSpeed")
+        ctx.line("----                      ------       ----------             ---------")
+        for name, up, mac, v4, v6, gw in _w95cmd_adapters():
+            speed = stats[name].speed if name in stats else 0
+            ctx.line("%-25s %-12s %-22s %s" % (name[:25], "Up" if up else "Disconnected", mac or "",
+                                               ("%d Mbps" % speed) if speed else "0 bps"))
+        ctx.line("")
+        return 0
+    return run
+
+
+def _w95cmd_ps_netipaddress(argv, ctx, raw=""):
+    if argv:
+        raise _W95CmdNotHere("Get-NetIPAddress")
+
+    def run():
+        for name, up, mac, v4, v6, gw in _w95cmd_adapters():
+            for ip, mask in v4:
+                prefix = sum(bin(int(p)).count("1") for p in mask.split(".")) if mask else 0
+                for label, value in (("IPAddress", ip), ("InterfaceAlias", name), ("AddressFamily", "IPv4"),
+                                     ("PrefixLength", prefix), ("AddressState", "Preferred" if up else "Deprecated")):
+                    ctx.line("%-17s : %s" % (label, value))
+                ctx.line("")
+        return 0
+    return run
+
+
+def _w95cmd_ps_new_item(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["path"], switches=("force",), named=("itemtype", "name", "value"))
+    if "path" not in params and "name" not in params:
+        raise _W95CmdNotHere("New-Item")
+    kind = params.get("itemtype", "file").lower()
+    if kind not in ("file", "directory"):
+        raise _W95CmdNotHere("New-Item -ItemType " + kind)
+
+    def run():
+        p = ctx.path(params.get("path", "."))
+        if "name" in params:
+            p = _w95cmd_os.path.join(p, params["name"])
+        if _w95cmd_os.path.exists(p) and not params.get("force"):
+            return _w95cmd_ps_error(ctx, "New-Item", "An item with the specified name %s already exists." % p)
+        try:
+            if kind == "directory":
+                _w95cmd_os.makedirs(p, exist_ok=True)
+            else:
+                with open(p, "w", encoding="utf-8") as handle:
+                    handle.write(params.get("value", ""))
+        except OSError as exc:
+            return _w95cmd_ps_error(ctx, "New-Item", exc.strerror or str(exc))
+        _w95cmd_ps_items_table(ctx, _w95cmd_os.path.dirname(p), [p])
+        return 0
+    return run
+
+
+def _w95cmd_ps_remove_item(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["path"], switches=("recurse", "force"))
+    if "path" not in params:
+        raise _W95CmdNotHere("Remove-Item")
+    full = ctx.path(params["path"])
+    if _w95cmd_os.path.isdir(full) and _w95cmd_os.listdir(full) and not params.get("recurse"):
+        raise _W95CmdNeeds("Remove-Item of a folder that is not empty needs -Recurse here: Remove-Item %s -Recurse"
+                           % params["path"])
+
+    def run():
+        paths = _w95cmd_expand(ctx, params["path"])
+        if not paths:
+            return _w95cmd_ps_error(ctx, "Remove-Item", "Cannot find path '%s' because it does not exist." % full)
+        for p in paths:
+            try:
+                if _w95cmd_os.path.isdir(p):
+                    _w95cmd_shutil.rmtree(p) if params.get("recurse") else _w95cmd_os.rmdir(p)
+                else:
+                    if params.get("force"):
+                        _w95cmd_os.chmod(p, 0o666)
+                    _w95cmd_os.remove(p)
+            except OSError as exc:
+                return _w95cmd_ps_error(ctx, "Remove-Item", exc.strerror or str(exc))
+        return 0
+    return run
+
+
+def _w95cmd_ps_copy_move(argv, ctx, raw="", move=False):
+    params = _w95cmd_ps_params(argv, ["path", "destination"], switches=("recurse", "force"))
+    if "path" not in params or "destination" not in params:
+        raise _W95CmdNotHere("Copy-Item / Move-Item")
+    command = "Move-Item" if move else "Copy-Item"
+
+    def run():
+        paths = _w95cmd_expand(ctx, params["path"])
+        if not paths:
+            return _w95cmd_ps_error(ctx, command, "Cannot find path '%s' because it does not exist."
+                                    % ctx.path(params["path"]))
+        dest = ctx.path(params["destination"])
+        for p in paths:
+            to = _w95cmd_os.path.join(dest, _w95cmd_os.path.basename(p)) if _w95cmd_os.path.isdir(dest) else dest
+            try:
+                if move:
+                    _w95cmd_shutil.move(p, to)
+                elif _w95cmd_os.path.isdir(p):
+                    if not params.get("recurse"):
+                        _w95cmd_os.makedirs(to, exist_ok=True)
+                    else:
+                        _w95cmd_shutil.copytree(p, to, dirs_exist_ok=True)
+                else:
+                    _w95cmd_shutil.copy2(p, to)
+            except OSError as exc:
+                return _w95cmd_ps_error(ctx, command, exc.strerror or str(exc))
+        return 0
+    return run
+
+
+def _w95cmd_ps_rename_item(argv, ctx, raw=""):
+    params = _w95cmd_ps_params(argv, ["path", "newname"], switches=("force",))
+    if "path" not in params or "newname" not in params:
+        raise _W95CmdNotHere("Rename-Item")
+
+    def run():
+        p = ctx.path(params["path"])
+        if not _w95cmd_os.path.exists(p):
+            return _w95cmd_ps_error(ctx, "Rename-Item", "Cannot rename because item at '%s' does not exist." % p)
+        try:
+            _w95cmd_os.rename(p, _w95cmd_os.path.join(_w95cmd_os.path.dirname(p), params["newname"]))
+        except OSError as exc:
+            return _w95cmd_ps_error(ctx, "Rename-Item", exc.strerror or str(exc))
+        return 0
+    return run
+
+
+# ═════ web requests: curl, Invoke-WebRequest, Invoke-RestMethod (Python's urllib, like the API Checker) ════════
+def _w95cmd_http(url, method=None, data=None, headers=None, timeout=30, insecure=False):
+    """-> (status, reason, headers [(name, value)], body bytes, final url); urllib errors are raised."""
+    import ssl
+    import urllib.error
+    import urllib.request
+    if "://" not in url:
+        url = "http://" + url
+    body = data.encode("utf-8") if isinstance(data, str) else data
+    request = urllib.request.Request(url, data=body, method=method or ("POST" if body is not None else "GET"))
+    request.add_header("User-Agent", "Bitpack/1.0")
+    for name, value in (headers or []):
+        request.add_header(name, value)
+    context = ssl._create_unverified_context() if insecure else None
+    try:
+        with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+            return response.status, response.reason, list(response.getheaders()), response.read(), response.geturl()
+    except urllib.error.HTTPError as exc:                    # 404, 500 ...: still an answer, with its body
+        return exc.code, exc.reason, list(exc.headers.items()) if exc.headers else [], exc.read(), url
+
+
+def _w95cmd_http_error(exc):
+    """A urllib error -> (curl exit code, curl message)."""
+    import socket
+    reason = getattr(exc, "reason", exc)
+    if isinstance(reason, socket.timeout) or isinstance(exc, socket.timeout) or "timed out" in str(reason):
+        return 28, "Operation timed out"
+    if isinstance(reason, socket.gaierror):
+        return 6, "Could not resolve host"
+    if isinstance(reason, ConnectionRefusedError):
+        return 7, "Failed to connect: Connection refused"
+    return 7, str(reason)
+
+
+def _w95cmd_c_curl(argv, ctx, raw=""):
+    method, data, headers, output, head, include, insecure, timeout, url = None, None, [], None, False, False, \
+        False, 30, None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        value = argv[i + 1] if i + 1 < len(argv) else None
+        if a in ("-X", "--request") and value:
+            method, i = value.upper(), i + 2
+        elif a in ("-d", "--data", "--data-raw", "--data-binary") and value is not None:
+            data, i = value, i + 2
+        elif a in ("-H", "--header") and value and ":" in value:
+            name, _, text = value.partition(":")
+            headers.append((name.strip(), text.strip()))
+            i += 2
+        elif a in ("-o", "--output") and value:
+            output, i = value, i + 2
+        elif a in ("-m", "--max-time") and value:
+            timeout, i = float(value), i + 2
+        elif a in ("-A", "--user-agent") and value:
+            headers.append(("User-Agent", value))
+            i += 2
+        elif a in ("-u", "--user") and value:
+            import base64
+            headers.append(("Authorization", "Basic " + base64.b64encode(value.encode()).decode()))
+            i += 2
+        elif a in ("-I", "--head"):
+            head, method, i = True, "HEAD", i + 1
+        elif a in ("-i", "--include"):
+            include, i = True, i + 1
+        elif a in ("-k", "--insecure"):
+            insecure, i = True, i + 1
+        elif a in ("-s", "--silent", "-S", "--show-error", "-L", "--location", "-sS", "-sL", "-Ls", "-v"):
+            i += 1
+        elif a.startswith("-") or url is not None:
+            raise _W95CmdNotHere("curl " + a)
+        else:
+            url, i = a, i + 1
+    if url is None:
+        raise _W95CmdNotHere("curl: no URL")
+
+    def run():
+        try:
+            status, reason, hdrs, body, _final = _w95cmd_http(url, method, data, headers, timeout, insecure)
+        except Exception as exc:
+            code, text = _w95cmd_http_error(exc)
+            ctx.line("curl: (%d) %s" % (code, text), err=True)
+            return code
+        if head or include:
+            ctx.out("HTTP/1.1 %d %s\r\n" % (status, reason))
+            for name, value in hdrs:
+                ctx.out("%s: %s\r\n" % (name, value))
+            ctx.out("\r\n")
+        if head:
+            return 0
+        if output:
+            with open(ctx.path(output), "wb") as handle:
+                handle.write(body)
+            ctx.line("  %% Total: %s bytes saved to %s" % (_w95cmd_n(len(body)), ctx.path(output)), err=True)
+        else:
+            ctx.out(body)
+            if body and not body.endswith(b"\n"):
+                ctx.out("\r\n")
+        return 0
+    return run
+
+
+def _w95cmd_ps_web(argv, ctx, raw="", rest=False):
+    params = _w95cmd_ps_params(argv, ["uri"], switches=("usebasicparsing", "skipcertificatecheck"),
+                               named=("method", "body", "outfile", "timeoutsec", "contenttype"))
+    if "uri" not in params:
+        raise _W95CmdNotHere("Invoke-WebRequest")
+    command = "Invoke-RestMethod" if rest else "Invoke-WebRequest"
+
+    def run():
+        headers = [("Content-Type", params["contenttype"])] if "contenttype" in params else []
+        try:
+            status, reason, hdrs, body, _final = _w95cmd_http(params["uri"], params.get("method", "").upper() or None,
+                                                              params.get("body"), headers,
+                                                              float(params.get("timeoutsec", 30)),
+                                                              bool(params.get("skipcertificatecheck")))
+        except Exception as exc:
+            return _w95cmd_ps_error(ctx, command, _w95cmd_http_error(exc)[1])
+        if "outfile" in params:
+            with open(ctx.path(params["outfile"]), "wb") as handle:
+                handle.write(body)
+            return 0 if status < 400 else 1
+        text = body.decode("utf-8", "replace")
+        if status >= 400:
+            return _w95cmd_ps_error(ctx, command, "The remote server returned an error: (%d) %s." % (status, reason))
+        if rest:
+            import json
+            try:
+                value = json.loads(text)
+            except ValueError:
+                value = None
+            if isinstance(value, dict):
+                width = max([len(k) for k in value] + [1])
+                ctx.line("")
+                for k, v in value.items():
+                    ctx.line("%-*s : %s" % (width, k, json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list))
+                                            else v))
+                ctx.line("")
+            elif isinstance(value, list):
+                for item in value:
+                    ctx.line(json.dumps(item, ensure_ascii=False))
+            else:
+                for line in text.splitlines():
+                    ctx.line(line)
+            return 0
+        content = text if len(text) <= 200 else text[:200] + "..."
+        ctx.line("")
+        ctx.line("StatusCode        : %d" % status)
+        ctx.line("StatusDescription : %s" % reason)
+        ctx.line("Content           : %s" % content.replace("\r", "").replace("\n", "\r\n                    "))
+        ctx.line("RawContentLength  : %d" % len(body))
+        ctx.line("Headers           : " + "; ".join("[%s, %s]" % (n, v) for n, v in hdrs[:6]))
+        ctx.line("")
+        return 0
+    return run
+
+
+# ═════ HELP: every command that can be used (cmd and PowerShell) ══════════════════════════════════════════════
+_W95CMD_HELP = [
+    ("Files and folders", [
+        ("DIR", "DIR [path] [/B] [/S] [/A[:attr]] [/O[:order]]", "Lists the files and folders."),
+        ("CD", "CD [path]", "Shows the current folder or changes it."),
+        ("TYPE", "TYPE file [file ...]", "Shows the text of a file."),
+        ("MORE", "MORE file", "Shows the text of a file."),
+        ("COPY", "COPY source [destination] [/Y]", "Copies one or more files."),
+        ("MOVE", "MOVE [/Y] source destination", "Moves files or folders, or renames a folder."),
+        ("DEL", "DEL [/Q] [/F] [/S] names", "Deletes files (ERASE does the same)."),
+        ("REN", "REN file newname", "Renames a file or folder (RENAME does the same)."),
+        ("MKDIR", "MKDIR folder", "Makes a folder and the ones above it (MD does the same)."),
+        ("RMDIR", "RMDIR [/S /Q] folder", "Removes a folder (RD does the same; /S /Q with what it holds)."),
+        ("TREE", "TREE [path] [/F] [/A]", "Draws the folder tree (/F with the files)."),
+        ("FIND", "FIND [/I] [/V] [/C] [/N] \"text\" files", "Finds the lines that contain a text."),
+        ("FINDSTR", "FINDSTR [/I] [/N] [/S] [/R] [/C:\"text\"] words files", "Finds text in files."),
+        ("SORT", "SORT [/R] file", "Shows the lines of a file in order."),
+        ("WHERE", "WHERE name", "Finds a program in the current folder and on the PATH."),
+    ]),
+    ("Network", [
+        ("PING", "PING [-n count] [-w ms] [-l size] [-i ttl] [-t] host", "Checks that a computer answers."),
+        ("TRACERT", "TRACERT [-d] [-h hops] [-w ms] host", "Shows the route to a computer, hop by hop."),
+        ("IPCONFIG", "IPCONFIG [/ALL] [/FLUSHDNS]", "Shows the network cards and their addresses."),
+        ("ARP", "ARP -A [address]", "Shows the devices seen on the network (IP and MAC)."),
+        ("ROUTE", "ROUTE PRINT -4", "Shows the IPv4 route table and the gateway."),
+        ("GETMAC", "GETMAC", "Shows the MAC addresses of the network cards."),
+        ("NETSTAT", "NETSTAT [-a] [-n] [-o]", "Shows the network connections and open ports."),
+        ("NSLOOKUP", "NSLOOKUP name [server]", "Asks the DNS for the address of a name (or the name of an IP)."),
+        ("CURL", "CURL [-X method] [-d data] [-H header] [-o file] [-I] [-i] [-k] url", "Sends a web request."),
+    ]),
+    ("System", [
+        ("TASKLIST", "TASKLIST [/FI \"IMAGENAME eq name\"] [/FO CSV] [/NH]", "Lists the running programs."),
+        ("TASKKILL", "TASKKILL /F [/T] /PID number | /IM name", "Stops a program (/T with its children)."),
+        ("SYSTEMINFO", "SYSTEMINFO", "Shows the computer, Windows, memory and BIOS."),
+        ("HOSTNAME", "HOSTNAME", "Shows the name of the computer."),
+        ("WHOAMI", "WHOAMI", "Shows the user (domain\\user)."),
+        ("VER", "VER", "Shows the Windows version."),
+        ("DATE", "DATE /T", "Shows the date."),
+        ("TIME", "TIME /T", "Shows the time."),
+        ("SET", "SET [name]", "Shows the environment variables."),
+        ("PATH", "PATH", "Shows the search path."),
+        ("ECHO", "ECHO text", "Shows a text."),
+        ("CLS", "CLS", "Clears the screen."),
+        ("HELP", "HELP [command]", "This list, or the options of one command (also: command /?)."),
+        ("EXIT", "EXIT [code]", "Ends the command."),
+    ]),
+]
+_W95CMD_PS_HELP = [
+    ("Files and folders", [
+        ("Get-Location", "Get-Location", "pwd", "Shows the current folder."),
+        ("Get-ChildItem", "Get-ChildItem [path] [-Recurse] [-File] [-Directory] [-Force]", "ls, dir, gci",
+         "Lists files and folders."),
+        ("Get-Content", "Get-Content path [-Tail n] [-TotalCount n]", "cat, type, gc", "Shows the text of a file."),
+        ("New-Item", "New-Item path [-ItemType File|Directory] [-Value text]", "ni", "Makes a file or folder."),
+        ("Copy-Item", "Copy-Item path destination [-Recurse]", "cp, copy", "Copies files or folders."),
+        ("Move-Item", "Move-Item path destination", "mv, move", "Moves files or folders."),
+        ("Rename-Item", "Rename-Item path newname", "ren", "Renames a file or folder."),
+        ("Remove-Item", "Remove-Item path [-Recurse] [-Force]", "rm, del", "Deletes files or folders."),
+    ]),
+    ("Network", [
+        ("Test-Connection", "Test-Connection host [-Count n] [-Quiet]", "", "Pings a computer."),
+        ("Test-NetConnection", "Test-NetConnection host [-Port n]", "tnc", "Tests ping or a TCP port."),
+        ("Resolve-DnsName", "Resolve-DnsName name [-Server ip] [-Type A|AAAA]", "", "Asks the DNS."),
+        ("Get-NetAdapter", "Get-NetAdapter", "", "Lists the network cards."),
+        ("Get-NetIPAddress", "Get-NetIPAddress", "", "Lists the IPv4 addresses."),
+        ("Invoke-WebRequest", "Invoke-WebRequest uri [-Method m] [-Body text] [-OutFile file]", "iwr",
+         "Sends a web request."),
+        ("Invoke-RestMethod", "Invoke-RestMethod uri [-Method m] [-Body text] [-ContentType type]", "irm",
+         "Calls a web API and shows its answer."),
+    ]),
+    ("System", [
+        ("Get-Process", "Get-Process [name] [-Id n]", "ps, gps", "Lists the running programs."),
+        ("Stop-Process", "Stop-Process -Id n | -Name name [-Force]", "kill", "Stops a program."),
+        ("Get-Service", "Get-Service [name]", "gsv", "Lists the Windows services."),
+        ("Get-Date", "Get-Date", "", "Shows the date and time."),
+        ("Write-Output", "Write-Output text", "echo, Write-Host", "Shows a text."),
+        ("Clear-Host", "Clear-Host", "cls, clear", "Clears the screen."),
+        ("Get-Help", "Get-Help [command]", "help", "This list, or the options of one command."),
+    ]),
+]
+
+
+def w95_commands_help(shell="cmd", command=None, skip=()):
+    """The text of HELP: every command a Bitpack terminal can run (shell "cmd" or "PowerShell"); with a command,
+    only its options. A terminal can show it in its own help; skip = names it lists itself (e.g. ("CD", "CLS"))."""
+    ps = str(shell).lower().startswith(("ps", "power", "pwsh"))
+    skip = set(str(n).upper() for n in skip)
+    lines = []
+    if command:
+        name = command.lower()
+        for _group, items in (_W95CMD_PS_HELP if ps else _W95CMD_HELP):
+            for item in items:
+                aliases = [a.strip().lower() for a in item[2].split(",")] if ps and item[2] else []
+                if item[0].lower() == name or name in aliases:
+                    lines += [item[-1], "", "  " + item[1]]
+                    if ps and item[2]:
+                        lines.append("  (also: %s)" % item[2])
+                    return "\r\n".join(lines) + "\r\n"
+        for _group, items in (_W95CMD_HELP if ps else _W95CMD_PS_HELP):   # a cmd command typed in PowerShell ...
+            for item in items:
+                if item[0].lower() == name:
+                    return "  " + item[1] + "\r\n"
+        return "This command is not available in Bitpack terminals: %s\r\nType HELP for the list.\r\n" % command
+    lines.append("Commands of this Bitpack terminal (they run inside Bitpack, not in Windows):")
+    for group, items in (_W95CMD_PS_HELP if ps else _W95CMD_HELP):
+        items = [item for item in items if item[0].upper() not in skip]
+        if not items:
+            continue
+        lines += ["", group]
+        for item in items:
+            if ps:
+                lines.append("  %-20s %s%s" % (item[0], item[-1], ("  (" + item[2] + ")") if item[2] else ""))
+            else:
+                lines.append("  %-11s %s" % (item[0], item[-1]))
+    if ps:
+        lines += ["", "PING, IPCONFIG, TRACERT, NETSTAT, NSLOOKUP, CURL and the other network and system commands",
+                  "work here too."]
+    lines += ["", "Type HELP command (or command /?) for its options."]
+    return "\r\n".join(lines) + "\r\n"
+
+
+def _w95cmd_c_help(argv, ctx, raw="", shell="cmd"):
+    return lambda: (ctx.out(w95_commands_help(shell, argv[0] if argv else None)), 0)[1]
+
+
+# ═════ the command tables ═════════════════════════════════════════════════════════════════════════════════════
+_W95CMD_CMD = {
+    "echo": _w95cmd_c_echo, "cd": _w95cmd_c_cd, "chdir": _w95cmd_c_cd, "dir": _w95cmd_c_dir, "type": _w95cmd_c_type,
+    "copy": _w95cmd_c_copy_move, "move": lambda a, c, r="": _w95cmd_c_copy_move(a, c, r, move=True),
+    "del": _w95cmd_c_del, "erase": _w95cmd_c_del, "ren": _w95cmd_c_ren, "rename": _w95cmd_c_ren,
+    "mkdir": _w95cmd_c_mkdir, "md": _w95cmd_c_mkdir, "rmdir": _w95cmd_c_rmdir, "rd": _w95cmd_c_rmdir,
+    "tree": _w95cmd_c_tree, "find": _w95cmd_c_find, "findstr": _w95cmd_c_findstr, "sort": _w95cmd_c_sort,
+    "more": _w95cmd_c_more, "where": _w95cmd_c_where, "set": _w95cmd_c_set, "path": _w95cmd_c_path,
+    "ver": _w95cmd_c_ver, "date": lambda a, c, r="": _w95cmd_c_date_time(a, c, r, "date"),
+    "time": lambda a, c, r="": _w95cmd_c_date_time(a, c, r, "time"), "cls": _w95cmd_c_cls, "exit": _w95cmd_c_exit,
+    "rem": _w95cmd_c_nothing, "title": _w95cmd_c_nothing, "hostname": _w95cmd_c_hostname, "whoami": _w95cmd_c_whoami,
+    "ping": _w95cmd_c_ping, "tracert": _w95cmd_c_tracert, "arp": _w95cmd_c_arp, "route": _w95cmd_c_route,
+    "ipconfig": _w95cmd_c_ipconfig, "getmac": _w95cmd_c_getmac, "netstat": _w95cmd_c_netstat,
+    "nslookup": _w95cmd_c_nslookup, "tasklist": _w95cmd_c_tasklist, "taskkill": _w95cmd_c_taskkill,
+    "systeminfo": _w95cmd_c_systeminfo, "curl": _w95cmd_c_curl, "help": _w95cmd_c_help,
+}
+# the programs (not the cmd built-ins) can also be started on their own: subprocess.run(["ping", ...])
+_W95CMD_PROGRAMS = {"ping", "tracert", "arp", "route", "ipconfig", "getmac", "netstat", "nslookup", "tasklist",
+                    "taskkill", "systeminfo", "hostname", "whoami", "where", "find", "findstr", "sort", "more", "tree",
+                    "curl"}
+_W95CMD_PS = {
+    "get-location": _w95cmd_ps_location, "pwd": _w95cmd_ps_location, "gl": _w95cmd_ps_location,
+    "get-childitem": _w95cmd_ps_childitem, "gci": _w95cmd_ps_childitem, "ls": _w95cmd_ps_childitem,
+    "dir": _w95cmd_ps_childitem, "get-content": _w95cmd_ps_content, "gc": _w95cmd_ps_content,
+    "cat": _w95cmd_ps_content, "type": _w95cmd_ps_content, "get-process": _w95cmd_ps_process,
+    "gps": _w95cmd_ps_process, "ps": _w95cmd_ps_process, "stop-process": _w95cmd_ps_stop_process,
+    "kill": _w95cmd_ps_stop_process, "get-service": _w95cmd_ps_service, "gsv": _w95cmd_ps_service,
+    "get-date": _w95cmd_ps_date, "write-output": _w95cmd_ps_echo, "write-host": _w95cmd_ps_echo,
+    "echo": _w95cmd_ps_echo, "test-connection": _w95cmd_ps_test_connection,
+    "test-netconnection": _w95cmd_ps_test_netconnection, "tnc": _w95cmd_ps_test_netconnection,
+    "resolve-dnsname": _w95cmd_ps_resolve_dns, "get-netadapter": _w95cmd_ps_netadapter,
+    "get-netipaddress": _w95cmd_ps_netipaddress, "new-item": _w95cmd_ps_new_item, "ni": _w95cmd_ps_new_item,
+    "remove-item": _w95cmd_ps_remove_item, "rm": _w95cmd_ps_remove_item, "del": _w95cmd_ps_remove_item,
+    "copy-item": _w95cmd_ps_copy_move, "cp": _w95cmd_ps_copy_move, "copy": _w95cmd_ps_copy_move,
+    "move-item": lambda a, c, r="": _w95cmd_ps_copy_move(a, c, r, move=True),
+    "mv": lambda a, c, r="": _w95cmd_ps_copy_move(a, c, r, move=True),
+    "move": lambda a, c, r="": _w95cmd_ps_copy_move(a, c, r, move=True),
+    "rename-item": _w95cmd_ps_rename_item, "ren": _w95cmd_ps_rename_item, "clear-host": _w95cmd_c_cls,
+    "cls": _w95cmd_c_cls, "clear": _w95cmd_c_cls, "hostname": _w95cmd_c_hostname, "whoami": _w95cmd_c_whoami,
+    "invoke-webrequest": _w95cmd_ps_web, "iwr": _w95cmd_ps_web, "curl": _w95cmd_ps_web, "wget": _w95cmd_ps_web,
+    "invoke-restmethod": lambda a, c, r="": _w95cmd_ps_web(a, c, r, rest=True),
+    "irm": lambda a, c, r="": _w95cmd_ps_web(a, c, r, rest=True),
+    "get-help": lambda a, c, r="": _w95cmd_c_help(a, c, r, "PowerShell"),
+    "help": lambda a, c, r="": _w95cmd_c_help(a, c, r, "PowerShell"),
+    "get-command": lambda a, c, r="": _w95cmd_c_help([], c, r, "PowerShell"),
+}
+
+
+# ═════ reading the command line ═══════════════════════════════════════════════════════════════════════════════
+def _w95cmd_cmd_tokens(line):
+    """cmd-style split: quotes group, the quotes stay out of the values."""
+    tokens, current, quoted, started = [], [], False, False
+    for ch in line:
+        if ch == '"':
+            quoted = not quoted
+            started = True
+            continue
+        if ch in " \t" and not quoted:
+            if started:
+                tokens.append("".join(current))
+                current, started = [], False
+            continue
+        current.append(ch)
+        started = True
+    if started:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _w95cmd_from_cmd_line(line, ctx):
+    """A cmd command line -> the emulated command, or _W95CmdNotHere."""
+    text = line.strip()
+    if text.startswith("@"):
+        text = text[1:].lstrip()
+    quoted = False
+    for ch in text:                                          # pipes, redirections, && ...: the real cmd
+        if ch == '"':
+            quoted = not quoted
+        elif ch in "|&<>^" and not quoted:
+            raise _W95CmdNotHere("pipe or redirection")
+    text = _w95cmd_re.sub(r"%([^%\s]+)%", lambda m: ctx.var(m.group(1), m.group(0)), text)
+    m = _w95cmd_re.match(r'^("?)([A-Za-z]+)\1([./\\:(].*|\s.*|)$', text, _w95cmd_re.S)
+    if not m:
+        raise _W95CmdUnknown((_w95cmd_cmd_tokens(text) or [text])[0])
+    name, rest = m.group(2).lower(), m.group(3)
+    if name not in _W95CMD_CMD:
+        raise _W95CmdUnknown(_w95cmd_cmd_tokens(text)[0] if _w95cmd_cmd_tokens(text) else name)
+    if "/?" in rest.split():
+        return _w95cmd_c_help([name], ctx)
+    if name == "echo":
+        return _W95CMD_CMD[name]([] if not rest.strip() else [rest], ctx, rest)
+    raw = rest[1:] if rest[:1] in (" ", "\t") else rest
+    if rest[:1] in "./\\" and name in ("cd", "chdir", "dir"):
+        raw = rest                                           # cd.. / dir/b / cd\
+    return _W95CMD_CMD[name](_w95cmd_cmd_tokens(raw), ctx, raw)
+
+
+def _w95cmd_from_ps_line(line, ctx):
+    """A PowerShell command line (one cmdlet, no pipeline) -> the emulated command, or _W95CmdNotHere."""
+    text = line.strip().rstrip(";").strip()
+    if not text or _w95cmd_re.search(r"[|;{}`$@()]|>|<|&&", text):
+        raise _W95CmdNotHere("pipeline or script")
+    try:
+        tokens = _w95cmd_shlex.split(text, posix=True)
+    except ValueError:
+        raise _W95CmdNotHere("quotes")
+    name = tokens[0].lower()
+    if "-?" in tokens[1:]:
+        return _w95cmd_c_help([tokens[0]], ctx, "", "PowerShell")
+    if name in _W95CMD_PS:
+        return _W95CMD_PS[name](tokens[1:], ctx, text[len(tokens[0]):].strip())
+    program = _w95cmd_os.path.basename(name)
+    if program.endswith(".exe"):
+        program = program[:-4]
+    if program in _W95CMD_PROGRAMS:                          # ping, ipconfig ... typed in PowerShell
+        return _W95CMD_CMD[program](tokens[1:], ctx, text[len(tokens[0]):].strip())
+    raise _W95CmdUnknown(tokens[0])
+
+
+def _w95cmd_join(parts):
+    return " ".join('"%s"' % p if (" " in p or not p) and not p.startswith('"') else p for p in parts)
+
+
+_W95CMD_LOCAL = _w95cmd_threading.local()
+W95_SANDBOX_ALLOW = set()          # programs a Bitpack terminal may still start in Windows (empty: none), e.g. {"python"}
+W95_NO_WINDOWS_PROGRAMS = True     # in all of Bitpack: no program of the Windows folder runs (cmd, powershell, powercfg,
+                                   # wmic, netsh, sc, shutdown, explorer ...); the commands of the list are answered by
+                                   # Bitpack. Programs outside the Windows folder (Bitpack itself, ffmpeg ...) still run.
+
+
+def _w95cmd_windows_program(name):
+    """True when the program is in the Windows folder (or is not found anywhere): Bitpack does not start it."""
+    windows = _w95cmd_os.path.normcase(_w95cmd_os.path.abspath(
+        _w95cmd_os.environ.get("SystemRoot") or _w95cmd_os.environ.get("WINDIR") or "C:\\Windows"))
+    path = name if _w95cmd_os.path.isabs(name) or _w95cmd_os.sep in name else None
+    if path is None:
+        import shutil
+        path = shutil.which(name)
+    if path is None:
+        return True
+    path = _w95cmd_os.path.normcase(_w95cmd_os.path.abspath(path))
+    return path == windows or path.startswith(windows.rstrip("\\/") + _w95cmd_os.sep)
+
+
+class w95_sandbox(object):
+    """with w95_sandbox("cmd" | "PowerShell"): the commands started inside (in this thread) never run in Windows:
+    a command of the list is emulated, anything else gets the 'not recognized' / 'not available' message."""
+
+    def __init__(self, shell="cmd"):
+        self.shell = shell
+
+    def __enter__(self):
+        stack = getattr(_W95CMD_LOCAL, "stack", None)
+        if stack is None:
+            stack = _W95CMD_LOCAL.stack = []
+        stack.append(self.shell)
+        return self
+
+    def __exit__(self, *exc):
+        _W95CMD_LOCAL.stack.pop()
+
+
+def w95_sandbox_popen(args, shell_name="cmd", **options):
+    """subprocess.Popen for a Bitpack terminal: never a Windows program (see w95_sandbox). Works even when
+    w95_install_commands() is turned off for the rest of Bitpack."""
+    with w95_sandbox(shell_name):
+        return _W95CmdPopen(args, **options)
+
+
+def _w95cmd_sandboxed():
+    stack = getattr(_W95CMD_LOCAL, "stack", None)
+    return stack[-1] if stack else None
+
+
+def _w95cmd_refusal(ctx, dialect, exc, where="terminal"):
+    """The message instead of running a Windows program (in a Bitpack terminal, or anywhere in Bitpack)."""
+    what = str(exc) or "this command"
+    if where == "global":                                   # a tool, not a terminal
+        def run_global():
+            if isinstance(exc, _W95CmdUnknown):
+                ctx.line("'%s' is not recognized as an internal or external command,\r\noperable program or batch file."
+                         "\r\n(Bitpack runs no Windows programs.)" % what, err=True)
+                return 9009
+            ctx.line("Not available in Bitpack (it runs no Windows programs): %s" % what, err=True)
+            return 1
+        return run_global
+
+    def run():
+        if isinstance(exc, _W95CmdUnknown):
+            if dialect == "ps":
+                ctx.line("%s : The term '%s' is not recognized as the name of a cmdlet, function, script file, or "
+                         "operable program. Type HELP for the commands of this Bitpack terminal." % (what, what), err=True)
+                return 1
+            ctx.line("'%s' is not recognized as an internal or external command,\r\noperable program or batch file."
+                     "\r\nType HELP for the commands of this Bitpack terminal." % what, err=True)
+            return 9009
+        if isinstance(exc, _W95CmdNeeds):
+            ctx.line(what, err=True)
+        elif what in ("pipe or redirection", "pipeline or script"):
+            ctx.line("Pipes (|), redirection (> <), && and scripts are not available in this Bitpack terminal. "
+                     "Type HELP for the commands.", err=True)
+        else:
+            first = what.split()[0].lower() if what.split() else ""
+            hint = ("HELP %s for the options that work" % first) if first in _W95CMD_CMD or first in _W95CMD_PS \
+                else "HELP for the commands"
+            ctx.line("Not available in this Bitpack terminal: %s. Type %s." % (what, hint), err=True)
+        return 1
+    return run
+
+
+def _w95cmd_build(args, options, strict=False):
+    """subprocess arguments -> (emulated command, context), or None for the real process.
+    strict (a Bitpack terminal): never None - what is not emulated gets a message instead of running."""
+    if not strict and (not _w95cmd_enabled() or options.get("executable") or options.get("pass_fds")):
+        return None
+    ctx = _W95CmdContext(options.get("cwd"), options.get("env"))
+    dialect = "ps" if str(strict).lower().startswith(("ps", "power", "pwsh")) else "cmd"
+    try:
+        shell = options.get("shell")
+        if isinstance(args, bytes):
+            args = args.decode()
+        if isinstance(args, str):
+            if shell:
+                return _w95cmd_from_cmd_line(args, ctx), ctx
+            argv = _w95cmd_cmd_tokens(args)
+        else:
+            argv = [a.decode() if isinstance(a, bytes) else str(a) for a in args]
+            if shell:
+                return _w95cmd_from_cmd_line(_w95cmd_join(argv), ctx), ctx
+        if not argv:
+            raise _W95CmdUnknown("")
+        program = _w95cmd_os.path.basename(argv[0]).lower()
+        if program.endswith(".exe"):
+            program = program[:-4]
+        if strict and program in W95_SANDBOX_ALLOW:
+            return None                                      # (allowed on purpose to start in Windows)
+        if program == "cmd":
+            dialect = "cmd"
+            switches = [a.lower() for a in argv[1:]]
+            for i, a in enumerate(switches):
+                if a in ("/c", "/k"):
+                    rest = argv[i + 2:]
+                    if a == "/k" and not rest:
+                        raise _W95CmdNotHere("an interactive cmd")
+                    line = rest[0] if len(rest) == 1 else _w95cmd_join(rest)
+                    return _w95cmd_from_cmd_line(line, ctx), ctx
+                if not a.startswith("/"):
+                    break
+            raise _W95CmdNotHere("an interactive cmd")
+        if program in ("powershell", "pwsh"):
+            dialect = "ps"
+            i = 1
+            while i < len(argv):
+                a = argv[i].lower()
+                if a in ("-command", "-c"):
+                    rest = argv[i + 1:]
+                    line = rest[0] if len(rest) == 1 else " ".join(rest)
+                    return _w95cmd_from_ps_line(line, ctx), ctx
+                if a in ("-noprofile", "-nologo", "-noninteractive", "-nop", "-noni", "-mta", "-sta"):
+                    i += 1
+                elif a in ("-executionpolicy", "-ep", "-inputformat", "-outputformat", "-windowstyle"):
+                    i += 2
+                else:
+                    raise _W95CmdNotHere("powershell " + argv[i])  # -File, -EncodedCommand ...
+            raise _W95CmdNotHere("an interactive PowerShell")
+        if program in _W95CMD_PROGRAMS:
+            return _W95CMD_CMD[program](argv[1:], ctx, _w95cmd_join(argv[1:])), ctx
+        if strict and program in ("sh", "bash") and len(argv) >= 3 and argv[1] == "-c":
+            return _w95cmd_from_cmd_line(argv[2], ctx), ctx           # (the sh / bash tabs on Linux)
+        if strict == "global":                               # a program started by a tool
+            if _w95cmd_windows_program(argv[0]):
+                raise _W95CmdUnknown(_w95cmd_os.path.basename(argv[0]))
+            return None                                      # outside the Windows folder: it runs
+        if strict and dialect == "ps":
+            return _w95cmd_from_ps_line(_w95cmd_join(argv), ctx), ctx
+        if strict:
+            return _w95cmd_from_cmd_line(_w95cmd_join(argv), ctx), ctx
+        return None
+    except _W95CmdNotHere as exc:
+        return (_w95cmd_refusal(ctx, dialect, exc, strict), ctx) if strict else None
+    except Exception as exc:                                 # anything unexpected
+        return (_w95cmd_refusal(ctx, dialect, _W95CmdNotHere(str(exc)), strict), ctx) if strict else None
+
+
+# ═════ the emulated process (what subprocess.Popen gives back for an emulated command) ═══════════════════════
+class _W95CmdProcess(_W95CMD_REAL_POPEN):
+    """Looks like a subprocess.Popen to the tool (stdout / stderr / stdin, poll, wait, communicate, kill,
+    terminate, send_signal, returncode, pid, with): the command runs in a thread and writes into real pipes, so
+    the output can be read line by line while it comes."""
+    _numbers = _w95cmd_itertools.count(1)
+
+    def __init__(self, args, body, ctx, options):           # (Popen.__init__ is not called: no Windows process)
+        self.args = args
+        self.pid = -(1000 + next(self._numbers))            # never a real PID: taskkill on it reaches this object
+        self.returncode = None
+        self._child_created = False
+        self._ctx = ctx
+        self._readers, self._results = None, {}
+        text = bool(options.get("text") or options.get("universal_newlines") or options.get("encoding")
+                    or options.get("errors"))
+        self.text_mode = text
+        self.encoding, self.errors = options.get("encoding"), options.get("errors")
+        self._out_encoding = options.get("encoding") or (_w95cmd_locale.getpreferredencoding(False) if text
+                                                         else _w95cmd_oem())
+        bufsize = options.get("bufsize", -1)
+        PIPE, STDOUT, DEVNULL = _w95cmd_subprocess.PIPE, _w95cmd_subprocess.STDOUT, _w95cmd_subprocess.DEVNULL
+        self._fds = []
+
+        def target(option, err):
+            if option == PIPE:
+                r, w = _w95cmd_os.pipe()
+                stream = _w95cmd_io.open(r, "rb", 0 if bufsize == 0 else -1)
+                if text:
+                    stream = _w95cmd_io.TextIOWrapper(stream, encoding=self._out_encoding, errors=self.errors)
+                self._fds.append(w)
+                return stream, w
+            if option == DEVNULL:
+                return None, "null"
+            if option is None:
+                return None, "parent-err" if err else "parent"
+            if isinstance(option, int) and option >= 0:
+                return None, option
+            if hasattr(option, "fileno"):
+                return None, option.fileno()
+            return None, "null"
+        self.stdout, out_fd = target(options.get("stdout"), False)
+        if options.get("stderr") == STDOUT:
+            self.stderr, err_fd = None, out_fd
+        else:
+            self.stderr, err_fd = target(options.get("stderr"), True)
+        self.stdin = None
+        if options.get("stdin") == PIPE:
+            self.stdin = open(_w95cmd_os.devnull, "w" if text else "wb")
+        lock = _w95cmd_threading.Lock()
+
+        def write(data, err=False):
+            fd = err_fd if err else out_fd
+            if fd == "null":
+                return
+            if isinstance(data, str):
+                data = data.encode(self._out_encoding, "replace")
+            if fd in ("parent", "parent-err"):
+                stream = _w95cmd_sys.stderr if fd == "parent-err" else _w95cmd_sys.stdout
+                if stream is not None:
+                    stream.write(data.decode(self._out_encoding, "replace").replace("\r\n", "\n"))
+                    stream.flush()
+                return
+            with lock:
+                view = memoryview(data)
+                while view:
+                    try:
+                        written = _w95cmd_os.write(fd, view)
+                    except OSError:                          # the reader went away: stop the command
+                        ctx.stop.set()
+                        raise _W95CmdStop()
+                    view = view[written:]
+        ctx.write = write
+        _W95CMD_PROCESSES[self.pid] = self
+        self._thread = _w95cmd_threading.Thread(target=self._run, args=(body,), daemon=True)
+        self._thread.start()
+
+    def _run(self, body):
+        code = 1
+        try:
+            code = body()
+            code = 0 if code is None else int(code)
+        except _W95CmdStop:
+            code = 1
+        except Exception as exc:                             # (already started: the error is the output)
+            try:
+                self._ctx.write("%s\r\n" % (getattr(exc, "strerror", None) or exc), True)
+            except Exception:
+                pass
+            code = 1
+        finally:
+            for fd in self._fds:
+                try:
+                    _w95cmd_os.close(fd)
+                except OSError:
+                    pass
+            self._fds = []
+            if self.returncode is None:
+                self.returncode = 1 if self._ctx.stop.is_set() else code
+            _W95CMD_PROCESSES.pop(self.pid, None)
+
+    # ----- the Popen calls ------------------------------------------------------------------------------------
+    def poll(self):
+        return self.returncode if not self._thread.is_alive() else None
+
+    def wait(self, timeout=None):
+        self._thread.join(timeout)
+        if self._thread.is_alive():
+            raise _w95cmd_subprocess.TimeoutExpired(self.args, timeout)
+        return self.returncode
+
+    def communicate(self, input=None, timeout=None):
+        if self.stdin is not None:
+            try:
+                self.stdin.close()
+            except OSError:
+                pass
+            self.stdin = None
+        if self._readers is None:
+            self._readers = []
+            for key, stream in (("out", self.stdout), ("err", self.stderr)):
+                if stream is not None:
+                    def drain(k=key, s=stream):
+                        try:
+                            self._results[k] = s.read()
+                        finally:
+                            s.close()
+                    reader = _w95cmd_threading.Thread(target=drain, daemon=True)
+                    reader.start()
+                    self._readers.append(reader)
+        deadline = _w95cmd_time.time() + timeout if timeout is not None else None
+        for thread in self._readers + [self._thread]:
+            thread.join(None if deadline is None else max(0.0, deadline - _w95cmd_time.time()))
+            if thread.is_alive():
+                raise _w95cmd_subprocess.TimeoutExpired(self.args, timeout)
+        return self._results.get("out"), self._results.get("err")
+
+    def kill(self):
+        self._ctx.stop.set()
+
+    terminate = kill
+
+    def send_signal(self, sig):
+        self._ctx.stop.set()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, value, traceback):
+        for stream in (self.stdout, self.stderr, self.stdin):
+            if stream is not None:
+                try:
+                    stream.close()
+                except (OSError, ValueError):
+                    pass
+        self.wait()
+
+    def __del__(self):
+        pass
+
+
+class _W95CmdPopen(_W95CMD_REAL_POPEN):
+    """subprocess.Popen: the emulated commands get a _W95CmdProcess, everything else the real process."""
+
+    _POSITIONAL = ("bufsize", "executable", "stdin", "stdout", "stderr", "preexec_fn", "close_fds", "shell", "cwd",
+                   "env", "universal_newlines", "startupinfo", "creationflags")
+
+    def __new__(cls, args=None, *more, **options):
+        sandbox = _w95cmd_sandboxed() or ("global" if W95_NO_WINDOWS_PROGRAMS else None)
+        if cls is _W95CmdPopen and args is not None and (not more or sandbox):
+            if more:                                         # (options given by position)
+                options = dict(zip(cls._POSITIONAL, more), **options)
+            built = _w95cmd_build(args, options, strict=sandbox or False)
+            if built is not None:
+                body, ctx = built
+                return _W95CmdProcess(args, body, ctx, options)
+        return super(_W95CmdPopen, cls).__new__(cls)
+
+
+_W95CMD_REAL_SYSTEM = getattr(_w95cmd_os, "_w95cmd_real_system", None) or _w95cmd_os.system
+
+
+def _w95cmd_system(command):
+    """os.system: through the same rules (os.system always starts cmd.exe)."""
+    if not W95_NO_WINDOWS_PROGRAMS:
+        return _W95CMD_REAL_SYSTEM(command)
+    process = _W95CmdPopen(command, shell=True, stdin=_w95cmd_subprocess.DEVNULL, stdout=_w95cmd_subprocess.DEVNULL,
+                           stderr=_w95cmd_subprocess.DEVNULL)
+    return process.wait()
+
+
+def w95_install_commands():
+    """From now on the common cmd / PowerShell commands are answered without cmd.exe and powershell.exe, in every
+    tool and terminal that starts them through subprocess (and os.system / os.popen); with W95_NO_WINDOWS_PROGRAMS,
+    no program of the Windows folder runs at all."""
+    _w95cmd_subprocess._w95cmd_real_popen = _W95CMD_REAL_POPEN     # (pasted twice by mistake: no loop)
+    _w95cmd_subprocess.Popen = _W95CmdPopen
+    _w95cmd_os._w95cmd_real_system = _W95CMD_REAL_SYSTEM
+    _w95cmd_os.system = _w95cmd_system
+
+
+w95_install_commands()
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+# COMPUTER INFORMATION WITHOUT WINDOWS PROGRAMS - for the AI Assistant, System Info (Menu) and any tool.
+# The same answers powershell / wmic / netsh / powercfg / net / shutdown gave, read here through the Windows
+# functions (firmware tables, registry, cfgmgr32, wevtapi, wlanapi, netapi32, powrprof, user32): no program starts,
+# no administrator rights. Each function returns text (or (True/False, text)) and never raises.
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+import struct as _w95info_struct
+
+
+def _w95info_windows():
+    return _w95cmd_os.name == "nt"
+
+
+def _w95info_firmware(provider, table_id=0):
+    """A firmware table (SMBIOS 'RSMB', ACPI tables), or None."""
+    import ctypes
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetSystemFirmwareTable.restype = ctypes.c_uint
+    kernel32.GetSystemFirmwareTable.argtypes = (ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
+    size = kernel32.GetSystemFirmwareTable(provider, table_id, None, 0)
+    if not size:
+        return None
+    buffer = ctypes.create_string_buffer(size)
+    if kernel32.GetSystemFirmwareTable(provider, table_id, buffer, size) != size:
+        return None
+    return buffer.raw
+
+
+def _w95info_smbios(raw):
+    """RawSMBIOSData -> [(type, formatted bytes, [strings])]."""
+    length = _w95info_struct.unpack_from("<I", raw, 4)[0]
+    data, i, out = raw[8:8 + length], 0, []
+    while i + 4 <= len(data):
+        kind, size = data[i], data[i + 1]
+        if size < 4:
+            break
+        formatted = data[i:i + size]
+        end = data.find(b"\x00\x00", i + size)
+        if end < 0:
+            break
+        text = data[i + size:end]
+        strings = [s.decode("latin-1", "replace").strip() for s in text.split(b"\x00")] if text else []
+        out.append((kind, formatted, strings))
+        if kind == 127:
+            break
+        i = end + 2
+    return out
+
+
+def _w95info_smbios_string(structure, offset):
+    kind, formatted, strings = structure
+    if offset >= len(formatted):
+        return ""
+    n = formatted[offset]
+    return strings[n - 1] if 1 <= n <= len(strings) else ""
+
+
+_W95INFO_DUMMY = ("to be filled", "default string", "system serial number", "not specified", "none", "0", "o.e.m.",
+                  "oem", "chassis serial number")
+
+
+def w95info_bios():
+    """{'manufacturer', 'model', 'serial', 'bios_vendor', 'bios_version', 'bios_date', 'chassis_serial',
+    'board_serial'} from the SMBIOS tables (what Get-CimInstance Win32_BIOS / Win32_ComputerSystem gave)."""
+    info = {}
+    if not _w95info_windows():
+        return info
+    try:
+        raw = _w95info_firmware(0x52534D42)                         # 'RSMB'
+        structures = _w95info_smbios(raw) if raw else []
+    except Exception:
+        structures = []
+    for s in structures:
+        if s[0] == 0:
+            info.setdefault("bios_vendor", _w95info_smbios_string(s, 4))
+            info.setdefault("bios_version", _w95info_smbios_string(s, 5))
+            info.setdefault("bios_date", _w95info_smbios_string(s, 8))
+        elif s[0] == 1:
+            info.setdefault("manufacturer", _w95info_smbios_string(s, 4))
+            info.setdefault("model", _w95info_smbios_string(s, 5))
+            info.setdefault("serial", _w95info_smbios_string(s, 7))
+        elif s[0] == 2:
+            info.setdefault("board_serial", _w95info_smbios_string(s, 7))
+        elif s[0] == 3:
+            info.setdefault("chassis_serial", _w95info_smbios_string(s, 7))
+    return info
+
+
+def _w95info_real(value):
+    return value if value and value.strip().lower() not in _W95INFO_DUMMY else ""
+
+
+def w95info_service_tag():
+    """The Service Tag / serial number of the computer (SMBIOS), as text."""
+    if not _w95info_windows():
+        return "The Service Tag is read from the firmware of a Windows computer."
+    info = w95info_bios()
+    tag = _w95info_real(info.get("serial")) or _w95info_real(info.get("chassis_serial"))
+    if not tag:
+        return "The Service Tag could not be read on this computer (the firmware has no serial number)."
+    extra = " - %s %s" % (info.get("manufacturer", ""), info.get("model", "")) if info.get("model") else ""
+    return "Service Tag: %s%s" % (tag, extra.rstrip())
+
+
+def w95info_windows_key():
+    """The Windows product key stored in the firmware (ACPI MSDM table), as text."""
+    if not _w95info_windows():
+        return "The Windows key is read from the firmware of a Windows computer."
+    try:
+        raw = _w95info_firmware(0x41435049, _w95info_struct.unpack("<I", b"MSDM")[0])     # 'ACPI', 'MSDM'
+    except Exception:
+        raw = None
+    key = raw[56:85].decode("ascii", "replace") if raw and len(raw) >= 85 else ""
+    import re
+    if re.match(r"^[A-Z0-9]{5}(-[A-Z0-9]{5}){4}$", key):
+        return "Windows license key (from the firmware): %s" % key
+    return ("No Windows key is stored in the firmware of this computer (OA3). The licence may be digital, linked to "
+            "the Microsoft account or the organisation.")
+
+
+def _w95info_reg(hive, path, name, default=None):
+    try:
+        import winreg
+        with winreg.OpenKey(hive, path) as key:
+            return winreg.QueryValueEx(key, name)[0]
+    except OSError:
+        return default
+
+
+def w95info_windows_version():
+    import winreg
+    path = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+    name = _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "ProductName", "Windows")
+    build = str(_w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "CurrentBuild", "") or "")
+    if build.isdigit() and int(build) >= 22000:
+        name = name.replace("Windows 10", "Windows 11")              # (the registry still says 10 on Windows 11)
+    display = _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "DisplayVersion") or \
+        _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "ReleaseId", "")
+    ubr = _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "UBR")
+    return "%s %s (build %s%s)" % (name, display or "", build, ".%s" % ubr if ubr is not None else "")
+
+
+def w95info_join():
+    """('domain' | 'workgroup' | 'unknown', its name)."""
+    try:
+        import ctypes
+        netapi = ctypes.windll.netapi32
+        name, status = ctypes.c_wchar_p(), ctypes.c_int()
+        if netapi.NetGetJoinInformation(None, ctypes.byref(name), ctypes.byref(status)) == 0:
+            value = name.value
+            netapi.NetApiBufferFree(name)
+            return {3: "domain", 2: "workgroup"}.get(status.value, "unknown"), value or ""
+    except Exception:
+        pass
+    return "unknown", _w95cmd_os.environ.get("USERDOMAIN", "")
+
+
+def w95info_computer():
+    """Computer name, domain, manufacturer, model, Windows, user (what Win32_ComputerSystem gave)."""
+    import socket
+    user = "%s\\%s" % (_w95cmd_os.environ.get("USERDOMAIN", "?"), _w95cmd_os.environ.get("USERNAME", "?"))
+    if not _w95info_windows():
+        return "Computer name : %s\nUser          : %s" % (socket.gethostname(), user)
+    import winreg
+    kind, joined = w95info_join()
+    info = w95info_bios()
+    manufacturer = info.get("manufacturer") or _w95info_reg(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS",
+                                                            "SystemManufacturer", "")
+    model = info.get("model") or _w95info_reg(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\BIOS",
+                                              "SystemProductName", "")
+    return "\n".join(["Computer name : %s" % _w95cmd_os.environ.get("COMPUTERNAME", socket.gethostname()),
+                      "%-14s: %s" % ("Domain" if kind == "domain" else "Workgroup", joined or "-"),
+                      "Manufacturer  : %s" % (manufacturer or "-"), "Model         : %s" % (model or "-"),
+                      "BIOS          : %s %s (%s)" % (info.get("bios_vendor", "-"), info.get("bios_version", ""),
+                                                      info.get("bios_date", "-")),
+                      "Windows       : %s" % w95info_windows_version(), "Logged-on user: %s" % user])
+
+
+def w95info_gpu():
+    """Graphics cards (driver, date, memory) from the registry, and the screen."""
+    if not _w95info_windows():
+        return "The graphics card is read from the Windows registry."
+    import winreg
+    import ctypes
+    lines = []
+    base = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as key:
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                sub = winreg.EnumKey(key, i)
+                if not sub.isdigit():
+                    continue
+                path = base + "\\" + sub
+                name = _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "DriverDesc")
+                if not name:
+                    continue
+                memory = _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "HardwareInformation.qwMemorySize") or \
+                    _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "HardwareInformation.MemorySize")
+                if isinstance(memory, bytes):
+                    memory = int.from_bytes(memory[:8], "little")
+                lines.append(name)
+                lines.append("  driver %s (%s)%s" % (_w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "DriverVersion", "?"),
+                                                     _w95info_reg(winreg.HKEY_LOCAL_MACHINE, path, "DriverDate", "?"),
+                                                     ", %d MB" % (memory // 1048576) if memory else ""))
+    except OSError:
+        pass
+    try:
+        user32 = ctypes.windll.user32
+        lines.append("Screen: %d x %d, %d monitor(s)" % (user32.GetSystemMetrics(0), user32.GetSystemMetrics(1),
+                                                         user32.GetSystemMetrics(80)))
+    except Exception:
+        pass
+    return "Graphics:\n" + "\n".join(lines) if lines else "The graphics card could not be read."
+
+
+def w95info_firewall():
+    """The state of the three firewall profiles (registry; a group policy wins over the local setting)."""
+    if not _w95info_windows():
+        return "The firewall state is read from the Windows registry."
+    import winreg
+    local = r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy"
+    policy = r"SOFTWARE\Policies\Microsoft\WindowsFirewall"
+    lines = ["Windows Firewall:"]
+    for label, key in (("Domain", "DomainProfile"), ("Private", "StandardProfile"), ("Public", "PublicProfile")):
+        forced = _w95info_reg(winreg.HKEY_LOCAL_MACHINE, policy + "\\" + key, "EnableFirewall")
+        value = forced if forced is not None else _w95info_reg(winreg.HKEY_LOCAL_MACHINE, local + "\\" + key,
+                                                               "EnableFirewall")
+        state = "unknown" if value is None else ("ON" if value else "OFF")
+        lines.append("  %-8s profile: %s%s" % (label, state, "  (set by group policy)" if forced is not None else ""))
+    return "\n".join(lines)
+
+
+def w95info_users():
+    """The local accounts of this computer (NetUserEnum, as 'net user')."""
+    if not _w95info_windows():
+        return "The local accounts are read from Windows."
+    import ctypes
+    from ctypes import wintypes
+    netapi = ctypes.windll.netapi32
+
+    class USER_INFO_1(ctypes.Structure):
+        _fields_ = [("name", wintypes.LPWSTR), ("password", wintypes.LPWSTR), ("password_age", wintypes.DWORD),
+                    ("priv", wintypes.DWORD), ("home_dir", wintypes.LPWSTR), ("comment", wintypes.LPWSTR),
+                    ("flags", wintypes.DWORD), ("script_path", wintypes.LPWSTR)]
+    names, resume, level = [], wintypes.DWORD(0), 1
+    while True:
+        buffer, read, total = ctypes.c_void_p(), wintypes.DWORD(), wintypes.DWORD()
+        status = netapi.NetUserEnum(None, level, 2, ctypes.byref(buffer), wintypes.DWORD(0xFFFFFFFF),
+                                    ctypes.byref(read), ctypes.byref(total), ctypes.byref(resume))
+        if status == 5 and level == 1 and not names:              # access denied for the details: names only
+            level, resume = 0, wintypes.DWORD(0)
+            continue
+        if status not in (0, 234):                                 # NERR_Success, ERROR_MORE_DATA
+            return "The local accounts could not be read (error %d)." % status
+        if buffer.value:
+            if level == 1:
+                for row in ctypes.cast(buffer, ctypes.POINTER(USER_INFO_1 * read.value)).contents:
+                    state = "disabled" if row.flags & 0x2 else "active"
+                    kind = {0: "guest", 1: "user", 2: "administrator"}.get(row.priv, "")
+                    names.append("  %-24s %-14s %s" % (row.name, kind, state))
+            else:
+                for name in ctypes.cast(buffer, ctypes.POINTER(wintypes.LPWSTR * read.value)).contents:
+                    names.append("  %s" % name)
+            netapi.NetApiBufferFree(buffer)
+        if status != 234:
+            break
+    return "Local accounts on this computer:\n" + ("\n".join(names) if names else "  (none)")
+
+
+def w95info_power_plan():
+    """The active power plan (powrprof, as 'powercfg /getactivescheme')."""
+    if not _w95info_windows():
+        return "The power plan is read from Windows."
+    import ctypes
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("a", wintypes.DWORD), ("b", wintypes.WORD), ("c", wintypes.WORD), ("d", ctypes.c_ubyte * 8)]
+    try:
+        powrprof = ctypes.windll.powrprof
+        scheme = ctypes.POINTER(GUID)()
+        if powrprof.PowerGetActiveScheme(None, ctypes.byref(scheme)) != 0:
+            return "The power plan could not be read."
+        size = wintypes.DWORD(0)
+        powrprof.PowerReadFriendlyName(None, scheme, None, None, None, ctypes.byref(size))
+        buffer = ctypes.create_string_buffer(size.value or 2)
+        powrprof.PowerReadFriendlyName(None, scheme, None, None, buffer, ctypes.byref(size))
+        name = buffer.raw.decode("utf-16-le", "replace").split("\x00")[0]
+        g = scheme.contents
+        guid = "%08x-%04x-%04x-%s-%s" % (g.a, g.b, g.c, bytes(g.d[:2]).hex(), bytes(g.d[2:]).hex())
+        ctypes.windll.kernel32.LocalFree(scheme)
+        return "Power plan: %s (%s)" % (name, guid)
+    except Exception as exc:
+        return "The power plan could not be read (%s)." % exc
+
+
+_W95INFO_PROBLEMS = {1: "not configured correctly", 3: "driver may be corrupted", 10: "cannot start",
+                     12: "not enough free resources", 14: "needs a restart", 18: "drivers must be reinstalled",
+                     19: "registry information is damaged", 21: "Windows is removing it", 22: "disabled",
+                     24: "not present or not working", 28: "drivers are not installed", 29: "disabled by the firmware",
+                     31: "not working properly", 37: "driver could not be initialised", 39: "driver missing or damaged",
+                     43: "stopped: it reported problems", 45: "not connected", 52: "driver signature not verified"}
+
+
+def w95info_devices():
+    """The devices and the ones with problems (cfgmgr32, like Device Manager / Get-PnpDevice)."""
+    if not _w95info_windows():
+        return "The devices are read from Windows."
+    import ctypes
+    from ctypes import wintypes
+    cm = ctypes.windll.cfgmgr32
+
+    def prop(node, which):
+        size = wintypes.ULONG(0)
+        cm.CM_Get_DevNode_Registry_PropertyW(node, which, None, None, ctypes.byref(size), 0)
+        if not size.value:
+            return ""
+        buffer = ctypes.create_unicode_buffer(size.value // 2 + 1)
+        if cm.CM_Get_DevNode_Registry_PropertyW(node, which, None, buffer, ctypes.byref(size), 0) != 0:
+            return ""
+        return buffer.value
+    root = wintypes.DWORD()
+    if cm.CM_Locate_DevNodeW(ctypes.byref(root), None, 0) != 0:
+        return "The device list could not be read here."
+    stack, total, bad = [root.value], 0, []
+    while stack:
+        node = stack.pop()
+        total += 1
+        status, problem = wintypes.ULONG(), wintypes.ULONG()
+        if cm.CM_Get_DevNode_Status(ctypes.byref(status), ctypes.byref(problem), node, 0) == 0 and \
+                status.value & 0x400:                                   # DN_HAS_PROBLEM
+            name = prop(node, 0x0D) or prop(node, 0x01) or "(no name)"   # friendly name / description
+            bad.append((problem.value, prop(node, 0x08) or "-", name))
+        child = wintypes.DWORD()
+        if cm.CM_Get_Child(ctypes.byref(child), node, 0) == 0:
+            current = child.value
+            while True:
+                stack.append(current)
+                sibling = wintypes.DWORD()
+                if cm.CM_Get_Sibling(ctypes.byref(sibling), current, 0) != 0:
+                    break
+                current = sibling.value
+    lines = ["Devices found: %d, with problems: %d" % (total - 1, len(bad)), ""]
+    for code, kind, name in sorted(bad, key=lambda b: b[2].lower()):
+        lines.append("%-12s %-12s %s" % ("code %d" % code, kind[:12], name))
+        lines.append("    %s" % _W95INFO_PROBLEMS.get(code, "problem code %d" % code))
+    return "Device check (like Device Manager):\n" + "\n".join(lines)
+
+
+def _w95info_event_xml(xml):
+    """(time, provider, id, level) from the XML of an event."""
+    import re
+    get = lambda pattern: (re.search(pattern, xml) or [None, ""])[1]
+    stamp = get(r"SystemTime=['\"]([^'\"]+)")
+    try:
+        import datetime
+        utc = datetime.datetime.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=datetime.timezone.utc)
+        stamp = utc.astimezone().strftime("%d.%m %H:%M")
+    except ValueError:
+        pass
+    return stamp, get(r"<Provider Name=['\"]([^'\"]+)"), get(r"<EventID[^>]*>(\d+)<"), get(r"<Level>(\d+)<")
+
+
+def w95info_events(hours=24, limit=15):
+    """The errors of the System log in the last hours (wevtapi, like Event Viewer / Get-WinEvent)."""
+    if not _w95info_windows():
+        return "The event log is read from Windows."
+    import ctypes
+    from ctypes import wintypes
+    w = ctypes.windll.wevtapi
+    w.EvtQuery.restype = ctypes.c_void_p
+    w.EvtQuery.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD)
+    w.EvtNext.argtypes = (ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p), wintypes.DWORD,
+                          wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+    w.EvtRender.argtypes = (ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                            ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD))
+    w.EvtOpenPublisherMetadata.restype = ctypes.c_void_p
+    w.EvtOpenPublisherMetadata.argtypes = (ctypes.c_void_p, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD,
+                                           wintypes.DWORD)
+    w.EvtFormatMessage.argtypes = (ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                                   wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD))
+    w.EvtClose.argtypes = (ctypes.c_void_p,)
+    query = "*[System[(Level=1 or Level=2) and TimeCreated[timediff(@SystemTime) <= %d]]]" % (hours * 3600000)
+    handle = w.EvtQuery(None, "System", query, 0x1 | 0x200)            # channel path, newest first
+    if not handle:
+        return "The System log could not be read (error %d)." % ctypes.GetLastError()
+    lines, publishers = [], {}
+    try:
+        events = (ctypes.c_void_p * 16)()
+        returned = wintypes.DWORD()
+        while len(lines) < limit * 2 and w.EvtNext(handle, 16, events, 2000, 0, ctypes.byref(returned)):
+            for i in range(returned.value):
+                event = events[i]
+                try:
+                    used, count = wintypes.DWORD(), wintypes.DWORD()
+                    w.EvtRender(None, event, 1, 0, None, ctypes.byref(used), ctypes.byref(count))
+                    buffer = ctypes.create_unicode_buffer(used.value // 2 + 1)
+                    if not w.EvtRender(None, event, 1, used, buffer, ctypes.byref(used), ctypes.byref(count)):
+                        continue
+                    stamp, provider, event_id, level = _w95info_event_xml(buffer.value)
+                    message = ""
+                    if provider not in publishers:
+                        publishers[provider] = w.EvtOpenPublisherMetadata(None, provider, None, 0, 0)
+                    if publishers[provider]:
+                        used = wintypes.DWORD()
+                        w.EvtFormatMessage(publishers[provider], event, 0, 0, None, 1, 0, None, ctypes.byref(used))
+                        if used.value:
+                            text = ctypes.create_unicode_buffer(used.value)
+                            if w.EvtFormatMessage(publishers[provider], event, 0, 0, None, 1, used, text,
+                                                  ctypes.byref(used)):
+                                message = text.value.strip().splitlines()[0].strip() if text.value.strip() else ""
+                    if len(lines) < limit * 2:
+                        lines.append("%s  %s (%s)%s" % (stamp, provider, event_id, "  CRITICAL" if level == "1" else ""))
+                        lines.append("    %s" % (message[:150] or "(no description)"))
+                finally:
+                    w.EvtClose(event)
+    finally:
+        for publisher in publishers.values():
+            if publisher:
+                w.EvtClose(publisher)
+        w.EvtClose(handle)
+    if not lines:
+        return "No errors in the System log in the last %d hours." % hours
+    return "System errors in the last %d hours (Event Viewer):\n%s" % (hours, "\n".join(lines))
+
+
+def _w95info_wifi_xml(xml):
+    """(protected?, key) from a Wi-Fi profile XML."""
+    import re
+    key = re.search(r"<keyMaterial>([^<]*)</keyMaterial>", xml)
+    protected = re.search(r"<protected>\s*true\s*</protected>", xml, re.I)
+    auth = re.search(r"<authentication>([^<]*)</authentication>", xml)
+    return (bool(protected), key.group(1) if key else "", auth.group(1) if auth else "")
+
+
+def w95info_wifi():
+    """The saved Wi-Fi networks and their passwords (wlanapi, as 'netsh wlan show profile key=clear')."""
+    if not _w95info_windows():
+        return "The Wi-Fi networks are read from Windows."
+    import ctypes
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("a", wintypes.DWORD), ("b", wintypes.WORD), ("c", wintypes.WORD), ("d", ctypes.c_ubyte * 8)]
+
+    class INTERFACE(ctypes.Structure):
+        _fields_ = [("guid", GUID), ("description", ctypes.c_wchar * 256), ("state", wintypes.DWORD)]
+
+    class PROFILE(ctypes.Structure):
+        _fields_ = [("name", ctypes.c_wchar * 256), ("flags", wintypes.DWORD)]
+    try:
+        wlan = ctypes.windll.wlanapi
+    except OSError:
+        return "No Wi-Fi on this computer (the WLAN service is not installed)."
+    handle, version = wintypes.HANDLE(), wintypes.DWORD()
+    if wlan.WlanOpenHandle(2, None, ctypes.byref(version), ctypes.byref(handle)) != 0:
+        return "No Wi-Fi adapter on this computer (or the WLAN service is stopped)."
+    rows, seen = [], set()
+    try:
+        interfaces = ctypes.c_void_p()
+        if wlan.WlanEnumInterfaces(handle, None, ctypes.byref(interfaces)) != 0:
+            return "The Wi-Fi adapters could not be read."
+        count = ctypes.cast(interfaces, ctypes.POINTER(wintypes.DWORD))[0]
+        items = ctypes.cast(interfaces.value + 8, ctypes.POINTER(INTERFACE * count)).contents if count else []
+        for interface in items:
+            profiles = ctypes.c_void_p()
+            if wlan.WlanGetProfileList(handle, ctypes.byref(interface.guid), None, ctypes.byref(profiles)) != 0:
+                continue
+            n = ctypes.cast(profiles, ctypes.POINTER(wintypes.DWORD))[0]
+            for profile in (ctypes.cast(profiles.value + 8, ctypes.POINTER(PROFILE * n)).contents if n else []):
+                if profile.name in seen:
+                    continue
+                seen.add(profile.name)
+                xml, flags, access = wintypes.LPWSTR(), wintypes.DWORD(4), wintypes.DWORD()   # plain text key
+                password = "(not shown)"
+                if wlan.WlanGetProfile(handle, ctypes.byref(interface.guid), profile.name, None, ctypes.byref(xml),
+                                       ctypes.byref(flags), ctypes.byref(access)) == 0:
+                    protected, key, auth = _w95info_wifi_xml(xml.value or "")
+                    if auth.lower() == "open":
+                        password = "(open network)"
+                    elif key and not protected:
+                        password = key
+                    else:
+                        password = "(not shown: it needs administrator)"
+                    wlan.WlanFreeMemory(xml)
+                rows.append("%-32s %s" % (profile.name[:32], password))
+            wlan.WlanFreeMemory(profiles)
+        wlan.WlanFreeMemory(interfaces)
+    finally:
+        wlan.WlanCloseHandle(handle, None)
+    if not rows:
+        return "No saved Wi-Fi networks."
+    return "Saved Wi-Fi networks:\n%-32s %s\n%s" % ("Network", "Password", "\n".join(rows))
+
+
+def w95info_services():
+    """Running services, and the automatic ones that are stopped (as Get-Service / services.msc)."""
+    try:
+        import psutil
+        services = list(psutil.win_service_iter())
+    except (ImportError, AttributeError):
+        return "The services are read from Windows (with psutil)."
+    running, stopped = 0, []
+    for s in services:
+        try:
+            info = s.as_dict()
+        except Exception:
+            continue
+        if info.get("status") == "running":
+            running += 1
+        elif info.get("start_type") == "automatic":
+            stopped.append("  %-44s %s" % ((info.get("display_name") or "")[:44], info.get("name")))
+    return "Running: %d of %d\n\nAutomatic services that are stopped:\n%s" % (
+        running, len(services), "\n".join(sorted(stopped, key=str.lower)) or "  (none)")
+
+
+def w95_exit_windows(kind):
+    """'logout' | 'restart' | 'shutdown' through ExitWindowsEx (shutdown.exe is not started).
+    -> (True, '') or (False, the reason)."""
+    if not _w95info_windows():
+        return False, "only on Windows"
+    import ctypes
+    from ctypes import wintypes
+    if kind in ("restart", "shutdown"):                                # the shutdown privilege, for this program
+        class LUID(ctypes.Structure):
+            _fields_ = [("low", wintypes.DWORD), ("high", wintypes.LONG)]
+
+        class TOKEN_PRIVILEGES(ctypes.Structure):
+            _fields_ = [("count", wintypes.DWORD), ("luid", LUID), ("attributes", wintypes.DWORD)]
+        advapi32, kernel32 = ctypes.windll.advapi32, ctypes.windll.kernel32
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        token = wintypes.HANDLE()
+        if advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), 0x20 | 0x8, ctypes.byref(token)):
+            luid = LUID()
+            if advapi32.LookupPrivilegeValueW(None, "SeShutdownPrivilege", ctypes.byref(luid)):
+                privileges = TOKEN_PRIVILEGES(1, luid, 0x2)               # SE_PRIVILEGE_ENABLED
+                advapi32.AdjustTokenPrivileges(token, False, ctypes.byref(privileges), 0, None, None)
+            kernel32.CloseHandle(token)
+    flags = {"logout": 0x0, "restart": 0x2, "shutdown": 0x8}[kind]       # EWX_LOGOFF / REBOOT / POWEROFF
+    if ctypes.windll.user32.ExitWindowsEx(flags, 0x80000000):           # SHTDN_REASON_FLAG_PLANNED
+        return True, ""
+    return False, ctypes.FormatError(ctypes.GetLastError()).strip()
+
+
+# ═════ TK INTERPRETERS ONLY DELETED BY THE MAIN THREAD
+# (against "Tcl_AsyncDelete: async handler deleted by the wrong thread", which stops all of Bitpack)
+# Bitpack opens one Tk window after another (login, then the tool ...). A closed window can stay in memory inside a
+# reference cycle until Python's garbage collector runs - and the collector runs in whichever thread is allocating at
+# that moment. When that is a worker thread (a ping sweep, a scan, a command in the background), the old Tcl
+# interpreter was deleted there and Tcl ended the program. Here every Tcl interpreter is also kept in a list, so the
+# collector can never delete it; the main thread lets it go once nothing else uses it (when a window is created or
+# destroyed). Nothing else changes.
+import sys as _w95tk_sys
+import threading as _w95tk_threading
+
+_W95TK_INTERPRETERS = []
+
+
+def _w95tk_release():
+    """On the main thread: the interpreters nothing else uses any more are deleted here."""
+    if _w95tk_threading.current_thread() is not _w95tk_threading.main_thread():
+        return
+    for app in list(_W95TK_INTERPRETERS):
+        if _w95tk_sys.getrefcount(app) <= 4:            # (the list, its copy, this loop and getrefcount itself)
+            _W95TK_INTERPRETERS.remove(app)
+        del app
+
+
+def w95_install_tk_guard():
+    import tkinter
+    if getattr(tkinter.Tk, "_w95_tk_guard", False):     # (pasted twice: installed once)
+        return
+    real_init, real_destroy = tkinter.Tk.__init__, tkinter.Tk.destroy
+
+    def init(self, *args, **kwargs):
+        _w95tk_release()
+        real_init(self, *args, **kwargs)
+        _W95TK_INTERPRETERS.append(self.tk)
+        # (no timer of its own: a timer left on a closed window printed "invalid command name ...tick")
+
+    def destroy(self):
+        real_destroy(self)
+        _w95tk_release()
+
+    tkinter.Tk.__init__, tkinter.Tk.destroy = init, destroy
+    tkinter.Tk._w95_tk_guard = True
+    # the windows made before this block (a login window, for example) are kept the same way
+    import gc
+    known = set(id(app) for app in _W95TK_INTERPRETERS)
+    for obj in gc.get_objects():
+        if isinstance(obj, tkinter.Misc):
+            app = getattr(obj, "tk", None)
+            if app is not None and id(app) not in known:
+                known.add(id(app))
+                _W95TK_INTERPRETERS.append(app)
+
+
+w95_install_tk_guard()
+
 # ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 # WINDOWS 95 SCROLLBAR - drawn with tk (the native tk.Scrollbar follows the Windows 10 / 11 theme).
 # It answers the tk.Scrollbar calls: orient, command, set(), get(), config(), pack / grid / place, fraction(),
@@ -18592,10 +22026,9 @@ if check_01():
 #dpi_report("3. login window")
 windowlogin.mainloop()
 
-# ═══════════════════════════════════════════════════════════════════════════════════════════════
-# MENU (Copy App / System Info) - replaces def main1() and def main2(). Everything is inside main1:
-# nothing else is added at module level (the Windows 95 dialogs and frame included).
-# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# MENU (Copy App / System Info) - inlocuieste def main1(...) si def main2() (nivelul 0), pana la sfarsitul lui main2.
+# Fara programe Windows: Service Tag, cheia Windows, logout / restart / shutdown merg prin functiile w95info_* si
+# w95_exit_windows din w95_commands_all.py (pune intai blocul global nou). Battery report a fost scos.
 def main1(licensed=True):
     """The Menu of the IT account (Windows 95 look): Copy App (programs and profiles kept in the database, copied
     to a folder with progress), System Info and Network Console (licensed) and Read me first."""
@@ -19609,16 +23042,6 @@ def main1(licensed=True):
         except OSError as e:
             return -1, str(e)
 
-    def powershell_value(expression):
-        code, text = run_command(["powershell", "-NoProfile", "-NonInteractive", "-Command", expression], timeout=60)
-        value = text.strip().splitlines()[-1].strip() if text.strip() else ""
-        return value if code == 0 else ""
-
-    def wmic_value(args):
-        code, text = run_command(["wmic"] + args, timeout=60)
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
-        return lines[1] if code == 0 and len(lines) > 1 else ""
-
     def get_setting(key, default=""):
         try:
             conn = sqlite3.connect(DB)
@@ -19729,7 +23152,7 @@ def main1(licensed=True):
             rows = [("Copy App", "Copy the kit programs to a folder, by hand\nor with a profile.", self.open_copy_app,
                      True)]
             if FEATURES["system_info"] is not None:
-                rows.append(("System Info", "Computer information, Service Tag, Windows key,\nbattery report, "
+                rows.append(("System Info", "Computer information, Service Tag, Windows key,\n"
                              "shutdown / restart / log out.", self.open_system_info, FEATURES["system_info"]))
             rows.append(("Read me first", "How to set up the programs and the profiles.", self.read_me, True))
             for text, detail, command, enabled in rows:
@@ -19786,7 +23209,7 @@ def main1(licensed=True):
                 "ABOUT THE APPLICATION\n\n"
                 "- Copy App: copies the selected programs to the destination folder (C:\\KIT unless you choose "
                 "another), with a progress bar for each one.\n"
-                + ("- System Info: computer information, Service Tag and Windows license key, battery report, "
+                + ("- System Info: computer information, Service Tag and Windows license key, "
                    "shutdown, restart and log out.\n" if FEATURES["system_info"] else "")
                 + ("- Network Console: received / sent megabytes every second (in Copy App)." if FEATURES["network"]
                    else "")))
@@ -20577,11 +24000,11 @@ def main1(licensed=True):
             left.pack(side="left", fill="y", padx=6, pady=6)
             self.buttons = []
             for item in (("System info", self.show_system_info), ("Service Tag", self.show_service_tag),
-                         ("Windows license key", self.show_license_key), ("Battery report", self.battery_report),
+                         ("Windows license key", self.show_license_key),
                          None, ("Copy", self.copy_output), ("Save Output As...", self.save_output), None,
-                         ("Log out", lambda: self.power("log out", ["shutdown", "/l"])),
-                         ("Restart", lambda: self.power("restart", ["shutdown", "/r", "/t", "1"])),
-                         ("Shutdown", lambda: self.power("shut down", ["shutdown", "/s", "/t", "1"])), None,
+                         ("Log out", lambda: self.power("log out", "logout")),
+                         ("Restart", lambda: self.power("restart", "restart")),
+                         ("Shutdown", lambda: self.power("shut down", "shutdown")), None,
                          ("Close", self.win.destroy)):
                 if item is None:
                     tk.Frame(left, bg=SHADOW, height=2).pack(fill="x", pady=6)
@@ -20627,32 +24050,10 @@ def main1(licensed=True):
             self.background("Reading the system information (systeminfo)", work)
 
         def show_service_tag(self):
-            def work():
-                tag = powershell_value("(Get-CimInstance Win32_BIOS).SerialNumber") or \
-                    wmic_value(["bios", "get", "serialnumber"])
-                return ("Service Tag: %s\n" % tag) if tag else "The Service Tag could not be retrieved.\n"
-            self.background("Reading the Service Tag", work)
+            self.background("Reading the Service Tag", lambda: w95info_service_tag() + "\n")   # (firmware: no wmic)
 
         def show_license_key(self):
-            def work():
-                key = powershell_value("(Get-CimInstance SoftwareLicensingService).OA3xOriginalProductKey") or \
-                    wmic_value(["path", "softwarelicensingservice", "get", "OA3xOriginalProductKey"])
-                return ("Windows license key: %s\n" % key) if key else \
-                    "No Windows key is stored in the firmware of this computer (OA3).\n"
-            self.background("Reading the Windows license key", work)
-
-        def battery_report(self):
-            folder = os.path.abspath("Reports")
-
-            def work():
-                os.makedirs(folder, exist_ok=True)
-                path = os.path.join(folder, "battery_report_%s.html" % time.strftime("%Y%m%d_%H%M%S"))
-                code, text = run_command(["powercfg", "/batteryreport", "/output", path], timeout=120)
-                if code == 0 and os.path.exists(path):
-                    return "Battery report saved:\n%s\n\n(open it with a browser)\n" % path
-                return "The battery report could not be made (a desktop PC has no battery):\n%s\n" % text.strip()
-            # (it was written to C:\, where a standard user cannot save)
-            self.background("Making the battery report", work)
+            self.background("Reading the Windows license key", lambda: w95info_windows_key() + "\n")
 
         def copy_output(self):
             self.win.clipboard_clear()
@@ -20669,14 +24070,14 @@ def main1(licensed=True):
                     mbox.showerror("Save Output", "The file could not be saved:\n%s" % (e.strerror or e),
                                    parent=self.win)
 
-        def power(self, what, command):
-            """Shutdown / restart / log out only after a Yes (they ran at once, on a single click, before)."""
+        def power(self, what, kind):
+            """Shutdown / restart / log out only after a Yes, through ExitWindowsEx (shutdown.exe is not started)."""
             if not mbox.askyesno("System Info", "Do you really want to %s this computer now?\nUnsaved work in other "
                                  "programs will be lost." % what, icon="warning", parent=self.win):
                 return
-            code, text = run_command(command, timeout=30)
-            if code != 0:
-                mbox.showerror("System Info", "The command did not run:\n%s" % text.strip(), parent=self.win)
+            ok, reason = w95_exit_windows(kind)
+            if not ok:
+                mbox.showerror("System Info", "That did not work:\n%s" % reason, parent=self.win)
 
         def stop_all(self):
             pass
@@ -20731,6 +24132,10 @@ if show_validation == True:
     bitpack95_validation(on_valid=main1, on_no_key=main2)
 
 elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actvtmntvar != 9067 and pdfbulkvar != 654312 and rszbvar != 67855 and batchedvar !=231145 and arcbrvar != 132454 and fldrcpvar != 223198 and personaldriveVAR != 78876 and bpkdshgraphvar != 778832 and arpatablevar != 9091 and planogram95var != 456111111111111111 and codebvar != 99887345 and docmrgvar != 99823 and iconedvar != 999213 and videoVAR != 3342109 and fldpckVAR != 88932 and chartvar != 901298 and exccmpvar != 978132 and stickyvar != 9879 and repbldvar != 88923 and stprcdvar != 67768 and shiftplvar != 333432 and tichetvar != 8796 and hardvar != 6 and postmanvar != 8712 and screenvar != 7 and zipvar != 8 and compvar != 9 and sqldesignerVARIABLE != 445532 and sqlmanagerVARIABLE != 44331122 and pdfvar != 10 and replfindvar != 11 and testvarr != 12 and testvarr2 != 122 and pdfvwvar != 13 and netwvar != 14 and crpvar2 != 155 and aivar != 20 and notepadvar != 21 and paintvar != 22 and Adm1var != 30 and Adm3var != 4409 and  Adm2var != 40 and zippassvar != 60 and bkvar != 700 and rnvar != 710 and passmngrr != 2000 and sqlcrvar != 2332 and pausevar != 10000 and taskmngrvar != 1000000 and show_validation == False and junkvar != 77777 and wbpvar != 123456789 and cmvar != 3333 and pingalivevar != 5566 and readervar != 1993 and hardmvar != 1994 and fetchervar != 1995 and shellvar != 1996 and w95var1 != 1997 and w95var != 1998 and sqllvar != 22222 and diagramvar != 2345432 and termadm != 6745 and commandervar != 88888888 and calendarvar != 999000 and allmonitorvar != 999001 and eventvval != 44445555 and assemblyvar != 333333333 and kbbbvar != 5189 and proc_varr != 67766776 and xmleditorvar != 111444555 and MDvar != 777666111 and archVar != 777666012 and expensevar != 777666013 and scrpVar != 777666014 and recoveryVarr != 777666090 and fishervar != 777666091 and muapdash != 777666092 and mindmapvar != 7776660999 and multifilevar != 77766609999 and safevar != 444555000888 and trafficvar != 333344440099 and pwdchkVAR != 9965 and dosboxvar != 3333444400999 and vscodevar != 999955550000 and pdfviewervar != 3333444400997676 and clipboardVAR != 333344440099767667 and filefinderVARR != 5555544443330 and topologyVAR != 555554444333000 and disktoolutilityvar != 99999999995555555555 and calculatorvarrr != 11111111111111111111 and devmgmtvar != 88888888888888888888 and todovar != 8888888888888888888888888888888888888888 and pdftoexcelvar != 666666666666666666666 and csvconvvar != 666666666666666666666666666666666666666666 and docupdfvar != 666666666666666666666666666666666666666666666666666666666666666 and emailvariable != 11002200 and manageextensionsvar != 1100220022 and clpvar != 112200220033000111 and winregvar != 112200220033000111000 and convcalcvar != 11100011100011100011100023 and programmercalcvar != 1110001110001110001110002322 and projmanvar != 111000111000111000111000232222 and regtestvar != 11100011100011100011100023222200 and graphcalcvar != 1110001110001110001110002322220099 and codemergervar != 98099999999999999999999999999999999999999999999999999 and xlcvarrrr != 55555555555555555555555555555555555555555555555555555555555555555555555 and dbmainvarrrr != 77777777777777777777777777777777777777777777777888812 and codeanaliservisvar != 43434343434344444444444433333333333434343 and pdfeditorVARvar != 434343434343444444444444333333333334343435 and wordtoPDFFFVAR != 449000000000000000000000000000000000000000000000000 and timelinevar != 555550009088888866666666666666666666666666666 and forensicvar != 5555500090888888666666666666666666666666666667 and timetrackerVARRR != 55555000908888886666666666666666666666666666678 and dbcompVARRR != 555550009088888866666666666666666666666666666789 and decisiontreeVAR != 5555500090888888666666666666666666666666666667890 and MO95VAR != 55555000908888886666666666666666666666666666678900 and verscontrVAR != 3333333333333333333333333333333333333300000000000000000000000011111111 and plotterVAR != 33333333333333333333333333333333333333000000000000000000000000111111112 and sqldiagramvaR != 777777777777777777777733333333333333333300000000000020202020 and sqlexecwdVAR != 7777777777777777777777333333333333333333000000000000202020209 and icoconvvar != 876523 and pxvar != 9023 and imgedvar != 7845:
+    # MENU main3 - pastreaza linia ta  elif trmn != 2 and ... :  si inlocuieste tot ce este sub ea (indentat cu 4
+    # spatii), de la comentarii / def main3(): pana la main3() inclusiv.
+    # Fara programe Windows: Service Tag, cheia Windows, logout / restart / shutdown merg prin functiile w95info_* si
+    # w95_exit_windows din w95_commands_all.py (pune intai blocul global nou). Battery report a fost scos.
     # ═══════════════════════════════════════════════════════════════════════════════════════════════
     # MENU of the other accounts (Copy App) - replaces "def main3(): ... main3()"
     # inside the elif. Everything is inside main3.
@@ -21745,16 +25150,6 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
             except OSError as e:
                 return -1, str(e)
 
-        def powershell_value(expression):
-            code, text = run_command(["powershell", "-NoProfile", "-NonInteractive", "-Command", expression], timeout=60)
-            value = text.strip().splitlines()[-1].strip() if text.strip() else ""
-            return value if code == 0 else ""
-
-        def wmic_value(args):
-            code, text = run_command(["wmic"] + args, timeout=60)
-            lines = [l.strip() for l in text.splitlines() if l.strip()]
-            return lines[1] if code == 0 and len(lines) > 1 else ""
-
         def get_setting(key, default=""):
             try:
                 conn = sqlite3.connect(DB)
@@ -21865,7 +25260,7 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
                 rows = [("Copy App", "Copy the kit programs to a folder, by hand\nor with a profile.", self.open_copy_app,
                          True)]
                 if FEATURES["system_info"] is not None:
-                    rows.append(("System Info", "Computer information, Service Tag, Windows key,\nbattery report, "
+                    rows.append(("System Info", "Computer information, Service Tag, Windows key,\n"
                                  "shutdown / restart / log out.", self.open_system_info, FEATURES["system_info"]))
                 rows.append(("Read me first", "How to set up the programs and the profiles.", self.read_me, True))
                 for text, detail, command, enabled in rows:
@@ -21922,7 +25317,7 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
                     "ABOUT THE APPLICATION\n\n"
                     "- Copy App: copies the selected programs to the destination folder (C:\\KIT unless you choose "
                     "another), with a progress bar for each one.\n"
-                    + ("- System Info: computer information, Service Tag and Windows license key, battery report, "
+                    + ("- System Info: computer information, Service Tag and Windows license key, "
                        "shutdown, restart and log out.\n" if FEATURES["system_info"] else "")
                     + ("- Network Console: received / sent megabytes every second (in Copy App)." if FEATURES["network"]
                        else "")))
@@ -22713,11 +26108,11 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
                 left.pack(side="left", fill="y", padx=6, pady=6)
                 self.buttons = []
                 for item in (("System info", self.show_system_info), ("Service Tag", self.show_service_tag),
-                             ("Windows license key", self.show_license_key), ("Battery report", self.battery_report),
+                             ("Windows license key", self.show_license_key),
                              None, ("Copy", self.copy_output), ("Save Output As...", self.save_output), None,
-                             ("Log out", lambda: self.power("log out", ["shutdown", "/l"])),
-                             ("Restart", lambda: self.power("restart", ["shutdown", "/r", "/t", "1"])),
-                             ("Shutdown", lambda: self.power("shut down", ["shutdown", "/s", "/t", "1"])), None,
+                             ("Log out", lambda: self.power("log out", "logout")),
+                             ("Restart", lambda: self.power("restart", "restart")),
+                             ("Shutdown", lambda: self.power("shut down", "shutdown")), None,
                              ("Close", self.win.destroy)):
                     if item is None:
                         tk.Frame(left, bg=SHADOW, height=2).pack(fill="x", pady=6)
@@ -22763,32 +26158,10 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
                 self.background("Reading the system information (systeminfo)", work)
 
             def show_service_tag(self):
-                def work():
-                    tag = powershell_value("(Get-CimInstance Win32_BIOS).SerialNumber") or \
-                        wmic_value(["bios", "get", "serialnumber"])
-                    return ("Service Tag: %s\n" % tag) if tag else "The Service Tag could not be retrieved.\n"
-                self.background("Reading the Service Tag", work)
+                self.background("Reading the Service Tag", lambda: w95info_service_tag() + "\n")   # (firmware: no wmic)
 
             def show_license_key(self):
-                def work():
-                    key = powershell_value("(Get-CimInstance SoftwareLicensingService).OA3xOriginalProductKey") or \
-                        wmic_value(["path", "softwarelicensingservice", "get", "OA3xOriginalProductKey"])
-                    return ("Windows license key: %s\n" % key) if key else \
-                        "No Windows key is stored in the firmware of this computer (OA3).\n"
-                self.background("Reading the Windows license key", work)
-
-            def battery_report(self):
-                folder = os.path.abspath("Reports")
-
-                def work():
-                    os.makedirs(folder, exist_ok=True)
-                    path = os.path.join(folder, "battery_report_%s.html" % time.strftime("%Y%m%d_%H%M%S"))
-                    code, text = run_command(["powercfg", "/batteryreport", "/output", path], timeout=120)
-                    if code == 0 and os.path.exists(path):
-                        return "Battery report saved:\n%s\n\n(open it with a browser)\n" % path
-                    return "The battery report could not be made (a desktop PC has no battery):\n%s\n" % text.strip()
-                # (it was written to C:\, where a standard user cannot save)
-                self.background("Making the battery report", work)
+                self.background("Reading the Windows license key", lambda: w95info_windows_key() + "\n")
 
             def copy_output(self):
                 self.win.clipboard_clear()
@@ -22805,14 +26178,14 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
                         mbox.showerror("Save Output", "The file could not be saved:\n%s" % (e.strerror or e),
                                        parent=self.win)
 
-            def power(self, what, command):
-                """Shutdown / restart / log out only after a Yes (they ran at once, on a single click, before)."""
+            def power(self, what, kind):
+                """Shutdown / restart / log out only after a Yes, through ExitWindowsEx (shutdown.exe is not started)."""
                 if not mbox.askyesno("System Info", "Do you really want to %s this computer now?\nUnsaved work in other "
                                      "programs will be lost." % what, icon="warning", parent=self.win):
                     return
-                code, text = run_command(command, timeout=30)
-                if code != 0:
-                    mbox.showerror("System Info", "The command did not run:\n%s" % text.strip(), parent=self.win)
+                ok, reason = w95_exit_windows(kind)
+                if not ok:
+                    mbox.showerror("System Info", "That did not work:\n%s" % reason, parent=self.win)
 
             def stop_all(self):
                 pass
@@ -22821,6 +26194,11 @@ elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actv
         menu.root.mainloop()
         return menu
     main3()
+
+# TERMINAL - inlocuieste tot blocul  if trmn == 2:  (pana la ultima lui linie,  terminal_95() ).
+# Are nevoie de blocul w95_commands_all.py (versiunea noua) la inceputul lui Bitpack.py, nivelul 0.
+# Nicio comanda nu mai porneste in Windows: comenzile din lista sunt raspunse de Bitpack, restul primesc
+# mesajul 'is not recognized'. help = toate comenzile care merg.
 
 if trmn == 2:
     bitpack95_validation("2")
@@ -23381,10 +26759,6 @@ if trmn == 2:
                     self.transient(owner)
             except _w95_tk.TclError:
                 pass
-            # try:                                                    # stays above the window that opened it
-                # self.transient(self.master.winfo_toplevel() if self.master is not None else None)
-            # except _w95_tk.TclError:
-                # pass
             self.configure(bd=2, relief="raised")
             self._w95_bar = _w95_tk.Frame(self, bg=_W95Base.NAVY, height=20)
             self._w95_bar.pack_propagate(False)
@@ -23483,8 +26857,7 @@ if trmn == 2:
                                                image=self._w95_pixel, compound="center", width=12, height=10, padx=0,
                                                pady=0, bg=_W95Base.FACE, bd=2, relief="raised", highlightthickness=0,
                                                takefocus=0, activebackground=_W95Base.FACE, command=self._w95_toggle_max)
-                #self._w95_max.pack(side="right", before=self._w95_close)
-                self._w95_max.pack(side="right", after=self._w95_close)
+                self._w95_max.pack(side="right", after=self._w95_close)     # left of Close
                 for widget in (bar, self._w95_title):
                     widget.bind("<Double-Button-1>", lambda e: self._w95_toggle_max())
                 grip = _w95_tk.Canvas(self, width=13, height=13, bg=_W95Base.FACE, bd=0, highlightthickness=0,
@@ -23611,9 +26984,8 @@ if trmn == 2:
         def available_shells():
             shells = []
             if IS_WINDOWS:
-                shells.append("cmd")
-                if shutil.which("powershell") or shutil.which("powershell.exe"):
-                    shells.append("PowerShell")
+                shells += ["cmd", "PowerShell"]          # both answered inside Bitpack (w95_sandbox): no cmd.exe,
+                                                         # no powershell.exe, so they work where those are blocked
             else:
                 for name in ("bash", "sh"):
                     if shutil.which(name):
@@ -23652,7 +27024,10 @@ if trmn == 2:
                     options["creationflags"] = 0x08000000                  # no console window pops up
                 else:
                     options["start_new_session"] = True                    # its own group: Ctrl+C stops the children too
-                self.process = subprocess.Popen(command_line(shell, command), **options)
+                # inside Bitpack only (w95_commands_all.py): no Windows program runs; an unknown command gets the
+                # 'is not recognized' message
+                self.process = w95_sandbox_popen(command_line(shell, command),
+                                                 "PowerShell" if shell == "PowerShell" else "cmd", **options)
                 self.readers = [threading.Thread(target=self.read, args=(self.process.stdout, "out"), daemon=True),
                                 threading.Thread(target=self.read, args=(self.process.stderr, "err"), daemon=True)]
                 for r in self.readers:
@@ -23695,6 +27070,9 @@ if trmn == 2:
                 if self.process.poll() is not None:
                     return
                 self.killed = True
+                if self.process.pid < 0:                                   # a command answered inside Bitpack
+                    self.process.kill()
+                    return
                 try:
                     if IS_WINDOWS:
                         subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.process.pid)], stdout=subprocess.DEVNULL,
@@ -23876,7 +27254,8 @@ if trmn == 2:
                      ("Esc", "Clear the line being typed"), ("Ctrl+L", "Clear the screen"), ("Ctrl+F", "Find"),
                      ("Ctrl+T / Ctrl+W", "New tab / close tab"), ("Ctrl+Tab", "Next tab"),
                      ("Ctrl+= / Ctrl+- / Ctrl+0", "Bigger / smaller / normal text"),
-                     ("Built in", "cd, cls (clear), exit, history, set NAME=value (cmd), export NAME=value (sh)")]
+                     ("Built in", "help [command], cd, cls (clear), exit, history, set NAME=value (cmd), "
+                                  "$env:NAME = value (PowerShell)")]
 
         class Tab:
             def __init__(self, app, shell, cwd):
@@ -24447,8 +27826,8 @@ if trmn == 2:
                 base = self.current.cwd if self.current is not None else os.path.expanduser("~")
                 tab = Tab(self, shell or (self.current.shell if self.current is not None else self.shells[0]), base)
                 self.tabs.append(tab)
-                self.write(tab, "Bitpack Terminal - %s. Type 'help' for the shell's own help; F1 shows the keys.\n" % tab.shell,
-                           "info")
+                self.write(tab, "Bitpack Terminal - %s. Type 'help' for the commands (they run inside Bitpack, not in "
+                                "Windows); F1 shows the keys.\n" % tab.shell, "info")
                 self.select_tab(tab)
                 self.prompt(tab)
 
@@ -24570,6 +27949,11 @@ if trmn == 2:
                     for i, c in enumerate(reversed(self.history[:50]), start=1):
                         self.write(tab, "%4d  %s\n" % (i, c))
                     return self.after_command(tab)
+                if word in ("help", "get-help", "man") and "|" not in stripped and ">" not in stripped:
+                    topic = stripped.split(None, 1)[1].strip() if len(stripped.split(None, 1)) > 1 else ""
+                    self.write(tab, self.help_text(tab.shell, topic))
+                    tab.last_code = 0
+                    return self.after_command(tab)
                 target, note = change_dir(tab.shell, stripped, tab.cwd)
                 if target is not None or note is not None:
                     if note:
@@ -24590,6 +27974,24 @@ if trmn == 2:
                     return self.after_command(tab)
                 self.draw_tabs()
                 self.update_status()
+
+            def help_text(self, shell, topic=""):
+                """HELP of this tab: the terminal's own commands and every command answered inside Bitpack."""
+                if topic:
+                    return w95_commands_help(shell, topic).replace("\r\n", "\n")
+                own = ("Commands of the Terminal itself:\n"
+                       "  HELP [command]      this list, or the options of one command (also: command /?)\n"
+                       "  CD [folder] / D:    change the folder of this tab (also: chdir, Set-Location)\n"
+                       "  CLS / CLEAR         clear the screen\n"
+                       "  HISTORY             the commands used before\n"
+                       "  %s\n"
+                       "  EXIT                close the tab\n\n"
+                       % ("$env:NAME = value   set a variable for this tab" if shell == "PowerShell"
+                          else "SET NAME=value      set a variable for this tab"))
+                listed = w95_commands_help(shell, skip=("CD", "CLS", "EXIT", "HELP", "Get-Help", "Clear-Host",
+                                                        "Get-Location"))
+                return own + listed.replace("\r\n", "\n") + ("Nothing else runs here: no Windows programs, no "
+                                                                "pipes or scripts.\n")
 
             def after_command(self, tab):
                 self.prompt(tab)
@@ -24830,7 +28232,7 @@ if trmn == 2:
         return app
 
     terminal_95()
-
+    
 if passfig == 4:
     import random
     import pyperclip
@@ -40470,6 +43872,10 @@ if crpvar2 == 155:
 
     fast_encrypt_95()
     
+# AI ASSISTANT - inlocuieste tot blocul  if aivar == 20:  (pana la ai_assistant_95() de la sfarsit).
+# Fara programe Windows: Service Tag, cheia Windows, Wi-Fi, dispozitive, evenimente, servicii, firewall, conturi,
+# plan de alimentare, restart / shutdown / logout prin functiile w95info_* din w95_commands_all.py; ipconfig, arp,
+# netstat, ping, systeminfo, whoami raspunse de Bitpack. Battery report a fost scos.
 if aivar == 20:
     bitpack95_validation("20")
     
@@ -41437,7 +44843,7 @@ if aivar == 20:
 
     def ai_assistant_95():
         """AI Assistant (Windows 95 look): questions in plain words, answers and automations in the chat. Nothing opens
-        Windows consoles or Control Panel: every command answers here."""
+        Windows consoles or Control Panel and no Windows program starts: every command answers here."""
         import os
         import re
         import time
@@ -41481,10 +44887,6 @@ if aivar == 20:
             except OSError as e:
                 return -1, str(e)
 
-        def powershell(script, timeout=60):
-            return run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " + script], timeout)
-
         def clean(text, limit=400):
             lines = [l.rstrip() for l in text.splitlines()]
             while lines and not lines[0].strip():
@@ -41520,40 +44922,17 @@ if aivar == 20:
         # AUTOMATIONS (each answers with text; the slow ones run away from the window)
         # ═════════════════════════════════════════════════════════════════════════════════════════════════════
         def a_service_tag(arg):
-            code, text = powershell("(Get-CimInstance Win32_BIOS).SerialNumber")
-            value = text.strip().splitlines()[-1].strip() if code == 0 and text.strip() else ""
-            if not value:
-                code, text = run(["wmic", "bios", "get", "serialnumber"])
-                lines = [l.strip() for l in text.splitlines() if l.strip()]
-                value = lines[1] if code == 0 and len(lines) > 1 else ""
-            return "Service Tag: %s" % value if value else "The Service Tag could not be read on this computer."
+            return w95info_service_tag()                        # (firmware table: no powershell / wmic)
 
         def a_windows_key(arg):
-            code, text = powershell("(Get-CimInstance SoftwareLicensingService).OA3xOriginalProductKey")
-            value = text.strip().splitlines()[-1].strip() if code == 0 and text.strip() else ""
-            if not value:
-                code, text = run(["wmic", "path", "softwarelicensingservice", "get", "OA3xOriginalProductKey"])
-                lines = [l.strip() for l in text.splitlines() if l.strip()]
-                value = lines[1] if code == 0 and len(lines) > 1 else ""
-            return ("Windows license key (from the firmware): %s" % value if value else
-                    "No Windows key is stored in the firmware of this computer (OA3). The licence may be digital, linked "
-                    "to the Microsoft account or the organisation.")
+            return w95info_windows_key()                        # (ACPI MSDM table: no powershell / wmic)
 
         def a_system_info(arg):
             code, text = run(["systeminfo"], timeout=180)
             return "System information:\n" + clean(text) if code == 0 else text
 
         def a_computer(arg):
-            code, text = powershell(
-                "$c = Get-CimInstance Win32_ComputerSystem; $o = Get-CimInstance Win32_OperatingSystem; "
-                "'Computer name : ' + $c.Name; 'Domain        : ' + $c.Domain + $(if ($c.PartOfDomain) {' (domain)'} "
-                "else {' (workgroup)'}); 'Manufacturer  : ' + $c.Manufacturer; 'Model         : ' + $c.Model; "
-                "'Windows       : ' + $o.Caption + ' ' + $o.Version + ' (build ' + $o.BuildNumber + ')'; "
-                "'Logged-on user: ' + $c.UserName")
-            if code == 0 and text.strip():
-                return clean(text)
-            return "Computer name: %s\nUser: %s\\%s" % (socket.gethostname(), os.environ.get("USERDOMAIN", "?"),
-                                                        os.environ.get("USERNAME", "?"))
+            return w95info_computer()
 
         def a_uptime(arg):
             psutil = need_psutil()
@@ -41684,33 +45063,12 @@ if aivar == 20:
             code, text = run(["ipconfig", "/all"] if IS_WINDOWS else ["ip", "addr"])
             return "IP configuration:\n" + clean(text)
 
-        LABEL_KEY = ("key content", "continut cheie", "schlusselinhalt", "contenu de la cle", "contenido de la clave",
-                     "contenuto chiave")
 
         def plain(text):
             return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)).lower()
 
         def a_wifi(arg):
-            code, text = run(["netsh", "wlan", "show", "profiles"])
-            if code != 0:
-                return clean(text) or "No Wi-Fi adapter or profiles on this computer."
-            names = []
-            for line in text.splitlines():
-                m = re.match(r"^\s{4}\S.*?\s:\s(.+)$", line)       # works in every Windows language (not only English)
-                if m and m.group(1).strip() and not m.group(1).strip().startswith("<"):
-                    names.append(m.group(1).strip())
-            if not names:
-                return "No saved Wi-Fi networks."
-            lines = ["%-32s %s" % ("Network", "Password")]
-            for name in names:
-                code, detail = run(["netsh", "wlan", "show", "profile", "name=%s" % name, "key=clear"])
-                password = ""
-                for line in detail.splitlines():
-                    label, sep, value = line.partition(":")
-                    if sep and plain(label).strip() in LABEL_KEY:
-                        password = value.strip()
-                lines.append("%-32s %s" % (name[:32], password or "(not shown: open network, or it needs administrator)"))
-            return "Saved Wi-Fi networks:\n" + "\n".join(lines)
+            return w95info_wifi()                               # (wlanapi: no netsh)
 
         def a_ping(arg):
             host = (arg or "").strip()
@@ -41736,20 +45094,10 @@ if aivar == 20:
                     return "The name could not be resolved: %s (%s)" % (name, e)
 
         def a_devices(arg):
-            code, text = powershell(
-                "$all = Get-PnpDevice -PresentOnly; $bad = $all | Where-Object { $_.Status -ne 'OK' }; "
-                "'Devices found: ' + $all.Count + ', with problems: ' + ($bad | Measure-Object).Count; ''; "
-                "$bad | ForEach-Object { '{0,-10} {1,-12} {2}' -f $_.Status, $_.Class, $_.FriendlyName }")
-            if code != 0:
-                return "The device list could not be read here.\n" + clean(text, 20)
-            return "Device check (like Device Manager):\n" + clean(text)
+            return w95info_devices()                            # (cfgmgr32: no powershell)
 
         def a_gpu(arg):
-            code, text = powershell(
-                "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name; '  driver ' + $_.DriverVersion + "
-                "' (' + $_.DriverDate.ToString('dd.MM.yyyy') + ')'; '  ' + $_.CurrentHorizontalResolution + ' x ' + "
-                "$_.CurrentVerticalResolution + ', ' + [math]::Round($_.AdapterRAM / 1MB) + ' MB' }")
-            return "Graphics:\n" + clean(text) if code == 0 and text.strip() else "The graphics card could not be read."
+            return w95info_gpu()
 
         def a_installed(arg):
             if not IS_WINDOWS:
@@ -41812,27 +45160,16 @@ if aivar == 20:
             return "Programs that start with Windows:\n" + ("\n".join(lines) if lines else "(none)")
 
         def a_services(arg):
-            code, text = powershell(
-                "$s = Get-Service; 'Running: ' + ($s | Where-Object Status -eq 'Running').Count + ' of ' + $s.Count; ''; "
-                "'Automatic services that are stopped:'; Get-CimInstance Win32_Service -Filter "
-                "\"StartMode='Auto' AND State<>'Running'\" | ForEach-Object { '  {0,-40} {1}' -f $_.DisplayName, $_.Name }")
-            return clean(text) if code == 0 else "The services could not be read.\n" + clean(text, 20)
+            return w95info_services()
 
         def a_events(arg):
-            code, text = powershell(
-                "$since = (Get-Date).AddDays(-1); try { Get-WinEvent -FilterHashtable @{LogName='System'; Level=1,2; "
-                "StartTime=$since} -MaxEvents 15 -ErrorAction Stop | ForEach-Object { $_.TimeCreated.ToString('dd.MM "
-                "HH:mm') + '  ' + $_.ProviderName + ' (' + $_.Id + ')'; '    ' + (($_.Message -split \"`n\")[0]).Trim() } "
-                "} catch { 'No errors in the System log in the last 24 hours.' }", timeout=90)
-            return "System errors in the last 24 hours (Event Viewer):\n" + clean(text) if code == 0 else clean(text, 20)
+            return w95info_events()                             # (wevtapi: no powershell)
 
         def a_firewall(arg):
-            code, text = run(["netsh", "advfirewall", "show", "allprofiles", "state"])
-            return "Windows Firewall:\n" + clean(text)
+            return w95info_firewall()                           # (registry: no netsh)
 
         def a_users(arg):
-            code, text = run(["net", "user"])
-            return "Local accounts on this computer:\n" + clean(text)
+            return w95info_users()                              # (netapi32: no net user)
 
         def a_whoami(arg):
             code, text = run(["whoami"])
@@ -41840,8 +45177,7 @@ if aivar == 20:
                                                                    os.environ.get("USERNAME", "?")))
 
         def a_power(arg):
-            code, text = run(["powercfg", "/getactivescheme"])
-            lines = [clean(text)] if code == 0 else []
+            lines = [w95info_power_plan()]                      # (powrprof: no powercfg)
             psutil = need_psutil()
             battery = psutil.sensors_battery() if psutil and hasattr(psutil, "sensors_battery") else None
             if battery is None:
@@ -41850,17 +45186,7 @@ if aivar == 20:
                 left = "" if battery.power_plugged or battery.secsleft < 0 else ", about %d min left" % (battery.secsleft // 60)
                 lines.append("Battery: %.0f%%, %s%s." % (battery.percent, "charging / plugged in" if battery.power_plugged
                                                          else "on battery", left))
-            lines.append("Type 'battery report' for the full battery report.")
             return "\n".join(lines)
-
-        def a_battery_report(arg):
-            folder = os.path.abspath("Reports")
-            os.makedirs(folder, exist_ok=True)
-            path = os.path.join(folder, "battery_report_%s.html" % time.strftime("%Y%m%d_%H%M%S"))
-            code, text = run(["powercfg", "/batteryreport", "/output", path], timeout=120)
-            if code == 0 and os.path.exists(path):
-                return "Battery report saved:\n%s\n(open it with a browser)" % path
-            return "The battery report could not be made (a desktop PC has no battery):\n" + clean(text, 10)
 
         def a_help(arg):
             return HELP
@@ -41950,7 +45276,6 @@ if aivar == 20:
             ("whoami", "Who am I", ["who am i", "whoami", "my account", "current user"], a_whoami, "slow"),
             ("power", "Power plan and battery", ["power plan", "power options", "power", "battery", "powercfg", "energy",
                                                  "baterie", "energie"], a_power, "slow"),
-            ("batteryreport", "Battery report", ["battery report", "raport baterie"], a_battery_report, "slow"),
             ("logout", "Log out...", ["logout", "log out", "logoff", "log off", "sign out", "delogare"], None, "confirm"),
             ("restart", "Restart...", ["restart", "reboot", "reporneste", "restart pc"], None, "confirm"),
             ("shutdown", "Shut down...", ["shutdown", "shut down", "turn off", "power off", "opreste", "inchide pc"], None,
@@ -42013,7 +45338,7 @@ if aivar == 20:
                   ("Performance", ["resources", "processes", "disks", "temp", "cleantemp"]),
                   ("Network", ["ipconfig", "adapters", "arp", "ports", "wifi"]),
                   ("Windows", ["devices", "gpu", "installed", "startup", "services", "events", "firewall", "users"]),
-                  ("Power", ["power", "batteryreport", "logout", "restart", "shutdown"])]
+                  ("Power", ["power", "logout", "restart", "shutdown"])]
         HELP = "\n".join(["What I can do (type it in your own words, e.g. 'show the service tag'):", ""] +
                          ["%s\n%s" % (title.upper(), "\n".join("  - %-28s %s" % (BY_KEY[k][1], ", ".join(BY_KEY[k][2][:3]))
                                                               for k in keys)) for title, keys in groups] +
@@ -42191,15 +45516,13 @@ if aivar == 20:
                         self.say("AI Assistant", "Nothing was deleted.")
                     return
                 what = {"shutdown": "shut down", "restart": "restart", "logout": "log out of"}[key]
-                command = {"shutdown": ["shutdown", "/s", "/t", "5"], "restart": ["shutdown", "/r", "/t", "5"],
-                           "logout": ["shutdown", "/l"]}[key]
                 if not mbox.askyesno("AI Assistant", "Do you really want to %s this computer now?\nUnsaved work in other "
                                      "programs will be lost." % what, icon="warning", parent=self.root):
                     self.say("AI Assistant", "Cancelled - nothing was done.")
                     return
-                code, text = run(command, timeout=20)
-                self.say("AI Assistant", ("OK, the computer will %s in a few seconds." % what.replace(" of", "")) if code == 0
-                         else "The command did not run:\n%s" % clean(text, 10), mono=code != 0)
+                ok, reason = w95_exit_windows(key)               # (ExitWindowsEx: shutdown.exe is not started)
+                self.say("AI Assistant", ("OK, the computer will %s now." % what.replace(" of", "")) if ok
+                         else "That did not work: %s" % reason)
 
             def clear_chat(self):
                 self.chat.config(state="normal")
@@ -42222,7 +45545,7 @@ if aivar == 20:
             def about(self):
                 mbox.showinfo("About AI Assistant", "AI Assistant\n\nAnswers from a fixed list of commands and runs the "
                               "checks in this window: system, network, Windows, power.\nNothing opens Control Panel or "
-                              "Windows consoles.", parent=self.root)
+                              "Windows consoles, and no Windows program is started.", parent=self.root)
 
             def close(self):
                 self.root.destroy()
@@ -42234,7 +45557,7 @@ if aivar == 20:
 
     if __name__ == "__main__":
         ai_assistant_95()
-
+        
 if notepadvar == 21:
     bitpack95_validation("21")
     #!/usr/bin/env python3
@@ -66038,6 +69361,12 @@ if fetchervar == 1995:
     if __name__ == "__main__":
         FetcherRepair95("test")
     
+# SHELL INTEGRATOR / BPK-DOS PROMPT - inlocuieste tot blocul  if shellvar == 1996:  (pana la apelul
+# ShellIntegrator95({...}) de la sfarsitul lui).
+# Are nevoie de blocul w95_commands_all.py (versiunea noua) la inceputul lui Bitpack.py, nivelul 0.
+# Nicio comanda nu mai porneste in Windows: comenzile din lista sunt raspunse de Bitpack, restul primesc
+# mesajul 'is not recognized'. help = toate comenzile care merg.
+
 if shellvar == 1996:
     import os
     import sys
@@ -66059,7 +69388,8 @@ if shellvar == 1996:
       * the Bitpack commands of the w95dist Command Prompt (exec ...). The administrator ones run for anyone
         who types them, as in w95dist; help lists them for an administrator (admin=True) or once
         `exec dbo_bitpack --admin` has set exec_admin_sql = 1 in app_flags
-      * any other text runs as a system command (cmd on Windows), with its output in the window; Ctrl+C stops it.
+      * the Windows commands answered inside Bitpack (w95_commands_all.py: ipconfig, ping, tasklist, dir /s ...);
+        no Windows program is started: anything else gets the 'is not recognized' message. Ctrl+C stops a command.
 
     `cd` changes only the terminal's own folder (the prompt and the system commands use it); the folder of
     the Bitpack process is never changed, so Config/dbo_bitpack.db is always found.
@@ -66241,64 +69571,6 @@ if shellvar == 1996:
                 return [f"Error: {exc}", "The existing database was not changed."], "error"
             return [f"{'Database overwritten' if replaced else 'Database created'} from {source_name} ({tables} table(s)).",
                     "Import completed successfully.", "Restart Bitpack to reload the new database."], "response"
-        # def export_db(target_name):
-            # db_path = find_db()
-            # if not os.path.isfile(db_path):
-                # return ["Error: Config/dbo_bitpack.db not found."], "error"
-            # target = os.path.join(os.path.dirname(db_path), target_name)
-            # conn = sqlite3.connect(db_path)
-            # try:
-                # tables = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-                                      # "AND name NOT LIKE 'sqlite_%'").fetchone()[0]
-                # statements = 0
-                # temp = target + ".part"
-                # with open(temp, "w", encoding="utf-8") as handle:
-                    # handle.write(f"-- Bitpack database export ({target_name})\n")
-                    # handle.write(f"-- Generated: {datetime.now():%Y-%m-%d %H:%M:%S}\n")
-                    # handle.write("-- Source: Config/dbo_bitpack.db\n")
-                    # restore = "exec dbo_bitpack --import" + (" --sql" if target_name.endswith(".sql") else "")
-                    # handle.write(f"-- Restore with: {restore}\n\n")
-                    # handle.write("PRAGMA foreign_keys = OFF;\n")
-                    # for line in conn.iterdump():
-                        # handle.write(f"{line}\n")
-                        # statements += 1
-                # os.replace(temp, target)                         # a failed export never leaves half a file
-            # finally:
-                # conn.close()
-            # size_kb = os.path.getsize(target) / 1024
-            # return [f"Exported {tables} table(s), {statements} statement(s).",
-                    # f"File: {target} ({size_kb:.1f} KB)", "Export completed successfully."], "response"
-
-        # def import_db(source_name):
-            # db_path = find_db()
-            # source = os.path.join(os.path.dirname(db_path), source_name)
-            # if not os.path.isfile(source):
-                # export = "exec dbo_bitpack --export" + (" --sql" if source_name.endswith(".sql") else "")
-                # return [f"Error: Config/{source_name} not found.", f"Run '{export}' first."], "error"
-            # with open(source, encoding="utf-8") as handle:
-                # script = handle.read()
-            # conn = sqlite3.connect(db_path)
-            # try:
-                # cursor = conn.cursor()
-                # cursor.execute("PRAGMA foreign_keys = OFF")
-                # dropped = 0
-                # for kind in ("trigger", "view", "index", "table"):
-                    # cursor.execute("SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'", (kind,))
-                    # for (name,) in cursor.fetchall():
-                        # cursor.execute(f'DROP {kind.upper()} IF EXISTS "{name}"')
-                        # dropped += 1
-                # conn.commit()
-                # conn.executescript(script)
-                # conn.commit()
-                # tables = cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
-                                        # "AND name NOT LIKE 'sqlite_%'").fetchone()[0]
-                # conn.isolation_level = None
-                # conn.execute("VACUUM")
-            # finally:
-                # conn.close()
-            # return [f"Dropped {dropped} existing object(s).",
-                    # f"Database overwritten from {source_name} ({tables} table(s)).",
-                    # "Import completed successfully.", "Restart Bitpack to reload the new database."], "response"
 
         def drop_all_tables(foreign_keys_off):
             conn = sqlite3.connect(find_db())
@@ -66377,7 +69649,6 @@ if shellvar == 1996:
              "The current database is REPLACED by Config/init.bpk95.", lambda: import_db("init.bpk95")),
             ("exec dbo_bitpack --import --sql", "rebuild the database from Config/init.sql", False,
              "The current database is REPLACED by Config/init.sql.", lambda: import_db("init.sql")),
-            #("exec recreate_data_pxed", "create the data_pxed folder for the pixel art account", False, None, cmd_pxed),
             ("exec bitpack_assets", "create the Bitpack assets folder", False, None,
              cmd_assets),
             ("exec sql_management_studio_variable", "create the SQL Management Studio environment variable", False,
@@ -66860,7 +70131,8 @@ if shellvar == 1996:
                 self.finish(entry[0], text, tag)
 
             def run_system(self, command):
-                """Any other command runs in cmd (or the shell), in the terminal's folder, output streamed here."""
+                """Any other command: answered inside Bitpack (w95_commands_all.py), never in Windows; in the
+                terminal's folder, output streamed here. An unknown command gets the 'is not recognized' message."""
                 self.busy = True
                 self.status.config(text=f"Running: {command}   (Ctrl+C or Stop to end it)")
                 events, collected = queue.Queue(), []
@@ -66873,7 +70145,7 @@ if shellvar == 1996:
                             options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000
                         else:
                             options["start_new_session"] = True
-                        process = subprocess.Popen(command, **options)
+                        process = w95_sandbox_popen(command, "cmd", **options)    # inside Bitpack only (no cmd.exe)
                         self.process = process
                         for raw in iter(process.stdout.readline, b""):
                             events.put(("out", raw.decode(CONSOLE_ENCODING, errors="replace").replace("\r", "")))
@@ -66916,7 +70188,9 @@ if shellvar == 1996:
                 if process is None or process.poll() is not None:
                     return
                 try:
-                    if IS_WINDOWS:
+                    if process.pid < 0:                                    # a command answered inside Bitpack
+                        process.kill()
+                    elif IS_WINDOWS:
                         subprocess.run(f"taskkill /F /T /PID {process.pid}", shell=True, capture_output=True,
                                        creationflags=0x08000000)
                     else:
@@ -66953,7 +70227,12 @@ if shellvar == 1996:
                         for entry in EXEC:
                             if entry[2]:
                                 self.write(f"  {entry[0]:<{width}}{entry[1]}\n", "admin")
-                    self.write("Any other command runs in the system shell (ipconfig, ping, tasklist...).\n", "info")
+                    self.write("Other commands (they run inside Bitpack, not in Windows):\n", "info")
+                    listed = w95_commands_help("cmd", skip=("CD", "CLS", "HELP", "VER", "EXIT"))
+                    for line in listed.replace("\r\n", "\n").splitlines()[2:]:
+                        self.write(("  " + line if line and not line.startswith(" ") else line) + "\n",
+                                   None if line.startswith(" ") or not line else "info")
+                    self.write("Nothing else runs here: no Windows programs, no pipes or scripts.\n", "info")
                     self.write("Up / Down = previous commands, Tab = complete, Esc = clear the line, "
                                "Ctrl+C = copy / stop.\n\n", "info")
                     self.prompt()
@@ -67096,7 +70375,7 @@ if shellvar == 1996:
         ShellIntegrator95({"init": "The precondition has been initialized.", "powercli Bitpack -t": "On",
                            "1/0,12": "OK.", "0/0,8": "OK.", "restart_prec": "All values have been restored.",
                            "launch_bitpack": "Launching Bitpack..."}, "test", admin=True if "--admin" in _sys.argv else None)
-    
+                           
     # # Commands and simulated messages
     # messages = {
         # "init": "The precondition has been initialized.",
@@ -76137,7 +79416,8 @@ if w95var == 1998 or w95var1 == 1997:
                 word_window.protocol("WM_DELETE_WINDOW", lambda: self.close_window("Word Lite", word_window))
             
             def create_terminal(self):
-                """Creează un terminal/command prompt care execută comenzi reale"""
+                """Command Prompt: the Bitpack commands (exec ..., repair, games) and the Windows commands, all of them
+                answered inside Bitpack (w95_commands_all.py): no cmd.exe and no Windows program is started."""
                 import sqlite3
                 import subprocess
                 import threading
@@ -76167,16 +79447,13 @@ if w95var == 1998 or w95var1 == 1997:
                 
                 self.make_window_draggable(terminal_window, title_bar)
                 
-                # Main content - Folosim un singur Text widget pentru tot
-                # în loc de a separa output și input
+                # One Text widget for the output and the command being typed
                 terminal_frame = tk.Frame(terminal_window, bg="black", bd=0)
                 terminal_frame.pack(fill="both", expand=True, padx=2, pady=2)
                 
-                # Scrollbars
                 v_scrollbar = tk.Scrollbar(terminal_frame)
                 v_scrollbar.pack(side="right", fill="y")
                 
-                # Text widget pentru afișarea atât a output-ului cât și pentru introducerea comenzilor
                 terminal_text = tk.Text(terminal_frame, wrap="word", bg="black", fg="#cccccc",
                                        insertbackground="white", font=("Courier New", 10),
                                        yscrollcommand=v_scrollbar.set)
@@ -76187,53 +79464,42 @@ if w95var == 1998 or w95var1 == 1997:
                 command_history = []
                 history_index = 0
                 
-                # Poziția curentă de input (tag pentru a marca unde utilizatorul poate scrie)
+                # Where the user may type (after the prompt)
                 input_pos = "1.0"
-                
-                # Prompt-ul utilizat
                 prompt = "> "
-                
-                # Get current OS
                 current_os = platform.system()
-                
-                # Referință la procesul curent
                 current_process = None
-                
-                # Flag pentru a ști dacă o comandă este în execuție
                 command_running = False
                 
-                # Inițializăm terminalul
                 terminal_text.insert("end", "Bitpack Command Prompt\n")
                 terminal_text.insert("end", "Type 'help' for a list of commands.\n\n")
                 terminal_text.insert("end", f"Current directory: {os.getcwd()}\n\n")
                 terminal_text.insert("end", prompt)
                 
-                # Setăm poziția de input inițială
                 input_pos = terminal_text.index("end-1c")
                 terminal_text.mark_set("input_mark", input_pos)
                 terminal_text.mark_gravity("input_mark", "left")
                 
-                # Focusăm pe textbox
                 terminal_text.focus_set()
                 terminal_text.see("end")
                 
                 def get_command():
-                    """Obține comanda curentă din terminal_text"""
+                    """The command typed after the prompt."""
                     input_start = terminal_text.index("input_mark")
                     input_end = terminal_text.index("end-1c")
                     return terminal_text.get(input_start, input_end)
                 
                 def stop_current_process():
-                    """Oprește procesul curent dacă există"""
+                    """Stops the running command (Ctrl+C)."""
                     nonlocal current_process, command_running
                     
                     if current_process and command_running:
                         try:
-                            if current_os == "Windows":
-                                # În Windows, folosim taskkill pentru a termina procesul și subprocesele sale
+                            if current_process.pid < 0:              # a command answered inside Bitpack
+                                current_process.kill()
+                            elif current_os == "Windows":
                                 subprocess.run(f"taskkill /F /T /PID {current_process.pid}", shell=True)
                             else:
-                                # În Unix/Linux, trimitem semnalul SIGTERM
                                 os.killpg(os.getpgid(current_process.pid), signal.SIGTERM)
                             
                             terminal_text.insert("end", "\n^C\nCommand terminated by user.\n")
@@ -76251,27 +79517,29 @@ if w95var == 1998 or w95var1 == 1997:
                     return False
                 
                 def execute_command(command):
-                    """Execută o comandă și afișează output-ul"""
+                    """Runs one command and shows its output."""
                     nonlocal history_index, input_pos, current_process, command_running
                     
                     if getattr(terminal_text, "_repair_busy", False):   # a repair command is still working
                         return
                     
-                    # Adaugă comanda la istoric
                     command_history.append(command)
                     history_index = len(command_history)
                     
-                    # Adăugăm un newline după comandă
                     terminal_text.insert("end", "\n")
+                    
+                    def new_prompt():
+                        nonlocal input_pos
+                        terminal_text.insert("end", prompt)
+                        input_pos = terminal_text.index("end-1c")
+                        terminal_text.mark_set("input_mark", input_pos)
+                        terminal_text.see("end")
                     
                     games_text = w95_games_command(command)
                     if games_text is not None:
                         terminal_text.insert("end", games_text + "\n\n")
                         self.games_refresh()            # Start > Games and the desktop icons, at once
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
                     if bpk_repair_key(command) is not None:         # manual repair, with the BPK-DOS delay
@@ -76303,30 +79571,6 @@ if w95var == 1998 or w95var1 == 1997:
                         spin()
                         return
                     
-                    # if command.strip() == "exec class mail_client:95":
-                        # try:
-                            # # Verificăm și creăm folderul Config dacă nu există
-                            # config_folder = "Config"
-                            # if not os.path.exists(config_folder):
-                                # os.makedirs(config_folder)
-                                # #terminal_text.insert("end", f"Created directory: {config_folder}\n")
-                            
-                            # # Creăm fișierul m95ec.inst95 cu valoarea 1
-                            # file_path = os.path.join(config_folder, "m95ec.inst95")
-                            # with open(file_path, 'w') as f:
-                                # f.write('True')
-                            
-                            # #terminal_text.insert("end", f"The registered email client has been activated: {file_path}\n")
-                            # terminal_text.insert("end", f"The registered mail client has been activated.\n")
-                            # terminal_text.insert("end", "Mail client configuration executed successfully.\n\n")
-                        # except Exception as e:
-                            # terminal_text.insert("end", f"Error during mail client activation: {str(e)}\n\n")
-                        
-                        # terminal_text.insert("end", prompt)
-                        # input_pos = terminal_text.index("end-1c")
-                        # terminal_text.mark_set("input_mark", input_pos)
-                        # terminal_text.see("end")
-                        # return
                     # ----- init.bpk95 (sir de caractere) / init.sql: export si import (bpk95_* de la inceputul fisierului)
                     if command.strip() in ("exec dbo_bitpack --export", "exec dbo_bitpack --export --sql"):
                         as_sql = command.strip().endswith("--sql")
@@ -76341,11 +79585,7 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", "Error: Config/dbo_bitpack.db not found.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     if command.strip() in ("exec dbo_bitpack --import", "exec dbo_bitpack --import --sql"):
                         as_sql = command.strip().endswith("--sql")
@@ -76357,8 +79597,8 @@ if w95var == 1998 or w95var1 == 1997:
                                 terminal_text.insert("end", "Run 'exec dbo_bitpack --export%s' first.\n\n"
                                                      % (" --sql" if as_sql else ""))
                             else:
-                                # baza se construieste intai in memorie: o eroare nu mai strica baza existenta,
-                                # iar Config/dbo_bitpack.db se creeaza daca lipseste
+                                # the database is built in memory first: an error never spoils the existing one,
+                                # and Config/dbo_bitpack.db is made when it is missing
                                 tables, replaced = bpk95_import(source, os.path.join("Config", "dbo_bitpack.db"))
                                 terminal_text.insert("end", "%s from %s (%d table(s)).\n"
                                                      % ("Database overwritten" if replaced else "Database created",
@@ -76367,206 +79607,8 @@ if w95var == 1998 or w95var1 == 1997:
                                 terminal_text.insert("end", "Restart Bitpack to reload the new database.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\nThe existing database was not changed.\n\n")
-
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
-                    # if command.strip() == "exec dbo_bitpack --export":
-                        # try:
-                            # config_folder = "Config"
-                            # if not os.path.exists(config_folder):
-                                # os.makedirs(config_folder)
-
-                            # db_path = os.path.join(config_folder, "dbo_bitpack.db")
-                            # bpk_path = os.path.join(config_folder, "init.bpk95")
-
-                            # if not os.path.exists(db_path):
-                                # terminal_text.insert("end", "Error: Config/dbo_bitpack.db not found.\n\n")
-                            # else:
-                                # conn = sqlite3.connect(db_path)
-                                # cursor = conn.cursor()
-                                # cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-                                # table_count = cursor.fetchone()[0]
-
-                                # statements = 0
-                                # with open(bpk_path, "w", encoding="utf-8") as f:
-                                    # f.write("-- Bitpack database export (init.bpk95)\n")
-                                    # f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                                    # f.write("-- Source: Config/dbo_bitpack.db\n")
-                                    # f.write("-- Restore with: exec dbo_bitpack --import\n\n")
-                                    # f.write("PRAGMA foreign_keys = OFF;\n")
-                                    # for line in conn.iterdump():
-                                        # f.write(f"{line}\n")
-                                        # statements += 1
-                                # conn.close()
-
-                                # size_kb = os.path.getsize(bpk_path) / 1024
-                                # terminal_text.insert("end", f"Exported {table_count} table(s), {statements} statement(s).\n")
-                                # terminal_text.insert("end", f"File: {bpk_path} ({size_kb:.1f} KB)\n")
-                                # terminal_text.insert("end", "Export completed successfully.\n\n")
-                        # except Exception as e:
-                            # terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        # terminal_text.insert("end", prompt)
-                        # input_pos = terminal_text.index("end-1c")
-                        # terminal_text.mark_set("input_mark", input_pos)
-                        # terminal_text.see("end")
-                        # return
-                    # if command.strip() == "exec dbo_bitpack --export --sql":
-                        # try:
-                            # config_folder = "Config"
-                            # if not os.path.exists(config_folder):
-                                # os.makedirs(config_folder)
-
-                            # db_path = os.path.join(config_folder, "dbo_bitpack.db")
-                            # bpk_path = os.path.join(config_folder, "init.sql")
-
-                            # if not os.path.exists(db_path):
-                                # terminal_text.insert("end", "Error: Config/dbo_bitpack.db not found.\n\n")
-                            # else:
-                                # conn = sqlite3.connect(db_path)
-                                # cursor = conn.cursor()
-                                # cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-                                # table_count = cursor.fetchone()[0]
-
-                                # statements = 0
-                                # with open(bpk_path, "w", encoding="utf-8") as f:
-                                    # f.write("-- Bitpack database export (init.sql)\n")
-                                    # f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                                    # f.write("-- Source: Config/dbo_bitpack.db\n")
-                                    # f.write("-- Restore with: exec dbo_bitpack --import\n\n")
-                                    # f.write("PRAGMA foreign_keys = OFF;\n")
-                                    # for line in conn.iterdump():
-                                        # f.write(f"{line}\n")
-                                        # statements += 1
-                                # conn.close()
-
-                                # size_kb = os.path.getsize(bpk_path) / 1024
-                                # terminal_text.insert("end", f"Exported {table_count} table(s), {statements} statement(s).\n")
-                                # terminal_text.insert("end", f"File: {bpk_path} ({size_kb:.1f} KB)\n")
-                                # terminal_text.insert("end", "Export completed successfully.\n\n")
-                        # except Exception as e:
-                            # terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        # terminal_text.insert("end", prompt)
-                        # input_pos = terminal_text.index("end-1c")
-                        # terminal_text.mark_set("input_mark", input_pos)
-                        # terminal_text.see("end")
-                        # return
-                    # if command.strip() == "exec dbo_bitpack --import":
-                        # try:
-                            # config_folder = "Config"
-                            # if not os.path.exists(config_folder):
-                                # os.makedirs(config_folder)
-
-                            # db_path = os.path.join(config_folder, "dbo_bitpack.db")
-                            # bpk_path = os.path.join(config_folder, "init.bpk95")
-
-                            # if not os.path.exists(bpk_path):
-                                # terminal_text.insert("end", "Error: Config/init.bpk95 not found.\n")
-                                # terminal_text.insert("end", "Run 'exec dbo_bitpack --export' first.\n\n")
-                            # else:
-                                # with open(bpk_path, "r", encoding="utf-8") as f:
-                                    # script = f.read()
-
-                                # conn = sqlite3.connect(db_path)
-                                # cursor = conn.cursor()
-                                # cursor.execute("PRAGMA foreign_keys = OFF")
-
-                                # # Golim complet baza existenta (overwrite)
-                                # dropped = 0
-                                # for obj_type in ("trigger", "view", "index", "table"):
-                                    # cursor.execute(
-                                        # "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'",
-                                        # (obj_type,)
-                                    # )
-                                    # for (obj_name,) in cursor.fetchall():
-                                        # cursor.execute(f'DROP {obj_type.upper()} IF EXISTS "{obj_name}"')
-                                        # dropped += 1
-                                # conn.commit()
-
-                                # # Rulam scriptul din init.bpk95
-                                # conn.executescript(script)
-                                # conn.commit()
-
-                                # cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-                                # table_count = cursor.fetchone()[0]
-
-                                # # Recuperam spatiul ramas dupa DROP
-                                # conn.isolation_level = None
-                                # conn.execute("VACUUM")
-                                # conn.close()
-
-                                # terminal_text.insert("end", f"Dropped {dropped} existing object(s).\n")
-                                # terminal_text.insert("end", f"Database overwritten from init.bpk95 ({table_count} table(s)).\n")
-                                # terminal_text.insert("end", "Import completed successfully.\n")
-                                # terminal_text.insert("end", "Restart Bitpack to reload the new database.\n\n")
-                        # except Exception as e:
-                            # terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        # terminal_text.insert("end", prompt)
-                        # input_pos = terminal_text.index("end-1c")
-                        # terminal_text.mark_set("input_mark", input_pos)
-                        # terminal_text.see("end")
-                        # return
-                    # if command.strip() == "exec dbo_bitpack --import --sql":
-                        # try:
-                            # config_folder = "Config"
-                            # if not os.path.exists(config_folder):
-                                # os.makedirs(config_folder)
-
-                            # db_path = os.path.join(config_folder, "dbo_bitpack.db")
-                            # bpk_path = os.path.join(config_folder, "init.sql")
-
-                            # if not os.path.exists(bpk_path):
-                                # terminal_text.insert("end", "Error: Config/init.sql not found.\n")
-                                # terminal_text.insert("end", "Run 'exec dbo_bitpack --export' first.\n\n")
-                            # else:
-                                # with open(bpk_path, "r", encoding="utf-8") as f:
-                                    # script = f.read()
-
-                                # conn = sqlite3.connect(db_path)
-                                # cursor = conn.cursor()
-                                # cursor.execute("PRAGMA foreign_keys = OFF")
-
-                                # # Golim complet baza existenta (overwrite)
-                                # dropped = 0
-                                # for obj_type in ("trigger", "view", "index", "table"):
-                                    # cursor.execute(
-                                        # "SELECT name FROM sqlite_master WHERE type=? AND name NOT LIKE 'sqlite_%'",
-                                        # (obj_type,)
-                                    # )
-                                    # for (obj_name,) in cursor.fetchall():
-                                        # cursor.execute(f'DROP {obj_type.upper()} IF EXISTS "{obj_name}"')
-                                        # dropped += 1
-                                # conn.commit()
-
-                                # # Rulam scriptul din init.sql
-                                # conn.executescript(script)
-                                # conn.commit()
-
-                                # cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-                                # table_count = cursor.fetchone()[0]
-
-                                # # Recuperam spatiul ramas dupa DROP
-                                # conn.isolation_level = None
-                                # conn.execute("VACUUM")
-                                # conn.close()
-
-                                # terminal_text.insert("end", f"Dropped {dropped} existing object(s).\n")
-                                # terminal_text.insert("end", f"Database overwritten from init.sql ({table_count} table(s)).\n")
-                                # terminal_text.insert("end", "Import completed successfully.\n")
-                                # terminal_text.insert("end", "Restart Bitpack to reload the new database.\n\n")
-                        # except Exception as e:
-                            # terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        # terminal_text.insert("end", prompt)
-                        # input_pos = terminal_text.index("end-1c")
-                        # terminal_text.mark_set("input_mark", input_pos)
-                        # terminal_text.see("end")
-                        # return
                     if command.strip() == "exec class mail_client:95":
                         try:
                             config_folder = "Config"
@@ -76583,11 +79625,7 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", "Mail client configuration executed successfully.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error during mail client activation: {str(e)}\n\n")
-                        
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                         
                     if command.strip() == "exec dbo_bitpack --admin":
@@ -76598,32 +79636,18 @@ if w95var == 1998 or w95var1 == 1997:
                             
                             setup_database_ALL()
                             
-                            # Redeschide conexiunea dupa ce setup_database_ALL() a inchis-o
+                            # opened again: setup_database_ALL() closed its connection
                             conn = sqlite3.connect("Config/dbo_bitpack.db")
                             cursor = conn.cursor()
                             cursor.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES ('exec_admin_sql', '1')")
                             conn.commit()
                             conn.close()
-                        # try:
-                            # # Verificăm și creăm folderul Config dacă nu există
-                            # config_folder = "Config"
-                            # if not os.path.exists(config_folder):
-                                # os.makedirs(config_folder)
-                                # #terminal_text.insert("end", f"Created directory: {config_folder}\n")
-                            
-                            # setup_database_ALL()
-                            
-                            #terminal_text.insert("end", f"The registered email client has been activated: {file_path}\n")
                             terminal_text.insert("end", "The admin database client has been created.\n")
                             terminal_text.insert("end", "Access level: ADMINISTRATOR\n")
                             terminal_text.insert("end", "Admin rights granted successfully.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-                        
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
                     if command.strip() == "exec dbo_bitpack --purge":
@@ -76636,8 +79660,6 @@ if w95var == 1998 or w95var1 == 1997:
 
                             conn = sqlite3.connect(db_path)
                             cursor = conn.cursor()
-
-                            #cursor.execute("PRAGMA foreign_keys = OFF")
 
                             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
                             tables = cursor.fetchall()
@@ -76652,11 +79674,7 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", "Purge completed successfully.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
                     if command.strip() == "exec dbo_bitpack --flush":
@@ -76685,11 +79703,7 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", "Flush completed successfully.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
                     if command.strip().startswith("exec bitpack_splash_image:"):
@@ -76705,41 +79719,16 @@ if w95var == 1998 or w95var1 == 1997:
                             terminal_text.insert("end", f"Splash images {status}.\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-                        
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
                     if command.strip() == "exec bitpack_assets":
                         try:
                             create_bitpack_assets()
-                            terminal_text.insert("end", prompt)
-                            input_pos = terminal_text.index("end-1c")
-                            terminal_text.mark_set("input_mark", input_pos)
-                            terminal_text.see("end")
+                            new_prompt()
                             return
                         except Exception as e:
                             terminal_text.insert("end", f"Error during create Bitpack assets folder: {str(e)}\n\n")
-                    # if command.strip() == "exec sql_management_studio_variable":
-                        # try:
-                            # # Create Config directory if it doesn't exist
-                            # os.makedirs("Config", exist_ok=True)
-
-                            # # Value to be written to the file
-                            # value = "00 11 45 32 01 83 57 90 xx"
-
-                            # # Create sqlms.inst95 file and write the value on the first line
-                            # with open("Config/sqlms.inst95", "w") as f:
-                                # f.write(value + "\n")
-                            # terminal_text.insert("end", prompt)
-                            # input_pos = terminal_text.index("end-1c")
-                            # terminal_text.mark_set("input_mark", input_pos)
-                            # terminal_text.see("end")
-                            # return
-                        # except Exception as e:
-                            # terminal_text.insert("end", f"Error during create SQL Management Studio variable: {str(e)}\n\n")
                     if command.strip() == "exec sql_management_studio_variable":
                         try:
                             os.makedirs("Config", exist_ok=True)
@@ -76749,22 +79738,17 @@ if w95var == 1998 or w95var1 == 1997:
                             cursor.execute("INSERT OR REPLACE INTO app_flags (key, value) VALUES ('sqlms', ?)", (value,))
                             conn.commit()
                             conn.close()
-                            terminal_text.insert("end", prompt)
-                            input_pos = terminal_text.index("end-1c")
-                            terminal_text.mark_set("input_mark", input_pos)
-                            terminal_text.see("end")
+                            new_prompt()
                             return
                         except Exception as e:
                             terminal_text.insert("end", f"Error during create SQL Management Studio variable: {str(e)}\n\n")
                     
-                    # Procesăm exit command
                     if command.lower() in ["exit", "quit"]:
                         terminal_text.insert("end", "Closing Command Prompt...\n")
                         terminal_text.see("end")
                         terminal_window.after(500, lambda: self.close_window("Command Prompt", terminal_window))
                         return
                     
-                    # Procesăm cd command intern
                     if command.lower().startswith("cd "):
                         try:
                             path = command[3:].strip()
@@ -76775,61 +79759,42 @@ if w95var == 1998 or w95var1 == 1997:
                                 terminal_text.insert("end", f"Directory not found: {path}\n\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-                        
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
-                    # Procesăm dir/ls command intern pentru formatare mai bună
                     if command.lower() in ["dir", "ls"]:
                         try:
                             current_dir = os.getcwd()
                             terminal_text.insert("end", f"Directory of {current_dir}\n\n")
-                            
-                            # Obținem fișierele și directoarele
                             items = os.listdir(current_dir)
-                            
-                            # Afișăm mai întâi directoarele
-                            for item in sorted(items):
+                            for item in sorted(items):                      # the folders first
                                 item_path = os.path.join(current_dir, item)
                                 if os.path.isdir(item_path):
                                     try:
-                                        # Obținem informații despre director
                                         item_time = os.path.getmtime(item_path)
                                         time_str = datetime.fromtimestamp(item_time).strftime('%Y-%m-%d %H:%M:%S')
                                         terminal_text.insert("end", f"{time_str}    <DIR>          {item}\n")
                                     except:
                                         terminal_text.insert("end", f"                <DIR>          {item}\n")
-                            
-                            # Apoi afișăm fișierele
-                            for item in sorted(items):
+                            for item in sorted(items):                      # then the files
                                 item_path = os.path.join(current_dir, item)
                                 if os.path.isfile(item_path):
                                     try:
-                                        # Obținem informații despre fișier
                                         item_size = os.path.getsize(item_path)
                                         item_time = os.path.getmtime(item_path)
                                         time_str = datetime.fromtimestamp(item_time).strftime('%Y-%m-%d %H:%M:%S')
                                         terminal_text.insert("end", f"{time_str}    {item_size:10} {item}\n")
                                     except:
                                         terminal_text.insert("end", f"                      ? {item}\n")
-                            
                             terminal_text.insert("end", "\n")
                         except Exception as e:
                             terminal_text.insert("end", f"Error: {str(e)}\n\n")
-                        
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
-                    # Procesăm help command
                     if command.lower() == "help":
                         terminal_text.insert("end", "Available Commands:\n")
-                        terminal_text.insert("end", "  help       - Display this help message\n")
+                        terminal_text.insert("end", "  help       - Display this help message (help <command>: its options)\n")
                         terminal_text.insert("end", "  cd <dir>   - Change directory\n")
                         terminal_text.insert("end", "  dir        - List files and directories\n")
                         terminal_text.insert("end", "  ls         - List files and directories (alternative)\n")
@@ -76851,101 +79816,49 @@ if w95var == 1998 or w95var1 == 1997:
                         terminal_text.insert("end", "  exec bitpack_splash_image:1 - Enable splash images\n")
                         terminal_text.insert("end", "  cls        - Clear screen\n")
                         terminal_text.insert("end", "  exit       - Exit Command Prompt\n")
-                        terminal_text.insert("end", "\nOther standard system commands are also available.\n")
+                        terminal_text.insert("end", "\Other commands (they run inside Bitpack, not in Windows):\n")
+                        listed = w95_commands_help("cmd", skip=("CD", "CLS", "HELP", "EXIT"))
+                        for help_line in listed.replace("\r\n", "\n").splitlines()[2:]:
+                            terminal_text.insert("end", ("  " + help_line if help_line and not help_line.startswith(" ")
+                                                         else help_line) + "\n")
+                        terminal_text.insert("end", "Nothing else runs here: no Windows programs, no pipes or scripts.\n")
                         terminal_text.insert("end", "Press Ctrl+C to stop a running command or copy selected text.\n")
                         terminal_text.insert("end", "Press Ctrl+V to paste text from clipboard.\n\n")
-                        
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
-                    # Procesăm clear/cls command
                     if command.lower() in ["cls", "clear"]:
                         terminal_text.delete("1.0", "end")
                         terminal_text.insert("end", "Bitpack Command Prompt\n\n")
-                        terminal_text.insert("end", prompt)
-                        input_pos = terminal_text.index("end-1c")
-                        terminal_text.mark_set("input_mark", input_pos)
-                        terminal_text.see("end")
+                        new_prompt()
                         return
                     
-                    # Rulăm comanda externă
                     def run_command():
+                        """The command runs inside Bitpack (w95_commands_all.py): no cmd.exe, no Windows program; an
+                        unknown command gets the 'is not recognized' message. Its lines are shown as they come."""
                         nonlocal current_process, command_running
                         command_running = True
-                        
                         try:
-                            # Determină shell și opțiuni în funcție de sistemul de operare
-                            if current_os == "Windows":
-                                # Creăm procesul cu pipe-uri pentru stdout și stderr
-                                current_process = subprocess.Popen(
-                                    command, 
-                                    shell=True, 
-                                    stdout=subprocess.PIPE, 
-                                    stderr=subprocess.PIPE,
-                                    stdin=subprocess.PIPE,
-                                    text=True,
-                                    encoding='cp850',  # Windows Command Prompt encoding
-                                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
-                                )
-                            else:  # Linux/Mac
-                                current_process = subprocess.Popen(
-                                    command,
-                                    shell=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    stdin=subprocess.PIPE,
-                                    text=True,
-                                    preexec_fn=os.setsid  # Permite terminarea procesului și a subproceselor
-                                )
-                            
-                            # Citim output-ul și error-ul în mod continuu
-                            while command_running:
-                                # Verificăm dacă procesul s-a terminat
-                                if current_process.poll() is not None:
+                            current_process = w95_sandbox_popen(command, "cmd", shell=True, stdout=subprocess.PIPE,
+                                                                stderr=subprocess.STDOUT, stdin=subprocess.PIPE,
+                                                                text=True, encoding="cp850", errors="replace")
+                            process = current_process
+                            for output_line in iter(process.stdout.readline, ""):
+                                if not command_running:
                                     break
-                                
-                                # Citim output disponibil fără să blocăm
-                                output_line = current_process.stdout.readline()
-                                if output_line:
-                                    terminal_window.after(0, lambda line=output_line: append_output(line))
-                                
-                                # Citim error disponibil fără să blocăm
-                                error_line = current_process.stderr.readline()
-                                if error_line:
-                                    terminal_window.after(0, lambda line=error_line: append_error(line))
-                                
-                                # Pauză scurtă pentru a nu supraîncărca CPU
-                                time.sleep(0.01)
-                            
-                            # După ce procesul s-a terminat, citim orice output rămas
-                            remaining_output, remaining_error = current_process.communicate()
-                            
-                            if remaining_output:
-                                terminal_window.after(0, lambda: append_output(remaining_output))
-                            
-                            if remaining_error:
-                                terminal_window.after(0, lambda: append_error(remaining_error))
-                            
-                            # Verificăm dacă procesul s-a terminat cu succes
-                            exit_code = current_process.returncode
-                            if exit_code != 0 and command_running:
-                                terminal_window.after(0, lambda: append_error(f"\nCommand exited with code {exit_code}\n"))
-                            
-                            # Comanda s-a terminat, adăugăm un nou prompt
-                            terminal_window.after(0, lambda: add_new_prompt())
-                            
-                            command_running = False
-                            current_process = None
-                            
+                                terminal_window.after(0, lambda line=output_line: append_output(line))
+                            exit_code = process.wait()
+                            if command_running:                    # (after Ctrl+C the prompt is already there)
+                                if exit_code not in (0, None):
+                                    terminal_window.after(0, lambda c=exit_code: append_error(
+                                        "Command exited with code %s\n" % c))
+                                terminal_window.after(0, add_new_prompt)
                         except Exception as e:
-                            terminal_window.after(0, lambda: append_error(f"\nError executing command: {str(e)}\n"))
-                            terminal_window.after(0, lambda: add_new_prompt())
-                            command_running = False
-                            current_process = None
-                    
+                            terminal_window.after(0, lambda e=e: append_error("\nError executing command: %s\n" % e))
+                            terminal_window.after(0, add_new_prompt)
+                        command_running = False
+                        current_process = None
+
                     def append_output(text):
                         terminal_text.insert("end", text)
                         terminal_text.see("end")
@@ -76961,23 +79874,23 @@ if w95var == 1998 or w95var1 == 1997:
                         terminal_text.mark_set("input_mark", input_pos)
                         terminal_text.see("end")
                     
-                    # Rulăm comanda într-un thread separat pentru a evita blocarea UI
+                    # in its own thread, so the window never freezes
                     command_thread = threading.Thread(target=run_command)
                     command_thread.daemon = True
                     command_thread.start()
                 
                 def copy_selected_text():
-                    """Copiază textul selectat în clipboard"""
+                    """Copies the selected text."""
                     try:
                         selected_text = terminal_text.get("sel.first", "sel.last")
                         terminal_window.clipboard_clear()
                         terminal_window.clipboard_append(selected_text)
                         return True
                     except:
-                        return False  # Nu există text selectat
+                        return False
                 
                 def paste_and_execute():
-                    """Lipește text din clipboard și execută automat comanda (Paste & Execute)"""
+                    """Pastes the clipboard after the prompt and runs it (Paste & Execute)."""
                     try:
                         clipboard_text = terminal_window.clipboard_get()
                         
@@ -76996,7 +79909,7 @@ if w95var == 1998 or w95var1 == 1997:
                         return False
                 
                 def paste_from_clipboard():
-                    """Lipește text din clipboard doar după prompt (input_mark)"""
+                    """Pastes the clipboard, only after the prompt."""
                     try:
                         clipboard_text = terminal_window.clipboard_get()
                         
@@ -77008,17 +79921,8 @@ if w95var == 1998 or w95var1 == 1997:
                         terminal_text.see("end")
                         return True
                     except:
-                        return False  # Clipboard-ul este gol sau inaccesibil
-                # def paste_from_clipboard():
-                    # """Lipește text din clipboard la poziția curentă de input"""
-                    # try:
-                        # clipboard_text = terminal_window.clipboard_get()
-                        # terminal_text.insert("insert", clipboard_text)
-                        # return True
-                    # except:
-                        # return False  # Clipboard-ul este gol sau inaccesibil
+                        return False
                 
-                # Meniu contextual (click dreapta) cu Copy și Paste
                 context_menu = tk.Menu(terminal_text, tearoff=0)
                 context_menu.add_command(label="Copy", command=copy_selected_text)
                 context_menu.add_command(label="Paste", command=paste_from_clipboard)
@@ -77032,76 +79936,63 @@ if w95var == 1998 or w95var1 == 1997:
         
                 terminal_text.bind("<Button-3>", show_context_menu)
                 
-                # Gestionăm tastele speciale și comenzile
                 def key_press(event):
                     nonlocal history_index
                     
                     if getattr(terminal_text, "_repair_busy", False):   # while a repair command works: no typing
                         return "break"
                     
-                    # Ctrl+C: Copiere text selectat sau oprire comandă
-                    if (event.state & 0x4) and event.keysym.lower() == "c":  # Ctrl+C
-                        if not copy_selected_text():  # Încercăm să copiem textul selectat
-                            # Dacă nu există text selectat, oprim comanda curentă
+                    # Ctrl+C: copy the selection, or stop the running command
+                    if (event.state & 0x4) and event.keysym.lower() == "c":
+                        if not copy_selected_text():
                             stop_current_process()
                         return "break"
                     
-                    # Ctrl+V: Lipire din clipboard
-                    if (event.state & 0x4) and event.keysym.lower() == "v":  # Ctrl+V
+                    # Ctrl+V: paste
+                    if (event.state & 0x4) and event.keysym.lower() == "v":
                         paste_from_clipboard()
                         return "break"
                     
-                    # Verificăm dacă cursorul este după prompt
+                    # the cursor stays after the prompt
                     cursor_pos = terminal_text.index("insert")
                     if terminal_text.compare(cursor_pos, "<", "input_mark"):
-                        # Cursorul este înainte de poziția de input, îl mutăm la final
                         terminal_text.mark_set("insert", "end")
                         return "break"
                     
-                    # Return/Enter key - Execute command
                     if event.keysym == "Return":
                         command = get_command()
                         if command.strip():
                             execute_command(command.strip())
                         return "break"
                     
-                    # Backspace key - Do not delete beyond prompt
                     elif event.keysym == "BackSpace":
                         cursor_pos = terminal_text.index("insert")
                         if terminal_text.compare(cursor_pos, "<=", "input_mark"):
                             return "break"
                     
-                    # Up key - Navigate command history
                     elif event.keysym == "Up":
                         if command_history and history_index > 0:
                             history_index -= 1
-                            # Ștergem comanda curentă
                             terminal_text.delete("input_mark", "end-1c")
-                            # Inserăm comanda din istoric
                             terminal_text.insert("input_mark", command_history[history_index])
                         return "break"
                     
-                    # Down key - Navigate command history
                     elif event.keysym == "Down":
                         if command_history and history_index < len(command_history) - 1:
                             history_index += 1
-                            # Ștergem comanda curentă
                             terminal_text.delete("input_mark", "end-1c")
-                            # Inserăm comanda din istoric
                             terminal_text.insert("input_mark", command_history[history_index])
                         elif history_index == len(command_history) - 1:
                             history_index = len(command_history)
-                            # Ștergem comanda curentă
                             terminal_text.delete("input_mark", "end-1c")
                         return "break"
                     
-                    # Home key - Go to beginning of input
                     elif event.keysym == "Home":
                         terminal_text.mark_set("insert", "input_mark")
                         return "break"
                 
-                # Asigurăm-ne că nu se poate șterge input mark-ul sau textul anterior
                 def delete_check(event):
+                    """Nothing before the prompt can be deleted."""
                     try:
                         if event.keysym == 'BackSpace':
                             cursor_pos = terminal_text.index("insert")
@@ -77119,31 +80010,24 @@ if w95var == 1998 or w95var1 == 1997:
                     except:
                         pass
                 
-                # Curățăm resursele la închiderea ferestrei
                 def on_window_close():
-                    # Oprim orice proces în execuție
                     stop_current_process()
-                    # Închidem fereastra
                     self.close_window("Command Prompt", terminal_window)
                 
-                # Bind keys
                 terminal_text.bind("<Key>", key_press)
                 terminal_text.bind("<KeyPress-BackSpace>", delete_check)
                 terminal_text.bind("<KeyPress-Delete>", delete_check)
                 terminal_text.bind("<KeyPress-KP_Delete>", delete_check)
                 terminal_text.bind("<Button-3>", show_context_menu)
                 
-                # Make sure focus is on the terminal text
                 terminal_text.focus_set()
                 
-                # Add to taskbar
                 self.add_window_to_taskbar("Command Prompt", terminal_window)
                 terminal_window.protocol("WM_DELETE_WINDOW", on_window_close)
                 
-                # Bind window activation
                 terminal_window.bind("<Map>", lambda e: terminal_text.focus_set())
                 terminal_window.bind("<FocusIn>", lambda e: terminal_text.focus_set())
-            
+                
             def create_excel_lite(self, file_path=None):
                 """Excel Lite: the same code as the Excel Lite account, kept here in w95dist."""
                 def excel_lite_95(master=None, desk=None, file_path=None):
@@ -114176,6 +117060,11 @@ if trafficvar == 333344440099:
 
     traffic_visualizer_95()
         
+# DOSBOX TERMINAL - inlocuieste tot blocul  if dosboxvar == 3333444400999:  (pana la  dosbox_terminal_95() ).
+# Are nevoie de blocul w95_commands_all.py (versiunea noua) la inceputul lui Bitpack.py, nivelul 0.
+# Nicio comanda nu mai porneste in Windows: comenzile din lista sunt raspunse de Bitpack, restul primesc
+# mesajul 'is not recognized'. help = toate comenzile care merg.
+
 if dosboxvar == 3333444400999:
     bitpack95_validation("3333444400999")
     bitpack95_extension("0x00065")
@@ -115376,10 +118265,11 @@ if dosboxvar == 3333444400999:
                 if show_command:
                     self.w("> %s\n" % line, "dim")
                 try:
-                    self.process = subprocess.Popen(line, shell=isinstance(line, str), cwd=self.cwd, env=self.env,
-                                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                                    stdin=subprocess.DEVNULL, creationflags=NO_WINDOW,
-                                                    start_new_session=not IS_WINDOWS)
+                    # inside Bitpack only (w95_commands_all.py): no cmd.exe, no Windows program
+                    self.process = w95_sandbox_popen(line, "cmd", shell=isinstance(line, str), cwd=self.cwd,
+                                                     env=self.env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                                     stdin=subprocess.DEVNULL, creationflags=NO_WINDOW,
+                                                     start_new_session=not IS_WINDOWS)
                 except OSError as e:
                     self.err("Cannot run: %s" % e)
                     return
@@ -115403,7 +118293,9 @@ if dosboxvar == 3333444400999:
                 self.stopped = True
                 if process is not None and process.poll() is None:
                     try:
-                        if IS_WINDOWS:                            # the shell and what it started
+                        if process.pid < 0:                       # a command answered inside Bitpack
+                            process.kill()
+                        elif IS_WINDOWS:                          # the shell and what it started
                             subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL, creationflags=NO_WINDOW)
                         else:
@@ -115428,7 +118320,19 @@ if dosboxvar == 3333444400999:
                 raise ValueError("give a file name, or use it after |  (e.g. dir | %s)" % name)
 
             def c_help(self, args, stdin):
+                if args:                                          # help ping, help grep ...
+                    name = args[0].lower()
+                    text = w95_commands_help("cmd", name).replace("\r\n", "\n")
+                    if name in COMMANDS and (text.startswith("This command") or name in ("dir", "ls", "find", "ping",
+                                                                                          "curl", "set", "tree")):
+                        rows = [l for l in HELP.splitlines() if re.search(r"(^|[\s|])%s\b" % re.escape(name), l)]
+                        text = "DosBox command:\n" + "\n".join(rows) + "\n"
+                    self.w(text)
+                    return
                 self.w(HELP)
+                listed = w95_commands_help("cmd", skip=[n.upper() for n in COMMANDS]).replace("\r\n", "\n")
+                self.w("\nAlso (Windows commands, answered inside Bitpack):\n" +
+                       "\n".join(listed.splitlines()[1:]) + "\n")
 
             def c_dir(self, args, stdin):
                 show_all = any(a.lower() in ("-a", "/a") for a in args)
@@ -115790,7 +118694,7 @@ if dosboxvar == 3333444400999:
                     i += 1
                 if not host or not re.match(r"^[\w.\-:]+$", host):
                     raise ValueError("not a host name or address: %s" % host)
-                self.system("ping %s %s %s" % ("-n" if IS_WINDOWS else "-c", int(count), host))
+                self.system("ping -n %d %s" % (int(count), host))       # answered inside Bitpack
 
             def c_netstat(self, args, stdin):
                 if not psutil:
@@ -115993,6 +118897,9 @@ if dosboxvar == 3333444400999:
 
             def c_python(self, args, stdin):
                 """In its own Python (not inside Bitpack as before; from Bitpack.exe the installed Python is used)."""
+                if not ({"python", "py"} & set(W95_SANDBOX_ALLOW)):  # python.exe is a Windows program
+                    raise ValueError("Python does not run in this terminal (it starts no Windows program). Use the "
+                                     "Bitpack Python editor (ide/vscode).")
                 if self.python is None:
                     self.python = find_python() or []
                 if not self.python:
@@ -116007,20 +118914,13 @@ if dosboxvar == 3333444400999:
                 self.c_python(["-m", "pip"] + list(args), stdin)
 
             def c_service(self, args, stdin):
-                if IS_WINDOWS:
-                    self.system("sc query " + " ".join(args) if args else "sc query state= all")
-                else:
-                    raise ValueError("services are a Windows command here (sc query)")
+                self.system(["powershell", "-NoProfile", "-Command", "Get-Service" + (" " + args[0] if args else "")])
 
             def c_systemctl(self, args, stdin):
                 self.w("systemctl is Linux. On Windows: service (sc query) lists the services.\n")
 
             def c_crontab(self, args, stdin):
-                if IS_WINDOWS:
-                    self.w("crontab is Unix. The Windows scheduled tasks:\n", "dim")
-                    self.system("schtasks /query /fo TABLE")
-                else:
-                    self.system("crontab -l")
+                self.w("crontab is Unix, and the Windows scheduled tasks (schtasks.exe) do not run in this terminal.\n")
 
         HELP = """DosBox Terminal - commands (DOS and Unix names both work)
 
@@ -116036,10 +118936,10 @@ if dosboxvar == 3333444400999:
       Network     ping <host> [-n N]   netstat   ipconfig [/all]   wget <url> [file]   curl <url>
       Archives    zip <a.zip> <files>   unzip <a.zip> [dir]   tar -czf a.tgz <files> | -xf | -tf
       Tools       calc <expression>   base64 -e|-d <text>   md5|sha1|sha256 <file>   history   alias ll=dir /a
-                  python <script.py|-c code|-m module>   pip <args>
+                  (python and pip: in the Bitpack Python editor, ide/vscode)
       Windows     edit|nano|vim <file>   files   sysinfo   procmon   netinfo   calculator   cls   exit
 
-      Any other command goes to Windows (cmd), with its pipes and redirection.
+      Nothing goes to Windows: no cmd.exe, no Windows programs (the commands are answered inside Bitpack).
       Up / Down: history     Tab: complete     Stop (or Ctrl+Break): stop a running command
     """
 
@@ -125764,7 +128664,7 @@ if topologyVAR == 555554444333000:
                 if not self.keep_changes():
                     return
                 path = filedialog.askopenfilename(parent=self.root, title="Open Network",
-                                                  filetypes=[("Network Topology", "*.topology"), ("All files", "*.*")])
+                                                  filetypes=[("Network Topology", "*.tplg95"), ("All files", "*.*")])
                 if not path:
                     return
                 try:
@@ -125792,9 +128692,10 @@ if topologyVAR == 555554444333000:
             def save_network(self, ask=False):
                 path = self.path
                 if ask or not path:
-                    path = filedialog.asksaveasfilename(parent=self.root, title="Save Network", defaultextension=".topology",
-                                                        filetypes=[("Network Topology", "*.topology")],
-                                                        initialfile=os.path.basename(self.path) if self.path else "network.topology")
+                    path = filedialog.asksaveasfilename(parent=self.root, title="Save Network", defaultextension=".tplg95",
+                                                        filetypes=[("Network Topology", "*.tplg95")],
+                                                        initialfile=(os.path.splitext(os.path.basename(self.path))[0]
+                                                                     if self.path else "network") + ".tplg95")
                     if not path:
                         return False
                 try:
@@ -125888,8 +128789,13 @@ if topologyVAR == 555554444333000:
                     row += 1
                 fields["name"] = self.entry(grid, d.name)
                 line("Name:", fields["name"])
+                # kind_var = tk.StringVar(value=TYPE_NAME.get(d.kind, "PC"))
+                # line("Type:", self.option(grid, kind_var, [n for n, k, c in TYPES], width=18))
                 kind_var = tk.StringVar(value=TYPE_NAME.get(d.kind, "PC"))
-                line("Type:", self.option(grid, kind_var, [n for n, k, c in TYPES], width=18))
+                if d.real:                                   # (a discovered device keeps the type it was found as)
+                    line("Type:", tk.Label(grid, text=kind_var.get(), font=F, bg=BG, anchor="w"))
+                else:
+                    line("Type:", self.option(grid, kind_var, [n for n, k, c in TYPES], width=18))
                 if d.real:                                           # (an empty box came when there was no ping before)
                     for label, value in (("IP Address:", d.ip), ("MAC Address:", d.mac or "-"),
                                          ("Status:", d.status.title()),
@@ -125927,8 +128833,11 @@ if topologyVAR == 555554444333000:
                             mbox.showwarning("Properties", "VLAN must be 1 - 4094 and Ports 1 - 512.", parent=win)
                             return
                         d.ip, d.mask, d.vlan, d.ports, d.status = ip, mask, vlan, ports, status_var.get()
+                    # d.name = name
+                    # d.kind = next(k for n, k, c in TYPES if n == kind_var.get())
                     d.name = name
-                    d.kind = next(k for n, k, c in TYPES if n == kind_var.get())
+                    if not d.real:
+                        d.kind = next(k for n, k, c in TYPES if n == kind_var.get())
                     win.destroy()
                     self.mark()
                     self.refresh()
@@ -126524,7 +129433,7 @@ if topologyVAR == 555554444333000:
             def about(self):
                 mbox.showinfo("About", "%s\n\nDraw a network (simulation) or discover the real one around this PC: ping, "
                               "traceroute, a port scanner, an IP calculator, live monitoring. Networks are saved as "
-                              ".topology files; the diagram can be exported as a PNG picture." % TITLE, parent=self.root)
+                              ".tplg95 files; the diagram can be exported as a PNG picture." % TITLE, parent=self.root)
 
         app = Topology()
         app.root.mainloop()
