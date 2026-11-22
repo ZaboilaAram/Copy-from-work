@@ -29,7 +29,7 @@ import zipfile
 import json
 import tkinter as tk
 from tkinter import PhotoImage
-from tkinter import filedialog, messagebox, ttk, Scrollbar
+from tkinter import filedialog, messagebox, Scrollbar #, ttk
 from tkinter.filedialog import askopenfilename, asksaveasfilename
 import math
 import pyperclip
@@ -40,7 +40,7 @@ import subprocess
 import tkinter.messagebox as MB
 import datetime
 import platform
-from tkinter.ttk import Progressbar, Scrollbar
+#from tkinter.ttk import Progressbar, Scrollbar
 from getmac import getmac
 from tkinter.messagebox import showinfo
 import socket,sys,threading,time
@@ -92,6 +92,293 @@ except ImportError:    # Python 2 fallback
 import getpass
 #from pygame.locals import *
 
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+# WINDOWS 95 SCROLLBAR - drawn with tk (the native tk.Scrollbar follows the Windows 10 / 11 theme).
+# It answers the tk.Scrollbar calls: orient, command, set(), get(), config(), pack / grid / place, fraction(),
+# delta(), identify(), activate(). w95_install_scrollbars() puts it in the place of tk.Scrollbar,
+# tkinter.scrolledtext and ttk.Scrollbar, so every tool gets it without changing its code.
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+import tkinter as _sb_tk
+
+
+class W95Scrollbar(_sb_tk.Canvas):
+    FACE, LIGHT, HILITE, SHADOW, DARK = "#c0c0c0", "#ffffff", "#dfdfdf", "#808080", "#000000"
+    SIZE = 16                                               # Windows 95: 16 pixels wide, square arrow buttons
+    MIN_THUMB = 8
+    DELAY, REPEAT = 300, 50                                 # ms before an arrow repeats, then between repeats
+    _IGNORED = ("bg", "background", "troughcolor", "activebackground", "highlightbackground", "highlightcolor",
+                "highlightthickness", "bd", "borderwidth", "relief", "elementborderwidth", "activerelief",
+                "jump", "repeatdelay", "repeatinterval", "takefocus", "style", "class_", "name")
+
+    def __init__(self, master=None, cnf=None, **kwargs):
+        options = dict(cnf or {})
+        options.update(kwargs)
+        self._orient = str(options.pop("orient", "vertical"))
+        self._command = options.pop("command", None)
+        size = int(options.pop("width", self.SIZE) or self.SIZE)
+        cursor = options.pop("cursor", "")
+        for key in self._IGNORED:
+            options.pop(key, None)
+        vertical = self._vertical()
+        _sb_tk.Canvas.__init__(self, master, width=size if vertical else 2 * size,
+                               height=2 * size if vertical else size, bg=self.LIGHT, bd=0,
+                               highlightthickness=0, takefocus=0, cursor=cursor)
+        self._size = size
+        self._first, self._last = 0.0, 1.0
+        self._pressed = None                                # "up" / "down" / "page-" / "page+" / "thumb"
+        self._job = None
+        self._drag_offset = 0
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<ButtonPress-1>", self._press)
+        self.bind("<B1-Motion>", self._motion)
+        self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Destroy>", lambda e: self._stop() if e.widget is self else None)
+
+    # ----- the tk.Scrollbar calls ---------------------------------------------------------------------------
+    def _vertical(self):
+        return not self._orient.lower().startswith("h")
+
+    def set(self, first, last):
+        first, last = float(first), float(last)
+        if (first, last) != (self._first, self._last):
+            self._first, self._last = first, last
+            self._draw()
+
+    def get(self):
+        return self._first, self._last
+
+    def configure(self, cnf=None, **kwargs):
+        options = dict(cnf or {})
+        options.update(kwargs)
+        if not options:
+            return _sb_tk.Canvas.configure(self)
+        if "command" in options:
+            self._command = options.pop("command")
+        if "orient" in options:
+            self._orient = str(options.pop("orient"))
+            self._draw()
+        if "width" in options:
+            self._size = int(options.pop("width") or self.SIZE)
+            _sb_tk.Canvas.configure(self, **({"width": self._size} if self._vertical() else {"height": self._size}))
+        for key in self._IGNORED:
+            options.pop(key, None)
+        if options:
+            return _sb_tk.Canvas.configure(self, **options)
+
+    config = configure
+
+    def cget(self, key):
+        if key == "command":
+            return self._command
+        if key == "orient":
+            return self._orient
+        if key == "width":
+            return self._size
+        return _sb_tk.Canvas.cget(self, key)
+
+    def __setitem__(self, key, value):
+        self.configure(**{key: value})
+
+    def __getitem__(self, key):
+        return self.cget(key)
+
+    def activate(self, index=None):
+        return None
+
+    def identify(self, x, y):
+        return self._part(x if self._vertical() else y, y if self._vertical() else x)
+
+    def fraction(self, x, y):
+        position = y if self._vertical() else x
+        track = self._length() - 2 * self._size
+        return max(0.0, min(1.0, (position - self._size) / float(max(1, track))))
+
+    def delta(self, dx, dy):
+        track = self._length() - 2 * self._size
+        return (dy if self._vertical() else dx) / float(max(1, track))
+
+    # ----- geometry -----------------------------------------------------------------------------------------
+    def _length(self):
+        return max(2 * self._size, self.winfo_height() if self._vertical() else self.winfo_width())
+
+    def _enabled(self):
+        return self._first > 0.0 or self._last < 1.0
+
+    def _thumb(self):
+        """(start, end) of the thumb along the bar, or None when everything is visible."""
+        if not self._enabled():
+            return None
+        track = self._length() - 2 * self._size
+        size = max(self.MIN_THUMB, min(track, int(round(track * (self._last - self._first)))))
+        if size >= track:
+            return None
+        free = track - size
+        share = self._first / max(1e-9, 1.0 - (self._last - self._first))
+        start = self._size + int(round(free * max(0.0, min(1.0, share))))
+        return start, start + size
+
+    def _part(self, along, across=0):
+        length = self._length()
+        if along < self._size:
+            return "arrow1"
+        if along >= length - self._size:
+            return "arrow2"
+        thumb = self._thumb()
+        if thumb is None:
+            return "trough1"
+        if along < thumb[0]:
+            return "trough1"
+        if along >= thumb[1]:
+            return "trough2"
+        return "slider"
+
+    def _rect(self, a0, a1):
+        """A rectangle along the bar (a0..a1), as canvas coordinates."""
+        s = self._size
+        return (0, a0, s, a1) if self._vertical() else (a0, 0, a1, s)
+
+    # ----- drawing ------------------------------------------------------------------------------------------
+    def _bevel(self, x0, y0, x1, y1, sunken=False):
+        if sunken:                                          # a pressed arrow: one dark line around, flat
+            self.create_rectangle(x0, y0, x1 - 1, y1 - 1, fill=self.FACE, outline=self.SHADOW)
+            return
+        self.create_rectangle(x0, y0, x1, y1, fill=self.FACE, outline="")
+        self.create_line(x0, y1 - 1, x0, y0, x1 - 1, y0, fill=self.HILITE)
+        self.create_line(x0 + 1, y1 - 2, x0 + 1, y0 + 1, x1 - 2, y0 + 1, fill=self.LIGHT)
+        self.create_line(x0, y1 - 1, x1 - 1, y1 - 1, x1 - 1, y0 - 1, fill=self.DARK)
+        self.create_line(x0 + 1, y1 - 2, x1 - 2, y1 - 2, x1 - 2, y0, fill=self.SHADOW)
+
+    def _arrow(self, x0, y0, x1, y1, direction, pressed, enabled):
+        self._bevel(x0, y0, x1, y1, sunken=pressed)
+        cx, cy = (x0 + x1) // 2 + (1 if pressed else 0), (y0 + y1) // 2 + (1 if pressed else 0)
+        shapes = {"up": (cx - 4, cy + 2, cx + 4, cy + 2, cx, cy - 2), "down": (cx - 4, cy - 2, cx + 4, cy - 2, cx, cy + 2),
+                  "left": (cx + 2, cy - 4, cx + 2, cy + 4, cx - 2, cy), "right": (cx - 2, cy - 4, cx - 2, cy + 4, cx + 2, cy)}
+        points = shapes[direction]
+        if not enabled:                                     # Windows 95: a grey arrow with a white shadow
+            self.create_polygon([p + 1 for p in points], fill=self.LIGHT, outline=self.LIGHT)
+            self.create_polygon(points, fill=self.SHADOW, outline=self.SHADOW)
+        else:
+            self.create_polygon(points, fill=self.DARK, outline=self.DARK)
+
+    def _draw(self):
+        try:
+            self.delete("all")
+        except _sb_tk.TclError:
+            return
+        s, length = self._size, self._length()
+        enabled = self._enabled()
+        x0, y0, x1, y1 = self._rect(s, length - s)          # the trough: the Windows 95 checkerboard
+        self.create_rectangle(x0, y0, x1, y1, fill=self.FACE, outline="", stipple="gray50")
+        if self._pressed in ("page-", "page+"):             # the part being paged through goes dark
+            thumb = self._thumb()
+            if thumb is not None:
+                part = (s, thumb[0]) if self._pressed == "page-" else (thumb[1], length - s)
+                self.create_rectangle(*self._rect(*part), fill=self.DARK, outline="", stipple="gray50")
+        vertical = self._vertical()
+        self._arrow(*self._rect(0, s), direction="up" if vertical else "left", pressed=self._pressed == "up",
+                    enabled=enabled)
+        self._arrow(*self._rect(length - s, length), direction="down" if vertical else "right",
+                    pressed=self._pressed == "down", enabled=enabled)
+        thumb = self._thumb()
+        if thumb is not None:
+            self._bevel(*self._rect(*thumb))
+
+    # ----- mouse --------------------------------------------------------------------------------------------
+    def _run(self, *args):
+        command = self._command
+        if command is None:
+            return
+        try:
+            if callable(command):
+                command(*args)
+            else:
+                self.tk.call(command, *args)                # a Tcl command name
+        except _sb_tk.TclError:
+            pass
+
+    def _along(self, event):
+        return event.y if self._vertical() else event.x
+
+    def _press(self, event):
+        if not self._enabled():
+            return
+        part = self._part(self._along(event))
+        if part == "slider":
+            self._pressed = "thumb"
+            self._drag_offset = self._along(event) - self._thumb()[0]
+            return
+        self._pressed = {"arrow1": "up", "arrow2": "down", "trough1": "page-", "trough2": "page+"}[part]
+        self._target = self._along(event)
+        self._draw()
+        self._step()
+        self._job = self.after(self.DELAY, self._repeat)
+
+    def _step(self):
+        if self._pressed == "up":
+            self._run("scroll", -1, "units")
+        elif self._pressed == "down":
+            self._run("scroll", 1, "units")
+        elif self._pressed in ("page-", "page+"):
+            thumb = self._thumb()
+            # paging stops once the thumb reaches the mouse, as in Windows
+            if thumb is None or (self._pressed == "page-" and self._target >= thumb[0]) or \
+                    (self._pressed == "page+" and self._target < thumb[1]):
+                return False
+            self._run("scroll", -1 if self._pressed == "page-" else 1, "pages")
+        return True
+
+    def _repeat(self):
+        self._job = None
+        if self._pressed in ("up", "down", "page-", "page+") and self._step() is not False:
+            self._job = self.after(self.REPEAT if self._pressed in ("up", "down") else 100, self._repeat)
+
+    def _motion(self, event):
+        if self._pressed == "thumb":
+            thumb = self._thumb()
+            if thumb is None:
+                return
+            track = self._length() - 2 * self._size
+            free = max(1, track - (thumb[1] - thumb[0]))
+            share = (self._along(event) - self._drag_offset - self._size) / float(free)
+            share = max(0.0, min(1.0, share))
+            self._run("moveto", share * (1.0 - (self._last - self._first)))
+        elif self._pressed in ("page-", "page+"):
+            self._target = self._along(event)
+
+    def _stop(self):
+        if self._job is not None:
+            try:
+                self.after_cancel(self._job)
+            except _sb_tk.TclError:
+                pass
+            self._job = None
+
+    def _release(self, event):
+        self._stop()
+        if self._pressed is not None:
+            self._pressed = None
+            self._draw()
+
+
+def w95_install_scrollbars():
+    """Every tk.Scrollbar, ScrolledText and ttk.Scrollbar made after this call is a Windows 95 scrollbar."""
+    import tkinter
+    tkinter.Scrollbar = W95Scrollbar
+    try:
+        import tkinter.scrolledtext as _scrolledtext        # ScrolledText makes its own Scrollbar
+        _scrolledtext.Scrollbar = W95Scrollbar
+    except ImportError:
+        pass
+    try:
+        import tkinter.ttk as _ttk                          # ttk.Scrollbar has the same calls
+        _ttk.Scrollbar = W95Scrollbar
+    except ImportError:
+        pass
+
+
+w95_install_scrollbars()
+Scrollbar = W95Scrollbar        # for code that did "from tkinter import *" (or "from tkinter import Scrollbar") before
+
 def w95_games_flag(key, value=None):
     """Reads (value None) or writes one value of the app_flags table."""
     import os
@@ -137,6 +424,805 @@ def w95_games_command(command):
         return "Bitpack Games: %s" % ("activated" if w95_games_enabled() else "not activated "
                                       "(type: exec class games:95)")
     return None
+
+BPK_REPAIR_COMMANDS = {
+    "init": "The precondition has been initialized.",
+    "powercli Bitpack -t": "On",
+    "1/0,12": "OK.",
+    "0/0,8": "OK.",
+    "restart_prec": "All values have been restored.",
+    "launch_bitpack": "Launching Bitpack...",
+}
+
+
+def bpk_launch_bitpack():
+    """Start Bitpack again: the .exe itself when built with PyInstaller, otherwise python + the script."""
+    import os
+    import sys
+    import subprocess
+    if getattr(sys, "frozen", False):
+        subprocess.Popen([sys.executable], cwd=os.path.dirname(sys.executable) or None)
+    else:
+        script = os.path.abspath(sys.argv[0])
+        subprocess.Popen([sys.executable, script], cwd=os.path.dirname(script) or None)
+
+
+def bpk_repair_key(command):
+    """The repair command typed (any case, spaces around it), or None."""
+    typed = (command or "").strip().lower()
+    return next((name for name in BPK_REPAIR_COMMANDS if name.lower() == typed), None)
+
+
+def bpk_repair_command(command, log_path="log.txt"):
+    """Runs a repair command -> its answer (written to log.txt as in the Shell Integrator); None if it is not one."""
+    key = bpk_repair_key(command)
+    if key is None:
+        return None
+    response = BPK_REPAIR_COMMANDS[key]
+    if key == "launch_bitpack":
+        try:
+            bpk_launch_bitpack()
+        except Exception as exc:
+            response = "Failed to launch Bitpack: %s" % exc
+    try:
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write("Command: %s\nResponse: %s\n---\n" % (key, response))
+    except OSError:
+        pass
+    return response
+
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+# WINDOWS 95 OPEN / SAVE AS / BROWSE FOR FOLDER - for ALL the tools at once (like the scrollbar).
+# w95_install_filedialogs() puts these dialogs in the place of tkinter.filedialog's functions
+# (askopenfilename, askopenfilenames, asksaveasfilename, askdirectory, askopenfile(s), asksaveasfile):
+# the same arguments and the same returned values, so no tool needs a change.
+# Before any Tk window exists the Windows dialogs are still used (they need no window).
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+import tkinter as _w95fd_tk
+import tkinter.font as _w95fd_tkfont
+import tkinter.filedialog as _w95fd_module
+
+_W95_FILEDIALOG_NAMES = ("askopenfilename", "askopenfilenames", "asksaveasfilename", "askdirectory", "askopenfile",
+                         "askopenfiles", "asksaveasfile")
+# the Windows ones, kept before they are replaced (used only while no Tk window exists)
+_W95_NATIVE_FILEDIALOG = dict(getattr(_w95fd_module, "_w95_native", None) or
+                              {name: getattr(_w95fd_module, name) for name in _W95_FILEDIALOG_NAMES})
+
+
+class _W95FileDialogBase(object):
+    FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    FONT = ("MS Sans Serif", 8)
+    FONT_B = ("MS Sans Serif", 8, "bold")
+
+    @staticmethod
+    def parent_of(parent):
+        if parent is not None:
+            try:
+                return parent.winfo_toplevel()
+            except (_w95fd_tk.TclError, AttributeError):
+                pass
+        root = _w95fd_tk._default_root
+        if root is None:
+            return None
+        try:
+            focus = root.focus_get()
+            if focus is not None:
+                return focus.winfo_toplevel()
+        except (KeyError, _w95fd_tk.TclError):
+            pass
+        return root
+
+    def window(self, parent, title, on_close):
+        win = _w95fd_tk.Toplevel(parent)
+        win.withdraw()
+        win.overrideredirect(True)
+        win.configure(bg=self.FACE, bd=2, relief="raised")
+        try:
+            win.transient(parent)
+        except _w95fd_tk.TclError:
+            pass
+        win.attributes("-topmost", True)
+        bar = _w95fd_tk.Frame(win, bg=self.NAVY, height=20)
+        bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+        bar.pack_propagate(False)
+        label = _w95fd_tk.Label(bar, text=title or "", bg=self.NAVY, fg=self.LIGHT, font=self.FONT_B, anchor="w")
+        label.pack(side="left", padx=4, fill="x", expand=True)
+        win._w95_pixel = _w95fd_tk.PhotoImage(master=win, width=1, height=1)
+        marlett = "Marlett" in _w95fd_tkfont.families(win)
+        _w95fd_tk.Button(bar, text="r" if marlett else "X", font=("Marlett", 7) if marlett else self.FONT_B,
+                       image=win._w95_pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=self.FACE,
+                       fg=self.BLACK, bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                       activebackground=self.FACE, command=on_close).pack(side="right", padx=2)
+
+        def press(event):
+            win._w95_drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+        def drag(event):
+            win.geometry("+%d+%d" % (event.x_root - win._w95_drag[0], event.y_root - win._w95_drag[1]))
+        for widget in (bar, label):
+            widget.bind("<ButtonPress-1>", press)
+            widget.bind("<B1-Motion>", drag)
+        return win
+
+    def icon(self, master, kind):
+        c = _w95fd_tk.Canvas(master, width=34, height=34, bg=self.FACE, highlightthickness=0)
+        if kind == "error":
+            c.create_oval(2, 2, 32, 32, fill="#ff0000", outline="#800000")
+            c.create_line(11, 11, 23, 23, fill="white", width=3)
+            c.create_line(23, 11, 11, 23, fill="white", width=3)
+        elif kind == "warning":
+            c.create_polygon(17, 2, 32, 30, 2, 30, fill="#ffff00", outline=self.BLACK)
+            c.create_text(17, 20, text="!", fill=self.BLACK, font=("Times New Roman", 15, "bold"))
+        else:
+            c.create_oval(2, 2, 32, 32, fill=self.LIGHT, outline=self.BLACK)
+            c.create_text(17, 17, text="?" if kind == "question" else "i", fill="#0000ff",
+                          font=("Times New Roman", 17, "bold"))
+        return c
+
+    def button(self, master, text, command, default=False, width=9):
+        return _w95fd_tk.Button(master, text=text, command=command, width=width, font=self.FONT_B if default else self.FONT,
+                              bg=self.FACE, fg=self.BLACK, activebackground=self.FACE, relief="raised", bd=2,
+                              highlightthickness=1 if default else 0, highlightbackground=self.BLACK, takefocus=0)
+
+    def run(self, win, parent, focus=None):
+        """Centred over the window that asked, in front, modal; the previous modal window gets its grab back."""
+        win.update_idletasks()
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+        try:
+            if parent is not None and parent.winfo_viewable():
+                x = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+                y = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 3)
+            else:
+                raise _w95fd_tk.TclError("no parent")
+        except _w95fd_tk.TclError:
+            x, y = (win.winfo_screenwidth() - w) // 2, (win.winfo_screenheight() - h) // 3
+        x = max(0, min(x, win.winfo_screenwidth() - w))
+        y = max(0, min(y, win.winfo_screenheight() - h - 30))
+        win.geometry("+%d+%d" % (x, y))
+        previous = None
+        try:
+            previous = win.grab_current()
+        except (_w95fd_tk.TclError, KeyError):
+            previous = None
+        win.deiconify()
+        win.lift()
+        (focus or win).focus_force()
+
+        def take_clicks():
+            try:
+                if win.winfo_exists() and win.winfo_viewable():
+                    win.grab_set()
+            except _w95fd_tk.TclError:
+                pass
+        job = win.after(100, take_clicks)
+        win.bind("<Destroy>", lambda e, w=win, j=job: w.after_cancel(j) if e.widget is w else None, add="+")
+        win.wait_window()
+        if previous is not None:
+            try:
+                if previous.winfo_exists():
+                    previous.grab_set()
+                    previous.focus_force()
+            except _w95fd_tk.TclError:
+                pass
+        elif parent is not None:
+            try:
+                parent.focus_force()
+            except _w95fd_tk.TclError:
+                pass
+
+    def box(self, title, text, kind, buttons, default=0, parent=None, detail=None, entry=None, show=None):
+        """-> (button pressed, text typed)."""
+        parent = self.parent_of(parent)
+        if parent is None:                                    # no window open yet: the Windows box is the only way
+            return None, None
+        result = {"value": buttons[-1], "text": None}
+        field = {}
+
+        def answer(value):
+            result["value"] = value
+            if "entry" in field:
+                result["text"] = field["entry"].get()
+            win.destroy()
+        win = self.window(parent, title, lambda: answer(buttons[-1]))
+        body = _w95fd_tk.Frame(win, bg=self.FACE)
+        body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+        self.icon(body, kind).pack(side="left", anchor="n", padx=(0, 12))
+        right = _w95fd_tk.Frame(body, bg=self.FACE)
+        right.pack(side="left", fill="both", expand=True)
+        _w95fd_tk.Label(right, text=text or "", font=self.FONT, bg=self.FACE, justify="left",
+                      wraplength=420).pack(anchor="w")
+        if detail:
+            _w95fd_tk.Label(right, text=detail, font=self.FONT, bg=self.FACE, fg=self.SHADOW, justify="left",
+                          wraplength=420).pack(anchor="w", pady=(6, 0))
+        if entry is not None:
+            e = _w95fd_tk.Entry(right, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                              width=42, show=show or "")
+            e.insert(0, entry)
+            e.select_range(0, "end")
+            e.pack(anchor="w", pady=(8, 0), fill="x")
+            e.bind("<Return>", lambda ev: answer(buttons[0]))
+            field["entry"] = e
+        row = _w95fd_tk.Frame(win, bg=self.FACE)
+        row.pack(pady=(6, 12))
+        for index, label in enumerate(buttons):
+            self.button(row, label, lambda v=label: answer(v), default=index == default).pack(side="left", padx=4)
+        win.bind("<Return>", lambda ev: answer(buttons[default]))
+        win.bind("<Escape>", lambda ev: answer(buttons[-1]))
+        for index, label in enumerate(buttons):                # Y / N / C ... like the Windows 95 boxes
+            win.bind("<Key-%s>" % label[0].lower(), lambda ev, v=label: answer(v) if "entry" not in field else None)
+        try:
+            win.bell()
+        except _w95fd_tk.TclError:
+            pass
+        self.run(win, parent, field.get("entry"))
+        return result["value"], result["text"]
+
+
+
+
+class _W95FileDialog(_W95FileDialogBase):
+    """filedialog.askopenfilename / askopenfilenames / asksaveasfilename / askdirectory / askopenfile(s) /
+    asksaveasfile with the Windows 95 Open, Save As and Browse for Folder look. The same arguments (title,
+    initialdir, initialfile, filetypes, defaultextension, confirmoverwrite, mustexist, parent) and the same returned
+    values as tkinter: a path with / ('' on Cancel), a tuple of paths for several files."""
+    ROW = 18
+    last_dir = None                                          # the next dialog opens where the last one ended
+
+    # ----- the tkinter functions ----------------------------------------------------------------------------
+    def askopenfilename(self, **options):
+        return self._dialog("open", options)
+
+    def askopenfilenames(self, **options):
+        return self._dialog("open", options, multiple=True)
+
+    def asksaveasfilename(self, **options):
+        return self._dialog("save", options)
+
+    def askdirectory(self, **options):
+        return self._dialog("folder", options)
+
+    def askopenfile(self, mode="r", **options):
+        path = self.askopenfilename(**options)
+        return open(path, mode) if path else None
+
+    def askopenfiles(self, mode="r", **options):
+        return [open(path, mode) for path in self.askopenfilenames(**options)] or None
+
+    def asksaveasfile(self, mode="w", **options):
+        path = self.asksaveasfilename(**options)
+        return open(path, mode) if path else None
+
+    def _say(self, parent, title, text, kind="warning"):
+        self.box(title, text, kind, ("OK",), 0, parent)
+
+    # ----- helpers --------------------------------------------------------------------------------------------
+    @staticmethod
+    def _patterns(pattern):
+        """The patterns of one file type, written in any of the ways tkinter / Windows accept them:
+        "*.xlsx *.xls", "*.xlsx;*.xls", "*.xlsx, *.xls", ("*.xlsx", "*.xls"), ".txt", "txt", "*"."""
+        import re
+        items = pattern if isinstance(pattern, (list, tuple)) else [pattern]
+        parts = []
+        for item in items:
+            parts += [p for p in re.split(r"[\s;,]+", str(item).strip("{} ")) if p]
+        result = []
+        for p in parts:
+            if "*" in p or "?" in p:
+                result.append(p)
+            elif p.startswith("."):
+                result.append("*" + p)                       # ".txt" -> "*.txt"
+            else:
+                result.append("*." + p)                      # "txt"  -> "*.txt"
+        return result or ["*"]
+
+    @staticmethod
+    def _matches(name, patterns):
+        import fnmatch
+        for p in patterns:
+            if p in ("*", "*.*") or fnmatch.fnmatch(name.lower(), p.lower()):
+                return True
+        return False
+
+    @staticmethod
+    def _size(entry):
+        if entry["is_dir"]:
+            return ""
+        kb = (entry["size"] + 1023) // 1024
+        return "{:,}KB".format(kb) if kb < 10240 else "{:,.1f}MB".format(entry["size"] / 1048576.0)
+
+    @staticmethod
+    def _type(entry):
+        if entry["is_dir"]:
+            return "File Folder"
+        import os
+        ext = os.path.splitext(entry["name"])[1][1:]
+        return (ext.upper() + " File") if ext else "File"
+
+    def _image(self, master, parts, size=16):
+        """A small picture from coloured rectangles: [(colour, x0, y0, x1, y1), ...]."""
+        img = _w95fd_tk.PhotoImage(master=master, width=size, height=size)
+        for colour, x0, y0, x1, y1 in parts:
+            img.put(colour, to=(x0, y0, x1, y1))
+        return img
+
+    def _icons(self, master):
+        folder = [("#808000", 1, 3, 7, 5), ("#808000", 1, 4, 15, 14), ("#ffff80", 2, 5, 14, 13),
+                  ("#ffff80", 2, 4, 6, 5)]
+        page = [("#000000", 3, 1, 13, 15), ("#ffffff", 4, 2, 12, 14), ("#808080", 10, 2, 12, 4)]
+        drive = [("#000000", 1, 5, 15, 12), ("#c0c0c0", 2, 6, 14, 11), ("#808080", 2, 10, 14, 11),
+                 ("#00c000", 11, 7, 13, 8)]
+        up = folder + [("#000000", 7, 7, 8, 12), ("#000000", 5, 9, 10, 10), ("#000000", 6, 8, 9, 9)]
+        new = folder + [("#000000", 10, 0, 11, 5), ("#000000", 8, 2, 13, 3), ("#ffff00", 9, 1, 12, 4)]
+        return {"folder": self._image(master, folder), "file": self._image(master, page),
+                "drive": self._image(master, drive), "up": self._image(master, up), "new": self._image(master, new)}
+
+    # ----- the dialog -----------------------------------------------------------------------------------------
+    def _dialog(self, mode, options, multiple=False):
+        import os
+        import time
+        native = {"open": "askopenfilenames" if multiple else "askopenfilename", "save": "asksaveasfilename",
+                  "folder": "askdirectory"}[mode]
+        parent = self.parent_of(options.get("parent"))
+        if parent is None:                                   # no Tk window yet: the Windows dialog
+            return _W95_NATIVE_FILEDIALOG[native](**options)
+        title = options.get("title") or {"open": "Open", "save": "Save As", "folder": "Browse for Folder"}[mode]
+        types = options.get("filetypes") or [("All Files", "*.*")]
+        if isinstance(types, (list, tuple)) and len(types) == 2 and all(isinstance(t, str) for t in types):
+            types = [types]                                  # one type given alone: ("Text", "*.txt")
+        filters = []
+        for entry in types:
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                desc, pattern = str(entry[0]), entry[1]
+            else:                                            # only a pattern, without a description
+                desc, pattern = "", entry
+            patterns = self._patterns(pattern)
+            label = desc or ";".join(patterns)
+            if desc and "(" not in desc:
+                label = "%s (%s)" % (desc, ";".join(patterns))
+            filters.append((label, patterns))
+        if not filters:
+            filters = [("All Files (*.*)", ["*"])]
+        start = options.get("initialdir") or _W95FileDialog.last_dir or os.getcwd()
+        start = os.path.abspath(os.path.expanduser(str(start)))
+        if not os.path.isdir(start):
+            start = os.getcwd()
+        default_ext = options.get("defaultextension") or ""
+        if default_ext and not default_ext.startswith("."):
+            default_ext = "." + default_ext
+        state = {"folder": start, "entries": [], "selected": [], "anchor": None, "top": 0, "sort": "name",
+                 "reverse": False, "patterns": filters[0][1] if filters else ["*"], "result": "" if not multiple
+                 else ()}
+
+        win = self.window(parent, title, lambda: win.destroy())
+        icons = self._icons(win)
+        win._w95_icons = icons                               # (kept alive with the window)
+        body = _w95fd_tk.Frame(win, bg=self.FACE)
+        body.pack(fill="both", expand=True, padx=8, pady=(8, 8))
+
+        # ----- Look in: [folder v] [up] [new folder] ------------------------------------------------------------
+        top = _w95fd_tk.Frame(body, bg=self.FACE)
+        top.pack(fill="x")
+        _w95fd_tk.Label(top, text={"open": "Look in:", "save": "Save in:", "folder": "Look in:"}[mode], font=self.FONT,
+                      bg=self.FACE, width=9, anchor="w").pack(side="left")
+        look = _w95fd_tk.Frame(top, bg=self.LIGHT, bd=2, relief="sunken")
+        look.pack(side="left", fill="x", expand=True)
+        look_icon = _w95fd_tk.Label(look, image=icons["folder"], bg=self.LIGHT)
+        look_icon.pack(side="left", padx=(2, 2))
+        look_text = _w95fd_tk.Label(look, text="", font=self.FONT, bg=self.LIGHT, anchor="w")
+        look_text.pack(side="left", fill="x", expand=True)
+        marlett = "Marlett" in _w95fd_tkfont.families(win)
+        look_button = _w95fd_tk.Button(look, text="6" if marlett else "v", font=("Marlett", 8) if marlett else self.FONT_B,
+                                     image=win._w95_pixel, compound="center", width=13, height=13, padx=0, pady=0,
+                                     bg=self.FACE, activebackground=self.FACE, bd=2, relief="raised",
+                                     highlightthickness=0, takefocus=0)
+        look_button.pack(side="right")
+
+        def tool_button(image, command):
+            return _w95fd_tk.Button(top, image=image, command=command, width=22, height=20, bg=self.FACE,
+                                  activebackground=self.FACE, bd=2, relief="raised", highlightthickness=0, takefocus=0)
+        tool_button(icons["up"], lambda: go_up()).pack(side="left", padx=(6, 1))
+        tool_button(icons["new"], lambda: new_folder()).pack(side="left", padx=1)
+
+        # ----- the list (Name, Size, Type, Modified) ------------------------------------------------------------
+        frame = _w95fd_tk.Frame(body, bg=self.LIGHT, bd=2, relief="sunken")
+        frame.pack(fill="both", expand=True, pady=(6, 6))
+        scroll = _w95fd_tk.Scrollbar(frame, orient="vertical")
+        scroll.pack(side="right", fill="y")
+        header = _w95fd_tk.Canvas(frame, height=18, bg=self.FACE, highlightthickness=0, bd=0)
+        header.pack(side="top", fill="x")
+        canvas = _w95fd_tk.Canvas(frame, width=500, height=220, bg=self.LIGHT, highlightthickness=0, bd=0, takefocus=1)
+        canvas.pack(side="left", fill="both", expand=True)
+        columns = (("Name", "name"), ("Size", "size"), ("Type", "type"), ("Modified", "mtime"))
+
+        def widths():
+            room = max(300, canvas.winfo_width())
+            return [room - 70 - 95 - 115, 70, 95, 115]
+
+        def shown():
+            return max(1, canvas.winfo_height() // self.ROW)
+
+        def draw():
+            entries, ws = state["entries"], widths()
+            header.delete("all")
+            x = 0
+            for (title_, key), w in zip(columns, ws):
+                header.create_rectangle(x, 0, x + w, 18, fill=self.FACE, outline="")
+                header.create_line(x, 17, x, 0, x + w - 1, 0, fill=self.LIGHT)
+                header.create_line(x, 17, x + w - 1, 17, x + w - 1, 0, fill=self.SHADOW)
+                mark = (" v" if state["reverse"] else " ^") if key == state["sort"] else ""
+                header.create_text(x + 6, 9, text=title_ + mark, anchor="w", font=self.FONT, fill=self.BLACK)
+                x += w
+            canvas.delete("all")
+            total = len(entries)
+            state["top"] = max(0, min(state["top"], total - shown()))
+            for row, i in enumerate(range(state["top"], min(total, state["top"] + shown() + 1))):
+                e, y = entries[i], row * self.ROW
+                canvas.create_image(4, y + 1, image=icons["drive" if e.get("drive") else "folder" if e["is_dir"]
+                                                            else "file"], anchor="nw")
+                name = e["name"]
+                text = canvas.create_text(24, y + self.ROW // 2, text=name, anchor="w", font=self.FONT,
+                                          fill=self.LIGHT if i in state["selected"] else self.BLACK)
+                if i in state["selected"]:
+                    x0, y0, x1, y1 = canvas.bbox(text)
+                    canvas.create_rectangle(x0 - 2, y + 1, min(x1 + 2, ws[0] - 2), y + self.ROW - 1, fill=self.NAVY,
+                                            outline="")
+                    canvas.tag_raise(text)
+                x = ws[0]
+                canvas.create_text(x + ws[1] - 6, y + self.ROW // 2, text=self._size(e), anchor="e", font=self.FONT)
+                x += ws[1]
+                canvas.create_text(x + 6, y + self.ROW // 2, text=e.get("kind") or self._type(e), anchor="w",
+                                   font=self.FONT)
+                x += ws[2]
+                stamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(e["mtime"])) if e["mtime"] else ""
+                canvas.create_text(x + 6, y + self.ROW // 2, text=stamp, anchor="w", font=self.FONT)
+            if total:
+                scroll.set(state["top"] / float(total), min(1.0, (state["top"] + shown()) / float(total)))
+            else:
+                scroll.set(0.0, 1.0)
+
+        def yview(*args):
+            total = max(1, len(state["entries"]))
+            if args and args[0] == "moveto":
+                state["top"] = int(float(args[1]) * total)
+            elif args and args[0] == "scroll":
+                state["top"] += int(args[1]) * (shown() if args[2] == "pages" else 1)
+            draw()
+        scroll.config(command=yview)
+
+        # ----- File name / Files of type / buttons ---------------------------------------------------------------
+        bottom = _w95fd_tk.Frame(body, bg=self.FACE)
+        bottom.pack(fill="x")
+        bottom.columnconfigure(1, weight=1)
+        name_var = _w95fd_tk.StringVar(win, value=str(options.get("initialfile") or ""))
+        _w95fd_tk.Label(bottom, text="Folder:" if mode == "folder" else "File name:", font=self.FONT, bg=self.FACE,
+                      anchor="w", width=12).grid(row=0, column=0, sticky="w")
+        name_entry = _w95fd_tk.Entry(bottom, textvariable=name_var, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2,
+                                   highlightthickness=0)
+        name_entry.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        ok_text = {"open": "Open", "save": "Save", "folder": "OK"}[mode]
+        self.button(bottom, ok_text, lambda: accept(), default=True).grid(row=0, column=2, sticky="e")
+        filter_var = _w95fd_tk.StringVar(win, value=filters[0][0] if filters else "")
+        if mode != "folder":
+            _w95fd_tk.Label(bottom, text="Save as type:" if mode == "save" else "Files of type:", font=self.FONT,
+                          bg=self.FACE, anchor="w", width=12).grid(row=1, column=0, sticky="w", pady=(6, 0))
+            menu = _w95fd_tk.OptionMenu(bottom, filter_var, *[f[0] for f in filters],
+                                      command=lambda value: pick_filter(value))
+            menu.config(font=self.FONT, bg=self.LIGHT, activebackground=self.LIGHT, relief="sunken", bd=2,
+                        highlightthickness=0, anchor="w")
+            menu["menu"].config(font=self.FONT, bg=self.FACE, activebackground=self.NAVY, activeforeground=self.LIGHT)
+            menu.grid(row=1, column=1, sticky="ew", padx=(0, 8), pady=(6, 0))
+        self.button(bottom, "Cancel", win.destroy).grid(row=1, column=2, sticky="e", pady=(6, 0))
+
+        def say(title_, text, kind="warning"):
+            """A Windows 95 message over the dialog; then the keyboard is back in the name field, as in Windows."""
+            self._say(win, title_, text, kind)
+            if win.winfo_exists():
+                name_entry.focus_force()
+                name_entry.select_range(0, "end")
+
+        # ----- behaviour -----------------------------------------------------------------------------------------
+        def drives():
+            if os.name != "nt":
+                return []
+            import string
+            return ["%s:\\" % d for d in string.ascii_uppercase[2:] if os.path.exists("%s:\\" % d)]
+
+        def refresh(select=None):
+            folder = state["folder"]
+            try:
+                items = list(os.scandir(folder))
+            except OSError as exc:
+                say(title, "%s is not accessible.\n\n%s" % (folder, exc.strerror or exc), "error")
+                return False
+            entries = []
+            for item in items:
+                if item.name.startswith("."):
+                    continue
+                try:
+                    is_dir = item.is_dir()
+                    info = item.stat()
+                except OSError:
+                    continue
+                if not is_dir and (mode == "folder" or not self._matches(item.name, state["patterns"])):
+                    continue
+                entries.append({"name": item.name, "path": item.path, "is_dir": is_dir,
+                                "size": 0 if is_dir else info.st_size, "mtime": info.st_mtime})
+            key = state["sort"]
+
+            def order(e):
+                value = {"name": e["name"].lower(), "size": e["size"], "type": self._type(e).lower(),
+                         "mtime": e["mtime"]}[key]
+                return value
+            folders = sorted([e for e in entries if e["is_dir"]], key=order, reverse=state["reverse"])
+            files = sorted([e for e in entries if not e["is_dir"]], key=order, reverse=state["reverse"])
+            state["entries"] = folders + files
+            state["selected"], state["anchor"] = [], None
+            if select:
+                for i, e in enumerate(state["entries"]):
+                    if e["name"].lower() == select.lower():
+                        state["selected"], state["anchor"] = [i], i
+                        state["top"] = max(0, i - shown() // 2)
+            look_text.config(text=os.path.basename(folder.rstrip("\\/")) or folder)
+            look_icon.config(image=icons["drive"] if os.path.dirname(folder.rstrip("\\/")) in ("", folder.rstrip("\\/"))
+                             or folder.rstrip("\\/") == os.path.splitdrive(folder)[0] else icons["folder"])
+            if mode == "folder":
+                name_var.set(folder)
+            draw()
+            return True
+
+        def navigate(folder, select=None):
+            folder = os.path.abspath(folder)
+            previous = state["folder"]
+            state["folder"], state["top"] = folder, 0
+            if not refresh(select):
+                state["folder"] = previous
+                refresh()
+                return
+            _W95FileDialog.last_dir = folder
+
+        def go_up():
+            parent_dir = os.path.dirname(state["folder"].rstrip("\\/")) or state["folder"]
+            if os.name == "nt" and len(parent_dir) == 2 and parent_dir.endswith(":"):
+                parent_dir += "\\"
+            if parent_dir != state["folder"]:
+                navigate(parent_dir, select=os.path.basename(state["folder"].rstrip("\\/")))
+
+        def new_folder():
+            value, typed = self.box("New Folder", "Name of the new folder:", "question", ("OK", "Cancel"), 0, win,
+                                    entry="New Folder")
+            name = (typed or "").strip()
+            if value != "OK" or not name:
+                return
+            try:
+                os.mkdir(os.path.join(state["folder"], name))
+            except OSError as exc:
+                say("New Folder", "Cannot create the folder '%s'.\n\n%s" % (name, exc.strerror or exc),
+                          "error")
+                return
+            refresh(select=name)
+
+        def open_look_in():
+            menu = _w95fd_tk.Menu(win, tearoff=0, font=self.FONT, bg=self.LIGHT, activebackground=self.NAVY,
+                                activeforeground=self.LIGHT)
+            chain, path = [], state["folder"]
+            while True:
+                chain.append(path)
+                up_ = os.path.dirname(path.rstrip("\\/"))
+                if os.name == "nt" and len(up_) == 2 and up_.endswith(":"):
+                    up_ += "\\"
+                if not up_ or up_ == path:
+                    break
+                path = up_
+            chain.reverse()
+            home = os.path.expanduser("~")
+            desktop = os.path.join(home, "Desktop")
+            if os.path.isdir(desktop):
+                menu.add_command(label="Desktop", command=lambda: navigate(desktop))
+            menu.add_command(label="  " + os.path.basename(home), command=lambda: navigate(home))
+            menu.add_separator()
+            roots = drives() or [chain[0]]
+            for root_ in roots:
+                if chain and os.path.normcase(chain[0]) == os.path.normcase(root_):
+                    for depth, path in enumerate(chain):
+                        label = path if depth == 0 else os.path.basename(path.rstrip("\\/"))
+                        menu.add_command(label="  " * depth + label, command=lambda p=path: navigate(p))
+                else:
+                    menu.add_command(label=root_, command=lambda p=root_: navigate(p))
+            try:
+                menu.tk_popup(look.winfo_rootx(), look.winfo_rooty() + look.winfo_height())
+            finally:
+                menu.grab_release()
+            win.after(50, lambda: name_entry.focus_force() if win.winfo_exists() else None)   # keys work again
+        look_button.config(command=open_look_in)
+        for widget in (look, look_text, look_icon):
+            widget.bind("<Button-1>", lambda e: open_look_in())
+
+        def pick_filter(value):
+            for desc, patterns in filters:
+                if desc == value:
+                    state["patterns"] = patterns
+            refresh()
+
+        def show_selection():
+            entries = [state["entries"][i] for i in state["selected"]]
+            files = [e["name"] for e in entries if not e["is_dir"]]
+            if mode == "folder":
+                name_var.set(entries[0]["path"] if entries else state["folder"])
+            elif len(files) == 1:
+                name_var.set(files[0])
+            elif files:
+                name_var.set(" ".join('"%s"' % f for f in files))
+
+        def row_at(event):
+            i = state["top"] + int(event.y // self.ROW)
+            return i if 0 <= i < len(state["entries"]) else None
+
+        def click(event, how="single"):
+            canvas.focus_set()
+            i = row_at(event)
+            if i is None:
+                state["selected"] = []
+            elif how == "toggle" and multiple:
+                state["selected"] = [s for s in state["selected"] if s != i] if i in state["selected"] \
+                    else state["selected"] + [i]
+                state["anchor"] = i
+            elif how == "range" and multiple and state["anchor"] is not None:
+                a, z = sorted((state["anchor"], i))
+                state["selected"] = list(range(a, z + 1))
+            else:
+                state["selected"], state["anchor"] = [i], i
+            show_selection()
+            draw()
+            return "break"
+
+        def double(event):
+            i = row_at(event)
+            if i is None:
+                return
+            entry = state["entries"][i]
+            if entry["is_dir"]:
+                navigate(entry["path"])
+            else:
+                state["selected"] = [i]
+                show_selection()
+                accept()
+
+        def move(step):
+            if not state["entries"]:
+                return "break"
+            current = state["selected"][-1] if state["selected"] else -1
+            i = max(0, min(len(state["entries"]) - 1, current + step))
+            state["selected"], state["anchor"] = [i], i
+            if i < state["top"]:
+                state["top"] = i
+            elif i >= state["top"] + shown():
+                state["top"] = i - shown() + 1
+            show_selection()
+            draw()
+            return "break"
+
+        def list_enter(_event=None):
+            if len(state["selected"]) == 1 and state["entries"][state["selected"][0]]["is_dir"] and mode != "folder":
+                navigate(state["entries"][state["selected"][0]]["path"])
+            else:
+                accept()
+            return "break"
+
+        def header_click(event):
+            x = 0
+            for (title_, key), w in zip(columns, widths()):
+                if x <= event.x < x + w:
+                    state["reverse"] = not state["reverse"] if state["sort"] == key else False
+                    state["sort"] = key
+                    refresh()
+                    return
+                x += w
+
+        def resolve(text):
+            text = os.path.expandvars(os.path.expanduser(text.strip().strip('"')))
+            return os.path.abspath(text if os.path.isabs(text) else os.path.join(state["folder"], text))
+
+        def finish(value):
+            state["result"] = value
+            _W95FileDialog.last_dir = state["folder"]        # the next dialog starts here, as in Windows
+            win.destroy()
+
+        def accept():
+            import shlex
+            text = name_var.get().strip()
+            if mode == "folder":
+                chosen = resolve(text) if text else state["folder"]
+                if not os.path.isdir(chosen):
+                    if options.get("mustexist"):
+                        say(title, "%s\nThe folder does not exist." % chosen)
+                        return
+                finish(chosen.replace("\\", "/"))
+                return
+            if not text:
+                if len(state["selected"]) == 1 and state["entries"][state["selected"][0]]["is_dir"]:
+                    navigate(state["entries"][state["selected"][0]]["path"])
+                return
+            if ("*" in text or "?" in text) and '"' not in text:      # a filter typed in the name field
+                state["patterns"] = self._patterns(text)
+                refresh()
+                return
+            names = [text]
+            if multiple and '"' in text:
+                try:
+                    names = shlex.split(text, posix=True)
+                except ValueError:
+                    names = [text]
+            paths = [resolve(n) for n in names]
+            if len(paths) == 1 and os.path.isdir(paths[0]):
+                navigate(paths[0])
+                name_var.set("")
+                return
+            if mode == "open":
+                for path in paths:
+                    if not os.path.isfile(path):
+                        say(title, "%s\nFile not found.\nPlease verify the correct file name was "
+                                  "given." % os.path.basename(path))
+                        return
+                result = [p.replace("\\", "/") for p in paths]
+                finish(tuple(result) if multiple else result[0])
+                return
+            path = paths[0]
+            if not os.path.splitext(path)[1]:                # Save: the extension of the chosen type
+                specific = [p for p in state["patterns"] if p.startswith("*.") and "*" not in p[2:] and "?" not in p]
+                if default_ext:
+                    path += default_ext
+                elif specific:
+                    path += specific[0][1:]
+            if not os.path.isdir(os.path.dirname(path)):
+                say(title, "%s\nThe folder does not exist." % os.path.dirname(path))
+                return
+            if os.path.isdir(path):
+                navigate(path)
+                return
+            if os.path.exists(path) and options.get("confirmoverwrite", True):
+                if self.box(title, "%s already exists.\nDo you want to replace it?" % os.path.basename(path),
+                            "warning", ("Yes", "No"), 0, win)[0] != "Yes":
+                    name_entry.focus_force()                 # No: back to the name, to type another one
+                    return
+            finish(path.replace("\\", "/"))
+
+        canvas.bind("<Configure>", lambda e: draw())
+        canvas.bind("<Button-1>", click)
+        canvas.bind("<Control-Button-1>", lambda e: click(e, "toggle"))
+        canvas.bind("<Shift-Button-1>", lambda e: click(e, "range"))
+        canvas.bind("<Double-Button-1>", double)
+        canvas.bind("<MouseWheel>", lambda e: yview("scroll", -3 if e.delta > 0 else 3, "units"))
+        canvas.bind("<Button-4>", lambda e: yview("scroll", -3, "units"))
+        canvas.bind("<Button-5>", lambda e: yview("scroll", 3, "units"))
+        for key, step in (("<Up>", -1), ("<Down>", 1), ("<Prior>", -10), ("<Next>", 10), ("<Home>", -10 ** 6),
+                          ("<End>", 10 ** 6)):
+            canvas.bind(key, lambda e, s=step: move(s))
+        canvas.bind("<Return>", list_enter)
+        canvas.bind("<BackSpace>", lambda e: (go_up(), "break")[1])
+        header.bind("<Button-1>", header_click)
+        name_entry.bind("<Return>", lambda e: (accept(), "break")[1])
+        win.bind("<Escape>", lambda e: win.destroy())
+        if not refresh(select=options.get("initialfile")):
+            state["folder"] = os.getcwd()
+            refresh()
+        name_entry.select_range(0, "end")
+        self.run(win, parent, name_entry)
+        return state["result"]
+
+
+def w95_install_filedialogs():
+    """filedialog.askopenfilename(...) and the others open the Windows 95 dialogs from now on, in every tool."""
+    dialog = _W95FileDialog()
+    _w95fd_module._w95_native = dict(_W95_NATIVE_FILEDIALOG)        # (pasted twice by mistake: no loop)
+    for name in _W95_FILEDIALOG_NAMES:
+        setattr(_w95fd_module, name, getattr(dialog, name))
+    return dialog
+
+
+_W95_FILEDIALOG_ALL = w95_install_filedialogs()
+for _w95fd_name in _W95_FILEDIALOG_NAMES:                  # for code that did "from tkinter.filedialog import ..."
+    if _w95fd_name in globals():
+        globals()[_w95fd_name] = getattr(_W95_FILEDIALOG_ALL, _w95fd_name)
 
 # =====================================================================================================
 # Bitpack: Config/init.bpk95 = baza de date ca un singur sir de caractere
@@ -1001,6 +2087,7 @@ def setup_database_ALL():
         {'app_name': 'Extension Manager', 'username': 'extension', 'password': 'manager', 'has_key': True, 'var_value': 1100220022},
         {'app_name': 'dbo_bitpack.db Database Viewer Dashboard', 'username': 'dbobitpackdash', 'password': 'dbobitpackdash', 'has_key': True, 'var_value': 778832},
         {'app_name': 'Color Picker', 'username': 'colorpicker', 'password': 'colorpicker', 'has_key': True, 'var_value': 112200220033000111},
+        {'app_name': 'Ticket System', 'username': 'ticket', 'password': 'system', 'has_key': True, 'var_value': 8796},
         {'app_name': 'Shift Planner', 'username': 'shiftpl', 'password': 'shiftpl', 'has_key': True, 'var_value': 333432},
         {'app_name': 'Video Editor', 'username': 'vided', 'password': 'vided', 'has_key': True, 'var_value': 3342109},
         {'app_name': 'Step Recorder', 'username': 'stprcd', 'password': 'stprcd', 'has_key': True, 'var_value': 67768},
@@ -1426,6 +2513,116 @@ def setup_database_ALL():
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='multi_format_editor_settings'")
     if cursor.fetchone() is None:
         cursor.execute('''CREATE TABLE multi_format_editor_settings (key TEXT PRIMARY KEY, value TEXT)''')
+
+    # ----- Ticket Desk 95 ----------------------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_areas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_area_members (
+            area_id INTEGER NOT NULL,
+            agent_id INTEGER NOT NULL,
+            level INTEGER NOT NULL,
+            PRIMARY KEY (area_id, agent_id, level)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'class',
+            color TEXT NOT NULL DEFAULT '#ffffff',
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (kind, name)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            requester TEXT NOT NULL DEFAULT '',
+            contact TEXT NOT NULL DEFAULT '',
+            area_id INTEGER,
+            priority INTEGER NOT NULL DEFAULT 3,
+            status TEXT NOT NULL DEFAULT 'New',
+            level INTEGER NOT NULL DEFAULT 0,
+            assignee_id INTEGER,
+            close_tag_id INTEGER,
+            resolution TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL,
+            updated TEXT NOT NULL,
+            resolved_at TEXT,
+            closed_at TEXT,
+            hold_reason TEXT NOT NULL DEFAULT '',
+            hold_from_status TEXT NOT NULL DEFAULT '',
+            hold_since TEXT,
+            hold_seconds INTEGER NOT NULL DEFAULT 0,
+            escalations INTEGER NOT NULL DEFAULT 0,
+            returns INTEGER NOT NULL DEFAULT 0,
+            reassignments INTEGER NOT NULL DEFAULT 0,
+            holds INTEGER NOT NULL DEFAULT 0,
+            reopens INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_ticket_tags (
+            ticket_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (ticket_id, tag_id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            at TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL,
+            from_stage TEXT NOT NULL DEFAULT '',
+            to_stage TEXT NOT NULL DEFAULT '',
+            from_status TEXT NOT NULL DEFAULT '',
+            to_status TEXT NOT NULL DEFAULT '',
+            from_agent TEXT NOT NULL DEFAULT '',
+            to_agent TEXT NOT NULL DEFAULT '',
+            from_area TEXT NOT NULL DEFAULT '',
+            to_area TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT ''
+        )
+    ''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS ticket_desk_events_ticket ON ticket_desk_events (ticket_id, id)''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            level1_enabled INTEGER NOT NULL DEFAULT 1,
+            level2_enabled INTEGER NOT NULL DEFAULT 1,
+            auto_assign INTEGER NOT NULL DEFAULT 1,
+            require_class_tag INTEGER NOT NULL DEFAULT 1,
+            sla_critical REAL NOT NULL DEFAULT 4,
+            sla_high REAL NOT NULL DEFAULT 8,
+            sla_normal REAL NOT NULL DEFAULT 24,
+            sla_low REAL NOT NULL DEFAULT 72,
+            hold_reasons TEXT NOT NULL DEFAULT 'Waiting for requester|Waiting for vendor|Waiting for parts|Scheduled for later',
+            acting_as TEXT NOT NULL DEFAULT '',
+            last_view TEXT NOT NULL DEFAULT 'open'
+        )
+    ''')
     
     # Tabel pentru Personal Storage - files
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_storage_files'")
@@ -2299,6 +3496,7 @@ def setup_database_INSTANCE():
         {'app_name': 'Extension Manager', 'username': 'extension', 'password': 'manager', 'has_key': True, 'var_value': 1100220022},
         {'app_name': 'dbo_bitpack.db Database Viewer Dashboard', 'username': 'dbobitpackdash', 'password': 'dbobitpackdash', 'has_key': True, 'var_value': 778832},
         {'app_name': 'Color Picker', 'username': 'colorpicker', 'password': 'colorpicker', 'has_key': True, 'var_value': 112200220033000111},
+        {'app_name': 'Ticket System', 'username': 'ticket', 'password': 'system', 'has_key': True, 'var_value': 8796},
         {'app_name': 'Shift Planner', 'username': 'shiftpl', 'password': 'shiftpl', 'has_key': True, 'var_value': 333432},
         {'app_name': 'Video Editor', 'username': 'vided', 'password': 'vided', 'has_key': True, 'var_value': 3342109},
         {'app_name': 'Step Recorder', 'username': 'stprcd', 'password': 'stprcd', 'has_key': True, 'var_value': 67768},
@@ -2719,6 +3917,116 @@ def setup_database_INSTANCE():
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='multi_format_editor_settings'")
     if cursor.fetchone() is None:
         cursor.execute('''CREATE TABLE multi_format_editor_settings (key TEXT PRIMARY KEY, value TEXT)''')
+
+    # ----- Ticket Desk 95 ----------------------------------------------------------------------------------------
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_areas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_agents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            email TEXT NOT NULL DEFAULT '',
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_area_members (
+            area_id INTEGER NOT NULL,
+            agent_id INTEGER NOT NULL,
+            level INTEGER NOT NULL,
+            PRIMARY KEY (area_id, agent_id, level)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'class',
+            color TEXT NOT NULL DEFAULT '#ffffff',
+            active INTEGER NOT NULL DEFAULT 1,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (kind, name)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            requester TEXT NOT NULL DEFAULT '',
+            contact TEXT NOT NULL DEFAULT '',
+            area_id INTEGER,
+            priority INTEGER NOT NULL DEFAULT 3,
+            status TEXT NOT NULL DEFAULT 'New',
+            level INTEGER NOT NULL DEFAULT 0,
+            assignee_id INTEGER,
+            close_tag_id INTEGER,
+            resolution TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL,
+            updated TEXT NOT NULL,
+            resolved_at TEXT,
+            closed_at TEXT,
+            hold_reason TEXT NOT NULL DEFAULT '',
+            hold_from_status TEXT NOT NULL DEFAULT '',
+            hold_since TEXT,
+            hold_seconds INTEGER NOT NULL DEFAULT 0,
+            escalations INTEGER NOT NULL DEFAULT 0,
+            returns INTEGER NOT NULL DEFAULT 0,
+            reassignments INTEGER NOT NULL DEFAULT 0,
+            holds INTEGER NOT NULL DEFAULT 0,
+            reopens INTEGER NOT NULL DEFAULT 0
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_ticket_tags (
+            ticket_id INTEGER NOT NULL,
+            tag_id INTEGER NOT NULL,
+            PRIMARY KEY (ticket_id, tag_id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            at TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL,
+            from_stage TEXT NOT NULL DEFAULT '',
+            to_stage TEXT NOT NULL DEFAULT '',
+            from_status TEXT NOT NULL DEFAULT '',
+            to_status TEXT NOT NULL DEFAULT '',
+            from_agent TEXT NOT NULL DEFAULT '',
+            to_agent TEXT NOT NULL DEFAULT '',
+            from_area TEXT NOT NULL DEFAULT '',
+            to_area TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT ''
+        )
+    ''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS ticket_desk_events_ticket ON ticket_desk_events (ticket_id, id)''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ticket_desk_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            level1_enabled INTEGER NOT NULL DEFAULT 1,
+            level2_enabled INTEGER NOT NULL DEFAULT 1,
+            auto_assign INTEGER NOT NULL DEFAULT 1,
+            require_class_tag INTEGER NOT NULL DEFAULT 1,
+            sla_critical REAL NOT NULL DEFAULT 4,
+            sla_high REAL NOT NULL DEFAULT 8,
+            sla_normal REAL NOT NULL DEFAULT 24,
+            sla_low REAL NOT NULL DEFAULT 72,
+            hold_reasons TEXT NOT NULL DEFAULT 'Waiting for requester|Waiting for vendor|Waiting for parts|Scheduled for later',
+            acting_as TEXT NOT NULL DEFAULT '',
+            last_view TEXT NOT NULL DEFAULT 'open'
+        )
+    ''')
     
     # Tabel pentru Personal Storage - files
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='personal_storage_files'")
@@ -11838,6 +13146,8 @@ This comprehensive suite streamlines various IT tasks from system monitoring to 
 
 - Activity Monitor Tool (activity/monitor)
 
+- Ticket System (ticket/system)
+
 - Sticky Notes (sticky/notes)
 
 - Calculator (calculator/calculator)
@@ -12069,6 +13379,7 @@ SPECIALIZED TOOL ACCOUNTS:
 - taskmanager/terminator - Advanced task manager
 - terminal/terminal - Command line terminal interface
 - textreplace/textfind - Text search and replace utility
+- ticket/system - Ticket system
 - timeline/file - File timeline viewer
 - timetracker/timetracker - Simple time tracker
 - todo/manager - Todo manager
@@ -13106,6 +14417,7 @@ trmn = None
 passfig = None
 passfig1 = None
 hardvar = None
+tichetvar = None
 shiftplvar = None
 videoVAR = None
 stprcdvar = None
@@ -13543,6 +14855,7 @@ def load_credentials():
         "Task Manager": {"username": "taskmanager", "password": "terminator"},
         "Terminal": {"username": "terminal", "password": "terminal"},
         "Text Replace & Find": {"username": "textreplace", "password": "textfind"},
+        "Ticket System": {"username": "ticket", "password": "system"},
         "Time Tracker": {"username": "timetracker", "password": "timetracker"},
         "Todo Manager": {"username": "todo", "password": "manager"},
         "Total Commander": {"username": "commander", "password": "total"},
@@ -13947,6 +15260,7 @@ def login():
     global passfig
     global passfig1
     global hardvar
+    global tichetvar
     global shiftplvar
     global videoVAR
     global suggestion_scope
@@ -14480,6 +15794,9 @@ def login():
     #clpuser = "colorpicker"
     #clppass = "colorpicker"
     clpuser, clppass = get_credentials(112200220033000111, "colorpicker", "colorpicker")
+    #tichetuser = "ticket"
+    #tichetpass = "system"
+    tichetuser, tichetpass = get_credentials(8796, "ticket", "system")
     #shiftpluser = "shiftpl"
     #shiftplpass = "shiftpl"
     shiftpluser, shiftplpass = get_credentials(333432, "shiftpl", "shiftpl")
@@ -14899,6 +16216,11 @@ def login():
         show_validation = False
         adminT = False
         hardvar = check_login(username_entry.get(), password_entry.get(), fallback=6)
+        windowlogin.destroy()
+    elif username_entry.get()==tichetuser and password_entry.get()==tichetpass:
+        show_validation = False
+        adminT = False
+        tichetvar = check_login(username_entry.get(), password_entry.get(), fallback=8796)
         windowlogin.destroy()
     elif username_entry.get()==shiftpluser and password_entry.get()==shiftplpass:
         show_validation = False
@@ -16752,6 +18074,161 @@ def w95_login_message(parent, title, text, kind="info"):
             pass
     return "ok"
     
+class RetroCombo(tk.Frame):
+    """Entry + buton + lista care se deschide sub ea. state: "normal" (se poate scrie), "readonly" (doar din
+    lista) sau "disabled". La alegere trimite <<ComboboxSelected>>, ca ttk.Combobox."""
+
+    def __init__(self, master, values=(), font=("Fixedsys", 14, "bold"), width=20, state="readonly",
+                 bg="gray40", fg="cyan", select_bg="lime green", select_fg="black", height=8, **kwargs):
+        tk.Frame.__init__(self, master, bg=master.cget("bg"), **kwargs)
+        self._values = list(values)
+        self._state = state
+        self._font, self._bg, self._fg = font, bg, fg
+        self._select_bg, self._select_fg, self._height = select_bg, select_fg, height
+        self._popup = None
+        self._var = tk.StringVar(self)
+        self._entry = tk.Entry(self, textvariable=self._var, font=font, width=width, bd=4, relief="sunken",
+                               bg=bg, fg=fg, insertbackground=select_bg, disabledbackground="gray30",
+                               disabledforeground="gray60", readonlybackground=bg, highlightthickness=0)
+        self._entry.pack(side="left", fill="x", expand=True)
+        self._button = tk.Button(self, text="v", font=font, bd=4, bg="black", fg=fg, activebackground="gray30",
+                                 activeforeground=select_bg, disabledforeground="gray40", takefocus=0,
+                                 highlightthickness=0, padx=4, pady=0, command=self._toggle)
+        self._button.pack(side="left", fill="y")
+        self._entry.bind("<Button-1>", lambda e: self._toggle() if self._state == "readonly" else None)
+        for key in ("<Down>", "<Alt-Down>", "<F4>"):
+            self._entry.bind(key, lambda e: (self._open(), "break")[1])
+        self._apply_state()
+
+    # ----- the ttk.Combobox calls -----------------------------------------------------------------------
+    def get(self):
+        return self._var.get()
+
+    def set(self, value):
+        self._var.set(value)
+
+    def current(self, index=None):
+        if index is None:
+            try:
+                return self._values.index(self.get())
+            except ValueError:
+                return -1
+        self.set(self._values[index])
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        if "values" in kwargs:
+            self._values = list(kwargs.pop("values"))
+        if "state" in kwargs:
+            self._state = str(kwargs.pop("state"))
+            self._apply_state()
+        if "font" in kwargs:
+            self._font = kwargs.pop("font")
+            self._entry.config(font=self._font)
+            self._button.config(font=self._font)
+        if "width" in kwargs:
+            self._entry.config(width=kwargs.pop("width"))
+        if kwargs:
+            tk.Frame.configure(self, **kwargs)
+
+    config = configure
+
+    def cget(self, key):
+        if key == "values":
+            return tuple(self._values)
+        if key == "state":
+            return self._state
+        return tk.Frame.cget(self, key)
+
+    def __setitem__(self, key, value):
+        self.configure(**{key: value})
+
+    def __getitem__(self, key):
+        return self.cget(key)
+
+    def focus_set(self):
+        self._entry.focus_set()
+
+    # ----- inside -------------------------------------------------------------------------------------
+    def _apply_state(self):
+        self._close()
+        entry_state = {"normal": "normal", "readonly": "readonly"}.get(self._state, "disabled")
+        self._entry.config(state=entry_state, cursor="hand2" if entry_state == "readonly" else "xterm")
+        self._button.config(state="disabled" if entry_state == "disabled" else "normal")
+
+    def _toggle(self):
+        if self._popup is not None:
+            self._close()
+        else:
+            self._open()
+
+    def _open(self):
+        if self._state == "disabled" or self._popup is not None or not self._values:
+            return
+        popup = tk.Toplevel(self)
+        popup.overrideredirect(True)
+        popup.attributes("-topmost", True)
+        rows = min(self._height, len(self._values))
+        box = tk.Listbox(popup, font=self._font, height=rows, bg=self._bg, fg=self._fg, bd=2, relief="solid",
+                         selectbackground=self._select_bg, selectforeground=self._select_fg,
+                         activestyle="none", highlightthickness=0, exportselection=False)
+        if len(self._values) > rows:
+            bar = tk.Scrollbar(popup, orient="vertical", command=box.yview)
+            bar.pack(side="right", fill="y")
+            box.config(yscrollcommand=bar.set)
+        box.pack(side="left", fill="both", expand=True)
+        for value in self._values:
+            box.insert("end", value)
+        if self.current() >= 0:
+            box.selection_set(self.current())
+            box.see(self.current())
+        self.update_idletasks()
+        popup.geometry("%dx%d+%d+%d" % (self.winfo_width(), box.winfo_reqheight(),
+                                        self.winfo_rootx(), self.winfo_rooty() + self.winfo_height()))
+        self._popup, self._box = popup, box
+        box.bind("<ButtonRelease-1>", lambda e: self._choose(box.nearest(e.y)))
+        box.bind("<Motion>", lambda e: (box.selection_clear(0, "end"), box.selection_set(box.nearest(e.y))))
+        box.bind("<Return>", lambda e: self._choose(box.curselection()[0] if box.curselection() else -1))
+        box.bind("<Escape>", lambda e: self._close())
+        popup.bind("<ButtonPress-1>", self._click_outside)
+        box.focus_set()
+        popup.after(1, self._grab)
+
+    def _grab(self):
+        try:
+            if self._popup is not None:
+                self._popup.grab_set()          # a click anywhere else closes the list
+        except tk.TclError:
+            pass
+
+    def _click_outside(self, event):
+        popup = self._popup
+        if popup is None:
+            return
+        x, y = event.x_root, event.y_root
+        if not (popup.winfo_rootx() <= x < popup.winfo_rootx() + popup.winfo_width() and
+                popup.winfo_rooty() <= y < popup.winfo_rooty() + popup.winfo_height()):
+            self._close()
+
+    def _choose(self, index):
+        if 0 <= index < len(self._values):
+            self.set(self._values[index])
+            self._close()
+            self._entry.focus_set()
+            self.event_generate("<<ComboboxSelected>>")
+        else:
+            self._close()
+
+    def _close(self):
+        popup, self._popup = self._popup, None
+        if popup is not None:
+            try:
+                popup.grab_release()
+                popup.destroy()
+            except tk.TclError:
+                pass
+    
 framelogin = tk.Frame(bg='gray20')
 
 # Canvas pentru PC retro 3D în colțul dreapta-sus
@@ -16804,7 +18281,8 @@ canvas_pc.create_arc(78, 108, 95, 125, start=60, extent=40, outline='white', wid
 
 # Crearea combobox-ului pentru selecția utilizatorilor
 combo_label = tk.Label(framelogin, text="Select user", bg='gray20', fg="lime green", font=("Fixedsys", 16, "bold"))
-combo_users = ttk.Combobox(framelogin, font=("Fixedsys", 14, "bold"), width=25, state="disabled")
+#combo_users = ttk.Combobox(framelogin, font=("Fixedsys", 14, "bold"), width=25, state="disabled")
+combo_users = RetroCombo(framelogin, font=("Fixedsys", 14, "bold"), width=25, state="disabled")
 combo_users['values'] = list(credentials.keys())
 combo_users.set("Only for Dev mode")  # Textul care apare dar nu e în listă
 combo_users.bind("<<ComboboxSelected>>", on_combo_selected)
@@ -16863,20 +18341,27 @@ suggestion_frame = tk.Frame(windowlogin, bg="black", bd=2, relief="ridge")
 
 
 def get_suggestions(text):
+    """Conturile care se potrivesc cu ce s-a scris. Mereu conturile din devcpp (credentials, lista Select user);
+    dupa fosfataza si conturile Tudor (tudor_credentials)."""
     text = text.strip().lower()
     if not text:
         return []
-    pool = dict(credentials)
+    pools = [credentials]
     if suggestion_scope == "tudor":
-        pool.update(tudor_credentials)
-    starts, contains = [], []
-    for app_name, data in pool.items():
-        user = data["username"]
-        if user.lower().startswith(text):
-            starts.append((app_name, user, data["password"]))
-        elif text in user.lower() or text in app_name.lower():
-            contains.append((app_name, user, data["password"]))
-    return (starts + contains)[:MAX_SUGGESTIONS]
+        pools = [tudor_credentials, credentials]
+    seen, starts, contains = set(), [], []
+    for pool in pools:
+        for app_name, data in pool.items():
+            user, password = data["username"], data["password"]
+            if (app_name, user, password) in seen:
+                continue
+            seen.add((app_name, user, password))
+            if user.lower().startswith(text):
+                starts.append((app_name, user, password))
+            elif text in user.lower() or text in app_name.lower():
+                contains.append((app_name, user, password))
+    limit = MAX_SUGGESTIONS * 2 if suggestion_scope == "tudor" else MAX_SUGGESTIONS   # loc pentru ambele
+    return (starts + contains)[:limit]
 
 
 def hide_suggestions(event=None):
@@ -19245,7 +20730,7 @@ validation.mainloop()
 if show_validation == True:
     bitpack95_validation(on_valid=main1, on_no_key=main2)
 
-elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actvtmntvar != 9067 and pdfbulkvar != 654312 and rszbvar != 67855 and batchedvar !=231145 and arcbrvar != 132454 and fldrcpvar != 223198 and personaldriveVAR != 78876 and bpkdshgraphvar != 778832 and arpatablevar != 9091 and planogram95var != 456111111111111111 and codebvar != 99887345 and docmrgvar != 99823 and iconedvar != 999213 and videoVAR != 3342109 and fldpckVAR != 88932 and chartvar != 901298 and exccmpvar != 978132 and stickyvar != 9879 and repbldvar != 88923 and stprcdvar != 67768 and shiftplvar != 333432 and hardvar != 6 and postmanvar != 8712 and screenvar != 7 and zipvar != 8 and compvar != 9 and sqldesignerVARIABLE != 445532 and sqlmanagerVARIABLE != 44331122 and pdfvar != 10 and replfindvar != 11 and testvarr != 12 and testvarr2 != 122 and pdfvwvar != 13 and netwvar != 14 and crpvar2 != 155 and aivar != 20 and notepadvar != 21 and paintvar != 22 and Adm1var != 30 and Adm3var != 4409 and  Adm2var != 40 and zippassvar != 60 and bkvar != 700 and rnvar != 710 and passmngrr != 2000 and sqlcrvar != 2332 and pausevar != 10000 and taskmngrvar != 1000000 and show_validation == False and junkvar != 77777 and wbpvar != 123456789 and cmvar != 3333 and pingalivevar != 5566 and readervar != 1993 and hardmvar != 1994 and fetchervar != 1995 and shellvar != 1996 and w95var1 != 1997 and w95var != 1998 and sqllvar != 22222 and diagramvar != 2345432 and termadm != 6745 and commandervar != 88888888 and calendarvar != 999000 and allmonitorvar != 999001 and eventvval != 44445555 and assemblyvar != 333333333 and kbbbvar != 5189 and proc_varr != 67766776 and xmleditorvar != 111444555 and MDvar != 777666111 and archVar != 777666012 and expensevar != 777666013 and scrpVar != 777666014 and recoveryVarr != 777666090 and fishervar != 777666091 and muapdash != 777666092 and mindmapvar != 7776660999 and multifilevar != 77766609999 and safevar != 444555000888 and trafficvar != 333344440099 and pwdchkVAR != 9965 and dosboxvar != 3333444400999 and vscodevar != 999955550000 and pdfviewervar != 3333444400997676 and clipboardVAR != 333344440099767667 and filefinderVARR != 5555544443330 and topologyVAR != 555554444333000 and disktoolutilityvar != 99999999995555555555 and calculatorvarrr != 11111111111111111111 and devmgmtvar != 88888888888888888888 and todovar != 8888888888888888888888888888888888888888 and pdftoexcelvar != 666666666666666666666 and csvconvvar != 666666666666666666666666666666666666666666 and docupdfvar != 666666666666666666666666666666666666666666666666666666666666666 and emailvariable != 11002200 and manageextensionsvar != 1100220022 and clpvar != 112200220033000111 and winregvar != 112200220033000111000 and convcalcvar != 11100011100011100011100023 and programmercalcvar != 1110001110001110001110002322 and projmanvar != 111000111000111000111000232222 and regtestvar != 11100011100011100011100023222200 and graphcalcvar != 1110001110001110001110002322220099 and codemergervar != 98099999999999999999999999999999999999999999999999999 and xlcvarrrr != 55555555555555555555555555555555555555555555555555555555555555555555555 and dbmainvarrrr != 77777777777777777777777777777777777777777777777888812 and codeanaliservisvar != 43434343434344444444444433333333333434343 and pdfeditorVARvar != 434343434343444444444444333333333334343435 and wordtoPDFFFVAR != 449000000000000000000000000000000000000000000000000 and timelinevar != 555550009088888866666666666666666666666666666 and forensicvar != 5555500090888888666666666666666666666666666667 and timetrackerVARRR != 55555000908888886666666666666666666666666666678 and dbcompVARRR != 555550009088888866666666666666666666666666666789 and decisiontreeVAR != 5555500090888888666666666666666666666666666667890 and MO95VAR != 55555000908888886666666666666666666666666666678900 and verscontrVAR != 3333333333333333333333333333333333333300000000000000000000000011111111 and plotterVAR != 33333333333333333333333333333333333333000000000000000000000000111111112 and sqldiagramvaR != 777777777777777777777733333333333333333300000000000020202020 and sqlexecwdVAR != 7777777777777777777777333333333333333333000000000000202020209 and icoconvvar != 876523 and pxvar != 9023 and imgedvar != 7845:
+elif trmn != 2 and passfig != 4 and hexedvar != 98122 and passfig1 != 5 and actvtmntvar != 9067 and pdfbulkvar != 654312 and rszbvar != 67855 and batchedvar !=231145 and arcbrvar != 132454 and fldrcpvar != 223198 and personaldriveVAR != 78876 and bpkdshgraphvar != 778832 and arpatablevar != 9091 and planogram95var != 456111111111111111 and codebvar != 99887345 and docmrgvar != 99823 and iconedvar != 999213 and videoVAR != 3342109 and fldpckVAR != 88932 and chartvar != 901298 and exccmpvar != 978132 and stickyvar != 9879 and repbldvar != 88923 and stprcdvar != 67768 and shiftplvar != 333432 and tichetvar != 8796 and hardvar != 6 and postmanvar != 8712 and screenvar != 7 and zipvar != 8 and compvar != 9 and sqldesignerVARIABLE != 445532 and sqlmanagerVARIABLE != 44331122 and pdfvar != 10 and replfindvar != 11 and testvarr != 12 and testvarr2 != 122 and pdfvwvar != 13 and netwvar != 14 and crpvar2 != 155 and aivar != 20 and notepadvar != 21 and paintvar != 22 and Adm1var != 30 and Adm3var != 4409 and  Adm2var != 40 and zippassvar != 60 and bkvar != 700 and rnvar != 710 and passmngrr != 2000 and sqlcrvar != 2332 and pausevar != 10000 and taskmngrvar != 1000000 and show_validation == False and junkvar != 77777 and wbpvar != 123456789 and cmvar != 3333 and pingalivevar != 5566 and readervar != 1993 and hardmvar != 1994 and fetchervar != 1995 and shellvar != 1996 and w95var1 != 1997 and w95var != 1998 and sqllvar != 22222 and diagramvar != 2345432 and termadm != 6745 and commandervar != 88888888 and calendarvar != 999000 and allmonitorvar != 999001 and eventvval != 44445555 and assemblyvar != 333333333 and kbbbvar != 5189 and proc_varr != 67766776 and xmleditorvar != 111444555 and MDvar != 777666111 and archVar != 777666012 and expensevar != 777666013 and scrpVar != 777666014 and recoveryVarr != 777666090 and fishervar != 777666091 and muapdash != 777666092 and mindmapvar != 7776660999 and multifilevar != 77766609999 and safevar != 444555000888 and trafficvar != 333344440099 and pwdchkVAR != 9965 and dosboxvar != 3333444400999 and vscodevar != 999955550000 and pdfviewervar != 3333444400997676 and clipboardVAR != 333344440099767667 and filefinderVARR != 5555544443330 and topologyVAR != 555554444333000 and disktoolutilityvar != 99999999995555555555 and calculatorvarrr != 11111111111111111111 and devmgmtvar != 88888888888888888888 and todovar != 8888888888888888888888888888888888888888 and pdftoexcelvar != 666666666666666666666 and csvconvvar != 666666666666666666666666666666666666666666 and docupdfvar != 666666666666666666666666666666666666666666666666666666666666666 and emailvariable != 11002200 and manageextensionsvar != 1100220022 and clpvar != 112200220033000111 and winregvar != 112200220033000111000 and convcalcvar != 11100011100011100011100023 and programmercalcvar != 1110001110001110001110002322 and projmanvar != 111000111000111000111000232222 and regtestvar != 11100011100011100011100023222200 and graphcalcvar != 1110001110001110001110002322220099 and codemergervar != 98099999999999999999999999999999999999999999999999999 and xlcvarrrr != 55555555555555555555555555555555555555555555555555555555555555555555555 and dbmainvarrrr != 77777777777777777777777777777777777777777777777888812 and codeanaliservisvar != 43434343434344444444444433333333333434343 and pdfeditorVARvar != 434343434343444444444444333333333334343435 and wordtoPDFFFVAR != 449000000000000000000000000000000000000000000000000 and timelinevar != 555550009088888866666666666666666666666666666 and forensicvar != 5555500090888888666666666666666666666666666667 and timetrackerVARRR != 55555000908888886666666666666666666666666666678 and dbcompVARRR != 555550009088888866666666666666666666666666666789 and decisiontreeVAR != 5555500090888888666666666666666666666666666667890 and MO95VAR != 55555000908888886666666666666666666666666666678900 and verscontrVAR != 3333333333333333333333333333333333333300000000000000000000000011111111 and plotterVAR != 33333333333333333333333333333333333333000000000000000000000000111111112 and sqldiagramvaR != 777777777777777777777733333333333333333300000000000020202020 and sqlexecwdVAR != 7777777777777777777777333333333333333333000000000000202020209 and icoconvvar != 876523 and pxvar != 9023 and imgedvar != 7845:
     # ═══════════════════════════════════════════════════════════════════════════════════════════════
     # MENU of the other accounts (Copy App) - replaces "def main3(): ... main3()"
     # inside the elif. Everything is inside main3.
@@ -45543,19 +47028,21 @@ if Adm3var == 4409:
     Visual designer for tkinter windows, in Windows 95 style (tkinter, no ttk, Python 3.10+).
 
     * Toolbox: Label, Button, Entry, Text, Checkbutton, Radiobutton, Listbox, Spinbox,
-      Scale, OptionMenu, Frame, LabelFrame, Canvas.
+      Scale, OptionMenu, Frame, LabelFrame, Canvas, VScrollbar, HScrollbar.
     * Click a tool, then click (or drag a rectangle) on the form to place it.
       Drag to move, drag the black handles to resize, arrow keys nudge
       (Shift = grid step, Ctrl = resize). Snap to grid.
     * Properties panel for the selected widget or the form; object list; z-order;
       duplicate, copy/paste, undo/redo.
+    * A scrollbar can be attached to a Listbox, Text, Canvas (or an Entry, sideways):
+      they scroll together in Test Form and in the generated code.
     * Test Form (F5) shows the window working for real; View Code (F7) and
       Export Python write clean, class-based tkinter code with event handler stubs.
     * Projects are saved as .bf95 (JSON).
     """
     bitpack95_validation("4409")
     bitpack95_extension("0x00065")
-    
+
     import copy
     import json
     import keyword
@@ -46291,7 +47778,6 @@ if Adm3var == 4409:
     colorchooser = _W95_COLORCHOOSER
 
 
-
     # ---------------------------------------------------------------------------
     # Constants
     # ---------------------------------------------------------------------------
@@ -46316,7 +47802,14 @@ if Adm3var == 4409:
     HANDLE = 6
 
     WIDGET_TYPES = ("Label", "Button", "Entry", "Text", "Checkbutton", "Radiobutton", "Listbox",
-                    "Spinbox", "Scale", "OptionMenu", "Frame", "LabelFrame", "Canvas")
+                    "Spinbox", "Scale", "OptionMenu", "Frame", "LabelFrame", "Canvas", "Scrollbar")
+
+    # the Toolbox: one Scrollbar type, two tools (as in Visual Basic: VScrollBar and HScrollBar)
+    TOOLBOX = ("Pointer", "Label", "Button", "Entry", "Text", "Checkbutton", "Radiobutton", "Listbox",
+               "Spinbox", "Scale", "OptionMenu", "Frame", "LabelFrame", "Canvas", "VScrollbar", "HScrollbar")
+    TOOL_PRESETS = {"VScrollbar": ("Scrollbar", "vertical"), "HScrollbar": ("Scrollbar", "horizontal")}
+    # what a scrollbar can be attached to (an Entry scrolls only sideways)
+    SCROLL_TARGETS = {"vertical": ("Listbox", "Text", "Canvas"), "horizontal": ("Entry", "Listbox", "Text", "Canvas")}
 
     FONT_FAMILIES = ("MS Sans Serif", "Arial", "Tahoma", "Verdana", "Segoe UI", "Courier New",
                      "Consolas", "Times New Roman", "Comic Sans MS")
@@ -46346,9 +47839,10 @@ if Adm3var == 4409:
         "Frame": ((200, 120), {"relief": "groove", "bd": 2}),
         "LabelFrame": ((200, 120), {"text": "Group", "relief": "groove", "bd": 2}),
         "Canvas": ((200, 150), {"bg": WHITE, "relief": "sunken", "bd": 2}),
+        "Scrollbar": ((16, 120), {"orient": "vertical", "target": ""}),     # horizontal: the size turned (120 x 16)
     }
     DEFAULT_FORM = {"title": "My Window", "class_name": "App", "width": 400, "height": 300, "bg": FACE,
-                    "resizable": True, "center": True}
+                    "resizable": True, "center": True, "retro": True}
 
 
     # ---------------------------------------------------------------------------
@@ -46359,6 +47853,9 @@ if Adm3var == 4409:
         """Properties shown in the panel: (key, label, kind, choices)."""
         rows = [("name", "Name", "name", None), ("x", "Left", "int", None), ("y", "Top", "int", None),
                 ("w", "Width", "int", None), ("h", "Height", "int", None)]
+        if item_type == "Scrollbar":                    # a scrollbar has no text, colours or border of its own
+            return rows + [("orient", "Orientation", "choice", ("vertical", "horizontal")),
+                           ("target", "Attached to", "target", None)]
         if item_type in TEXT_TYPES:
             rows.append(("text", "Text", "str", None))
         if item_type in ("Label", "Button"):
@@ -46392,7 +47889,8 @@ if Adm3var == 4409:
     FORM_SCHEMA = [("title", "Title", "str", None), ("class_name", "Class name", "ident", None),
                    ("width", "Width", "int", None), ("height", "Height", "int", None),
                    ("bg", "Background", "color", None), ("resizable", "Resizable", "bool", None),
-                   ("center", "Center on screen", "bool", None)]
+                   ("center", "Center on screen", "bool", None),
+                   ("retro", "Win95 look in export", "bool", None)]
 
 
     def font_of(props):
@@ -46423,6 +47921,29 @@ if Adm3var == 4409:
         return groups
 
 
+    def scroll_target(item, items):
+        """The widget a scrollbar is attached to, if it still exists and can scroll that way; else None."""
+        if item["type"] != "Scrollbar":
+            return None
+        name = item["props"].get("target", "")
+        other = next((i for i in items if i["id"] == name), None) if name else None
+        if other is not None and other["type"] in SCROLL_TARGETS.get(item["props"].get("orient", "vertical"), ()):
+            return other
+        return None
+
+
+    def attach_scrollbars(items, widgets):
+        """Join every scrollbar to its widget (Test Form): the bar moves the view, the view moves the bar."""
+        for item in items:
+            other = scroll_target(item, items)
+            if other is None or item["id"] not in widgets or other["id"] not in widgets:
+                continue
+            bar, view = widgets[item["id"]], widgets[other["id"]]
+            axis = "y" if item["props"]["orient"] == "vertical" else "x"
+            bar.config(command=getattr(view, axis + "view"))
+            view.config(**{axis + "scrollcommand": bar.set})
+
+
     class Ref(str):
         """A code reference (self.something) written into generated code without quotes."""
 
@@ -46430,6 +47951,8 @@ if Adm3var == 4409:
     def widget_options(item):
         """Constructor options shared by the designer, the test window and the generated code."""
         props, kind = item["props"], item["type"]
+        if kind == "Scrollbar":
+            return {"orient": props["orient"]}
         options = {"bg": props["bg"], "bd": int(props["bd"]), "relief": props["relief"], "highlightthickness": 0}
         if kind not in NO_FG_TYPES:
             options["fg"] = props["fg"]
@@ -46508,11 +48031,424 @@ if Adm3var == 4409:
             widget = tk.Frame(parent, **options)
         elif kind == "LabelFrame":
             widget = tk.LabelFrame(parent, **options)
+        elif kind == "Scrollbar":
+            widget = tk.Scrollbar(parent, **options)
         else:
             widget = tk.Canvas(parent, **options)
         if kind in STATE_TYPES and state == "disabled":
             widget.config(state="disabled")
         return widget
+
+
+    # ---------------------------------------------------------------------------
+    # Windows 95 look for the exported code (copied into the .py file, so it runs without Bitpack)
+    # ---------------------------------------------------------------------------
+
+    # (textwrap.dedent takes away the indentation these texts get inside the Bitpack block)
+    RETRO_WINDOW = '''
+    FACE, LIGHT, SHADOW, NAVY = "#c0c0c0", "#ffffff", "#808080", "#000080"
+
+
+    class W95Window(tk.Tk):
+        """A window with the Windows 95 title bar (minimize, maximize, close, drag) instead of the system one.
+        The widgets go in self.body."""
+
+        def __init__(self, title, resizable=True):
+            super().__init__()
+            self.title(title)
+            self.configure(bg=FACE, bd=2, relief="raised")
+            self.resizable(resizable, resizable)
+            self._normal = None                     # the size before Maximize
+            self._minimizing = False
+            self._bar = tk.Frame(self, bg=NAVY, height=20)
+            self._bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self._bar.pack_propagate(False)
+            self._caption = tk.Label(self._bar, text=title, bg=NAVY, fg=LIGHT, font=("MS Sans Serif", 8, "bold"),
+                                     anchor="w")
+            self._caption.pack(side="left", fill="x", expand=True, padx=4)
+            marlett = "Marlett" in tkfont.families(self)
+            self._glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                            else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(master=self, width=1, height=1)
+
+            def button(key, command):
+                return tk.Button(self._bar, text=self._glyphs[key], command=command, font=font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            button("close", self.close).pack(side="right", padx=2)
+            if resizable:
+                self._max_button = button("max", self.toggle_maximize)
+                self._max_button.pack(side="right")
+            button("min", self.minimize).pack(side="right")
+            for widget in (self._bar, self._caption):
+                widget.bind("<ButtonPress-1>", self._press)
+                widget.bind("<B1-Motion>", self._drag)
+                if resizable:
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            self.body = tk.Frame(self, bg=FACE)
+            self.body.pack(side="top", fill="both", expand=True)
+            if resizable:
+                grip = tk.Canvas(self, width=13, height=13, bg=FACE, bd=0, highlightthickness=0,
+                                 cursor="size_nw_se" if os.name == "nt" else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(12, i, i, 12, fill=LIGHT)
+                    grip.create_line(12, i + 1, i + 1, 12, fill=SHADOW)
+                grip.place(relx=1.0, rely=1.0, anchor="se")
+                grip.bind("<ButtonPress-1>", self._grip_press)
+                grip.bind("<B1-Motion>", self._grip_drag)
+            self.protocol("WM_DELETE_WINDOW", self.close)
+            self.bind("<Activate>", lambda e: self._active(True) if e.widget is self else None)
+            self.bind("<Deactivate>", lambda e: self._active(False) if e.widget is self else None)
+            self.bind("<Map>", self._on_map)
+            self.bind_all("<ButtonPress-1>", self._focus_click, add="+")
+            self.after(10, self._borderless)
+
+        def close(self):
+            self.destroy()
+
+        def _borderless(self):
+            self.overrideredirect(True)
+            self.update_idletasks()
+            self.after(30, self._taskbar_button)
+
+        def _taskbar_button(self):
+            """Without the system frame Windows gives the program no taskbar button: this asks for one."""
+            if os.name != "nt":
+                return
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            self.withdraw()
+            self.after(20, lambda: (self.deiconify(), self.lift(), self.focus_force()))
+
+        def _on_map(self, event):
+            """Back from the taskbar after Minimize: the Windows 95 bar again."""
+            if event.widget is self and self._minimizing and self.state() == "normal":
+                self._minimizing = False
+                self.overrideredirect(True)
+                self.after(10, self._taskbar_button)
+
+        def minimize(self):
+            self._minimizing = True
+            self.overrideredirect(False)            # Tk cannot minimize a window without the system frame
+            self.iconify()
+
+        def toggle_maximize(self):
+            if self._normal:
+                self.geometry(self._normal)
+                self._normal = None
+            else:
+                self._normal = self.geometry()
+                x, y, w, h = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+                if os.name == "nt":                 # the work area: the taskbar stays visible
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, w, h = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                self.geometry(f"{w}x{h}+{x}+{y}")
+            self._max_button.config(text=self._glyphs["restore" if self._normal else "max"])
+
+        def _press(self, event):
+            self._offset = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _drag(self, event):
+            if not self._normal:
+                self.geometry(f"+{event.x_root - self._offset[0]}+{event.y_root - self._offset[1]}")
+
+        def _grip_press(self, event):
+            self._start = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self._normal:
+                x0, y0, w, h = self._start
+                self.geometry(f"{max(120, w + event.x_root - x0)}x{max(80, h + event.y_root - y0)}")
+
+        def _active(self, on):
+            for widget in (self._bar, self._caption):
+                widget.config(bg=NAVY if on else SHADOW)
+            self._caption.config(fg=LIGHT if on else FACE)
+
+        def _focus_click(self, event):
+            """A window without the system frame does not take the keyboard by itself: a click in a field gives it."""
+            if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox, tk.Spinbox)):
+                try:
+                    event.widget.focus_force()
+                except tk.TclError:
+                    pass
+    '''
+
+    RETRO_SCROLLBAR = '''
+    class W95Scrollbar(tk.Canvas):
+        FACE, LIGHT, HILITE, SHADOW, DARK = "#c0c0c0", "#ffffff", "#dfdfdf", "#808080", "#000000"
+        SIZE = 16                                               # Windows 95: 16 pixels wide, square arrow buttons
+        MIN_THUMB = 8
+        DELAY, REPEAT = 300, 50                                 # ms before an arrow repeats, then between repeats
+        _IGNORED = ("bg", "background", "troughcolor", "activebackground", "highlightbackground", "highlightcolor",
+                    "highlightthickness", "bd", "borderwidth", "relief", "elementborderwidth", "activerelief",
+                    "jump", "repeatdelay", "repeatinterval", "takefocus", "style", "class_", "name")
+
+        def __init__(self, master=None, cnf=None, **kwargs):
+            options = dict(cnf or {})
+            options.update(kwargs)
+            self._orient = str(options.pop("orient", "vertical"))
+            self._command = options.pop("command", None)
+            size = int(options.pop("width", self.SIZE) or self.SIZE)
+            cursor = options.pop("cursor", "")
+            for key in self._IGNORED:
+                options.pop(key, None)
+            vertical = self._vertical()
+            tk.Canvas.__init__(self, master, width=size if vertical else 2 * size,
+                                   height=2 * size if vertical else size, bg=self.LIGHT, bd=0,
+                                   highlightthickness=0, takefocus=0, cursor=cursor)
+            self._size = size
+            self._first, self._last = 0.0, 1.0
+            self._pressed = None                                # "up" / "down" / "page-" / "page+" / "thumb"
+            self._job = None
+            self._drag_offset = 0
+            self.bind("<Configure>", lambda e: self._draw())
+            self.bind("<ButtonPress-1>", self._press)
+            self.bind("<B1-Motion>", self._motion)
+            self.bind("<ButtonRelease-1>", self._release)
+            self.bind("<Destroy>", lambda e: self._stop() if e.widget is self else None)
+
+        # ----- the tk.Scrollbar calls ---------------------------------------------------------------------------
+        def _vertical(self):
+            return not self._orient.lower().startswith("h")
+
+        def set(self, first, last):
+            first, last = float(first), float(last)
+            if (first, last) != (self._first, self._last):
+                self._first, self._last = first, last
+                self._draw()
+
+        def get(self):
+            return self._first, self._last
+
+        def configure(self, cnf=None, **kwargs):
+            options = dict(cnf or {})
+            options.update(kwargs)
+            if not options:
+                return tk.Canvas.configure(self)
+            if "command" in options:
+                self._command = options.pop("command")
+            if "orient" in options:
+                self._orient = str(options.pop("orient"))
+                self._draw()
+            if "width" in options:
+                self._size = int(options.pop("width") or self.SIZE)
+                tk.Canvas.configure(self, **({"width": self._size} if self._vertical() else {"height": self._size}))
+            for key in self._IGNORED:
+                options.pop(key, None)
+            if options:
+                return tk.Canvas.configure(self, **options)
+
+        config = configure
+
+        def cget(self, key):
+            if key == "command":
+                return self._command
+            if key == "orient":
+                return self._orient
+            if key == "width":
+                return self._size
+            return tk.Canvas.cget(self, key)
+
+        def __setitem__(self, key, value):
+            self.configure(**{key: value})
+
+        def __getitem__(self, key):
+            return self.cget(key)
+
+        def activate(self, index=None):
+            return None
+
+        def identify(self, x, y):
+            return self._part(x if self._vertical() else y, y if self._vertical() else x)
+
+        def fraction(self, x, y):
+            position = y if self._vertical() else x
+            track = self._length() - 2 * self._size
+            return max(0.0, min(1.0, (position - self._size) / float(max(1, track))))
+
+        def delta(self, dx, dy):
+            track = self._length() - 2 * self._size
+            return (dy if self._vertical() else dx) / float(max(1, track))
+
+        # ----- geometry -----------------------------------------------------------------------------------------
+        def _length(self):
+            return max(2 * self._size, self.winfo_height() if self._vertical() else self.winfo_width())
+
+        def _enabled(self):
+            return self._first > 0.0 or self._last < 1.0
+
+        def _thumb(self):
+            """(start, end) of the thumb along the bar, or None when everything is visible."""
+            if not self._enabled():
+                return None
+            track = self._length() - 2 * self._size
+            size = max(self.MIN_THUMB, min(track, int(round(track * (self._last - self._first)))))
+            if size >= track:
+                return None
+            free = track - size
+            share = self._first / max(1e-9, 1.0 - (self._last - self._first))
+            start = self._size + int(round(free * max(0.0, min(1.0, share))))
+            return start, start + size
+
+        def _part(self, along, across=0):
+            length = self._length()
+            if along < self._size:
+                return "arrow1"
+            if along >= length - self._size:
+                return "arrow2"
+            thumb = self._thumb()
+            if thumb is None:
+                return "trough1"
+            if along < thumb[0]:
+                return "trough1"
+            if along >= thumb[1]:
+                return "trough2"
+            return "slider"
+
+        def _rect(self, a0, a1):
+            """A rectangle along the bar (a0..a1), as canvas coordinates."""
+            s = self._size
+            return (0, a0, s, a1) if self._vertical() else (a0, 0, a1, s)
+
+        # ----- drawing ------------------------------------------------------------------------------------------
+        def _bevel(self, x0, y0, x1, y1, sunken=False):
+            if sunken:                                          # a pressed arrow: one dark line around, flat
+                self.create_rectangle(x0, y0, x1 - 1, y1 - 1, fill=self.FACE, outline=self.SHADOW)
+                return
+            self.create_rectangle(x0, y0, x1, y1, fill=self.FACE, outline="")
+            self.create_line(x0, y1 - 1, x0, y0, x1 - 1, y0, fill=self.HILITE)
+            self.create_line(x0 + 1, y1 - 2, x0 + 1, y0 + 1, x1 - 2, y0 + 1, fill=self.LIGHT)
+            self.create_line(x0, y1 - 1, x1 - 1, y1 - 1, x1 - 1, y0 - 1, fill=self.DARK)
+            self.create_line(x0 + 1, y1 - 2, x1 - 2, y1 - 2, x1 - 2, y0, fill=self.SHADOW)
+
+        def _arrow(self, x0, y0, x1, y1, direction, pressed, enabled):
+            self._bevel(x0, y0, x1, y1, sunken=pressed)
+            cx, cy = (x0 + x1) // 2 + (1 if pressed else 0), (y0 + y1) // 2 + (1 if pressed else 0)
+            shapes = {"up": (cx - 4, cy + 2, cx + 4, cy + 2, cx, cy - 2), "down": (cx - 4, cy - 2, cx + 4, cy - 2, cx, cy + 2),
+                      "left": (cx + 2, cy - 4, cx + 2, cy + 4, cx - 2, cy), "right": (cx - 2, cy - 4, cx - 2, cy + 4, cx + 2, cy)}
+            points = shapes[direction]
+            if not enabled:                                     # Windows 95: a grey arrow with a white shadow
+                self.create_polygon([p + 1 for p in points], fill=self.LIGHT, outline=self.LIGHT)
+                self.create_polygon(points, fill=self.SHADOW, outline=self.SHADOW)
+            else:
+                self.create_polygon(points, fill=self.DARK, outline=self.DARK)
+
+        def _draw(self):
+            try:
+                self.delete("all")
+            except tk.TclError:
+                return
+            s, length = self._size, self._length()
+            enabled = self._enabled()
+            x0, y0, x1, y1 = self._rect(s, length - s)          # the trough: the Windows 95 checkerboard
+            self.create_rectangle(x0, y0, x1, y1, fill=self.FACE, outline="", stipple="gray50")
+            if self._pressed in ("page-", "page+"):             # the part being paged through goes dark
+                thumb = self._thumb()
+                if thumb is not None:
+                    part = (s, thumb[0]) if self._pressed == "page-" else (thumb[1], length - s)
+                    self.create_rectangle(*self._rect(*part), fill=self.DARK, outline="", stipple="gray50")
+            vertical = self._vertical()
+            self._arrow(*self._rect(0, s), direction="up" if vertical else "left", pressed=self._pressed == "up",
+                        enabled=enabled)
+            self._arrow(*self._rect(length - s, length), direction="down" if vertical else "right",
+                        pressed=self._pressed == "down", enabled=enabled)
+            thumb = self._thumb()
+            if thumb is not None:
+                self._bevel(*self._rect(*thumb))
+
+        # ----- mouse --------------------------------------------------------------------------------------------
+        def _run(self, *args):
+            command = self._command
+            if command is None:
+                return
+            try:
+                if callable(command):
+                    command(*args)
+                else:
+                    self.tk.call(command, *args)                # a Tcl command name
+            except tk.TclError:
+                pass
+
+        def _along(self, event):
+            return event.y if self._vertical() else event.x
+
+        def _press(self, event):
+            if not self._enabled():
+                return
+            part = self._part(self._along(event))
+            if part == "slider":
+                self._pressed = "thumb"
+                self._drag_offset = self._along(event) - self._thumb()[0]
+                return
+            self._pressed = {"arrow1": "up", "arrow2": "down", "trough1": "page-", "trough2": "page+"}[part]
+            self._target = self._along(event)
+            self._draw()
+            self._step()
+            self._job = self.after(self.DELAY, self._repeat)
+
+        def _step(self):
+            if self._pressed == "up":
+                self._run("scroll", -1, "units")
+            elif self._pressed == "down":
+                self._run("scroll", 1, "units")
+            elif self._pressed in ("page-", "page+"):
+                thumb = self._thumb()
+                # paging stops once the thumb reaches the mouse, as in Windows
+                if thumb is None or (self._pressed == "page-" and self._target >= thumb[0]) or \
+                        (self._pressed == "page+" and self._target < thumb[1]):
+                    return False
+                self._run("scroll", -1 if self._pressed == "page-" else 1, "pages")
+            return True
+
+        def _repeat(self):
+            self._job = None
+            if self._pressed in ("up", "down", "page-", "page+") and self._step() is not False:
+                self._job = self.after(self.REPEAT if self._pressed in ("up", "down") else 100, self._repeat)
+
+        def _motion(self, event):
+            if self._pressed == "thumb":
+                thumb = self._thumb()
+                if thumb is None:
+                    return
+                track = self._length() - 2 * self._size
+                free = max(1, track - (thumb[1] - thumb[0]))
+                share = (self._along(event) - self._drag_offset - self._size) / float(free)
+                share = max(0.0, min(1.0, share))
+                self._run("moveto", share * (1.0 - (self._last - self._first)))
+            elif self._pressed in ("page-", "page+"):
+                self._target = self._along(event)
+
+        def _stop(self):
+            if self._job is not None:
+                try:
+                    self.after_cancel(self._job)
+                except tk.TclError:
+                    pass
+                self._job = None
+
+        def _release(self, event):
+            self._stop()
+            if self._pressed is not None:
+                self._pressed = None
+                self._draw()
+    '''
+    # the window frame added around the form: 2 px border on each side, 20 px title bar + 1 px above it
+    RETRO_EXTRA_W, RETRO_EXTRA_H = 4, 25
 
 
     # ---------------------------------------------------------------------------
@@ -46523,21 +48459,38 @@ if Adm3var == 4409:
         def fmt(options):
             return ", ".join(f"{key}={value if isinstance(value, Ref) else repr(value)}" for key, value in options.items())
 
+        import textwrap
         class_name = form["class_name"] or "App"
         width, height = int(form["width"]), int(form["height"])
-        out = ["#!/usr/bin/env python3", "# -*- coding: utf-8 -*-", f"# Generated by {APP_NAME}", "",
-               "import tkinter as tk", "", "",
-               f"class {class_name}(tk.Tk):", "    def __init__(self):", "        super().__init__()",
-               f"        self.title({form['title']!r})"]
-        if form.get("center"):
-            out += [f"        x = (self.winfo_screenwidth() - {width}) // 2",
-                    f"        y = (self.winfo_screenheight() - {height}) // 3",
-                    f"        self.geometry(f\"{width}x{height}+{{x}}+{{y}}\")"]
-        else:
-            out.append(f"        self.geometry(\"{width}x{height}\")")
         resizable = bool(form.get("resizable"))
-        out += [f"        self.resizable({resizable}, {resizable})", f"        self.configure(bg={form['bg']!r})",
-                "        self._build_ui()", "", "    def _build_ui(self):"]
+        retro = bool(form.get("retro", True))           # Windows 95 title bar and scrollbars in the exported file
+        has_bars = any(item["type"] == "Scrollbar" for item in items)
+        parent = "self.body" if retro else "self"       # (with the Win95 frame the widgets go under its title bar)
+        out = ["#!/usr/bin/env python3", "# -*- coding: utf-8 -*-", f"# Generated by {APP_NAME}", ""]
+        if retro:
+            out += ["import os", "import tkinter as tk", "import tkinter.font as tkfont", "", ""]
+            out += textwrap.dedent(RETRO_WINDOW).strip("\n").splitlines()
+            if has_bars:
+                out += ["", ""] + textwrap.dedent(RETRO_SCROLLBAR).strip("\n").splitlines()
+            out += ["", "", f"class {class_name}(W95Window):", "    def __init__(self):",
+                    f"        super().__init__({form['title']!r}, resizable={resizable})"]
+            outer_w, outer_h = width + RETRO_EXTRA_W, height + RETRO_EXTRA_H
+        else:
+            out += ["import tkinter as tk", "", "",
+                    f"class {class_name}(tk.Tk):", "    def __init__(self):", "        super().__init__()",
+                    f"        self.title({form['title']!r})"]
+            outer_w, outer_h = width, height
+        if form.get("center"):
+            out += [f"        x = (self.winfo_screenwidth() - {outer_w}) // 2",
+                    f"        y = (self.winfo_screenheight() - {outer_h}) // 3",
+                    f"        self.geometry(f\"{outer_w}x{outer_h}+{{x}}+{{y}}\")"]
+        else:
+            out.append(f"        self.geometry(\"{outer_w}x{outer_h}\")")
+        if retro:
+            out.append(f"        self.body.configure(bg={form['bg']!r})")
+        else:
+            out += [f"        self.resizable({resizable}, {resizable})", f"        self.configure(bg={form['bg']!r})"]
+        out += ["        self._build_ui()", "", "    def _build_ui(self):"]
         groups = radio_groups(items)
         for group, value in groups.items():
             out.append(f"        self.{group}_var = tk.StringVar(value={value!r})")
@@ -46565,11 +48518,13 @@ if Adm3var == 4409:
                 values = split_list(props["values"]) or [""]
                 out.append(f"        {var}_var = tk.StringVar(value={values[0]!r})")
                 extra = f", command=self.{command}" if command else ""
-                out.append(f"        {var} = tk.OptionMenu(self, {var}_var, *{values!r}{extra})")
+                out.append(f"        {var} = tk.OptionMenu({parent}, {var}_var, *{values!r}{extra})")
                 out.append(f"        {var}.config({rendered})")
                 out.append(f"        {var}['menu'].config(font={font_of(props)!r})")
+            elif kind == "Scrollbar" and retro:
+                out.append(f"        {var} = W95Scrollbar({parent}, {rendered})")
             else:
-                out.append(f"        {var} = tk.{kind}(self, {rendered})")
+                out.append(f"        {var} = tk.{kind}({parent}, {rendered})")
             if kind == "Entry" and props["initial"]:
                 out.append(f"        {var}.insert(0, {props['initial']!r})")
             if kind == "Text" and props["content"]:
@@ -46581,6 +48536,14 @@ if Adm3var == 4409:
                 out.append(f"        {var}.config(state='disabled')")
             out.append(f"        {var}.place(x={int(item['x'])}, y={int(item['y'])}, "
                        f"width={int(item['w'])}, height={int(item['h'])})")
+        links = [(item, scroll_target(item, items)) for item in items if item["type"] == "Scrollbar"]
+        links = [(bar, view) for bar, view in links if view is not None]
+        if links:                                       # after all the widgets: a bar may come before its widget
+            out.append("        # scrollbars joined to their widgets")
+            for bar, view in links:
+                axis = "y" if bar["props"]["orient"] == "vertical" else "x"
+                out.append(f"        self.{bar['id']}.config(command=self.{view['id']}.{axis}view)")
+                out.append(f"        self.{view['id']}.config({axis}scrollcommand=self.{bar['id']}.set)")
         if not items:
             out.append("        pass")
         for handler in handlers:
@@ -46658,6 +48621,20 @@ if Adm3var == 4409:
             c.create_rectangle(2, 2, 19, 19, fill=WHITE, outline=SHADOW)
             c.create_oval(5, 5, 13, 13, outline="#c00000")
             c.create_line(8, 16, 17, 7, fill=NAVY)
+        elif kind == "VScrollbar":                      # trough, two arrow buttons and the thumb
+            c.create_rectangle(7, 1, 14, 20, fill=WHITE, outline=SHADOW)
+            for y0 in (1, 15):
+                c.create_rectangle(7, y0, 14, y0 + 5, fill=FACE, outline=BLACK)
+            c.create_polygon(9, 5, 12, 5, 10.5, 2.5, fill=BLACK)
+            c.create_polygon(9, 16, 12, 16, 10.5, 18.5, fill=BLACK)
+            c.create_rectangle(7, 8, 14, 12, fill=FACE, outline=BLACK)
+        elif kind == "HScrollbar":
+            c.create_rectangle(1, 7, 20, 14, fill=WHITE, outline=SHADOW)
+            for x0 in (1, 15):
+                c.create_rectangle(x0, 7, x0 + 5, 14, fill=FACE, outline=BLACK)
+            c.create_polygon(5, 9, 5, 12, 2.5, 10.5, fill=BLACK)
+            c.create_polygon(16, 9, 16, 12, 18.5, 10.5, fill=BLACK)
+            c.create_rectangle(8, 7, 12, 14, fill=FACE, outline=BLACK)
 
 
     # ---------------------------------------------------------------------------
@@ -46936,12 +48913,39 @@ if Adm3var == 4409:
             body = tk.Frame(self, bg=FACE)
             body.pack(side="top", fill="both", expand=True, padx=4, pady=4)
 
-            # toolbox
+            # toolbox: always with its scrollbar (Windows 95: grey arrows and no thumb while all the tools fit)
             box = tk.LabelFrame(body, text=" Toolbox ", font=FONT, bg=FACE, bd=2, relief="groove")
             box.pack(side="left", fill="y", padx=(0, 4))
+            self.tools_bar = tk.Scrollbar(box, orient="vertical")
+            self.tools_canvas = tk.Canvas(box, bg=FACE, bd=0, highlightthickness=0, width=120,
+                                          yscrollcommand=self.tools_bar.set)
+            self.tools_bar.config(command=self.tools_canvas.yview)
+            self.tools_bar.pack(side="right", fill="y")
+            self.tools_canvas.pack(side="left", fill="y")
+            tools = tk.Frame(self.tools_canvas, bg=FACE)
+            self.tools_canvas.create_window(0, 0, anchor="nw", window=tools)
+
+            def tools_fit(_event=None):
+                """The list's real size: the scrollbar works when not all the tools fit, else it shows them all."""
+                canvas = self.tools_canvas
+                canvas.config(width=tools.winfo_reqwidth(), scrollregion=(0, 0, tools.winfo_reqwidth(),
+                                                                          max(tools.winfo_reqheight(),
+                                                                              canvas.winfo_height())))
+                if tools.winfo_reqheight() <= canvas.winfo_height():
+                    canvas.yview_moveto(0)
+
+            def tools_wheel(event):
+                if tools.winfo_reqheight() > self.tools_canvas.winfo_height():
+                    step = -1 if (event.num == 4 or getattr(event, "delta", 0) > 0) else 1
+                    self.tools_canvas.yview_scroll(step * 2, "units")
+                return "break"
+
+            tools.bind("<Configure>", tools_fit)
+            self.tools_canvas.bind("<Configure>", tools_fit)
+            self.tools_canvas.config(yscrollincrement=12)
             self.tool_buttons = {}
-            for kind in ("Pointer",) + WIDGET_TYPES:
-                row = tk.Frame(box, bg=FACE, bd=2, relief="flat")
+            for kind in TOOLBOX:
+                row = tk.Frame(tools, bg=FACE, bd=2, relief="flat")
                 row.pack(side="top", fill="x", padx=2, pady=1)
                 icon = tk.Canvas(row, width=21, height=21, bg=FACE, bd=0, highlightthickness=0)
                 draw_tool_icon(icon, kind)
@@ -46951,7 +48955,14 @@ if Adm3var == 4409:
                 for widget in (row, icon, label):
                     widget.bind("<Button-1>", lambda _e, k=kind: self.set_tool(k))
                     widget.bind("<Double-Button-1>", lambda _e, k=kind: self.add_item(k, None, None))
+                    widget.bind("<MouseWheel>", tools_wheel)
+                    widget.bind("<Button-4>", tools_wheel)
+                    widget.bind("<Button-5>", tools_wheel)
                 self.tool_buttons[kind] = (row, icon, label)
+            for widget in (tools, self.tools_canvas):
+                widget.bind("<MouseWheel>", tools_wheel)
+                widget.bind("<Button-4>", tools_wheel)
+                widget.bind("<Button-5>", tools_wheel)
 
             # right side: properties + objects
             right = tk.Frame(body, bg=FACE, width=290)
@@ -47081,6 +49092,21 @@ if Adm3var == 4409:
             self.form_canvas.config(cursor="arrow" if kind == "Pointer" else "crosshair")
             self.status_main.config(text="Select, move and resize widgets" if kind == "Pointer"
                                     else f"{kind}: click on the form to place it, or drag a rectangle")
+            self._tool_see(kind)
+
+        def _tool_see(self, kind):
+            """The chosen tool stays in sight when the toolbox scrolls (Escape goes back to Pointer, at the top)."""
+            canvas = getattr(self, "tools_canvas", None)
+            if canvas is None or kind not in self.tool_buttons:
+                return
+            row = self.tool_buttons[kind][0]
+            total = max(1, row.master.winfo_reqheight())
+            top, bottom = canvas.yview()
+            y0, y1 = row.winfo_y() / float(total), (row.winfo_y() + row.winfo_height()) / float(total)
+            if y0 < top:
+                canvas.yview_moveto(y0)
+            elif y1 > bottom:
+                canvas.yview_moveto(max(0.0, y1 - (bottom - top)))
 
         # ----- model / rendering -----------------------------------------------------
 
@@ -47144,6 +49170,8 @@ if Adm3var == 4409:
             for item in self.items:
                 widget = build_widget(self.form_canvas, item, variables)
                 widget.place(x=item["x"], y=item["y"], width=item["w"], height=item["h"])
+                if item["type"] == "Scrollbar":
+                    widget.set(0.0, 0.4)                # on the form it shows a thumb, as in Visual Basic
                 self._make_inert(widget)
                 self.widgets[item["id"]] = widget
                 self.widget_ids[str(widget)] = item["id"]
@@ -47154,7 +49182,12 @@ if Adm3var == 4409:
                                                 self.form_window.winfo_reqheight() + 40))
 
         def _make_inert(self, widget):
-            widget.bindtags(("DesignItem",))
+            if isinstance(widget, tk.Scrollbar):
+                # the designer takes the mouse (its handlers stop there), the scrollbar keeps only its own redraw
+                # when it is resized on the form
+                widget.bindtags(("DesignItem", str(widget)))
+            else:
+                widget.bindtags(("DesignItem",))
             for child in widget.winfo_children():
                 self._make_inert(child)
 
@@ -47413,7 +49446,15 @@ if Adm3var == 4409:
             if kind == "Pointer":
                 return
             self._commit_editors()
+            orient = None
+            if kind in TOOL_PRESETS:                    # VScrollbar / HScrollbar: a Scrollbar turned that way
+                kind, orient = TOOL_PRESETS[kind]
             (w, h), props = DEFAULTS[kind]
+            props = copy.deepcopy(props)
+            if orient:
+                props["orient"] = orient
+                if orient == "horizontal":
+                    w, h = h, w
             if size:
                 w, h = size
             if x is None:
@@ -47421,7 +49462,7 @@ if Adm3var == 4409:
                 x = y = self.snap(offset)
             item_id = self.unique_name(kind)
             item = {"id": item_id, "type": kind, "x": int(x), "y": int(y), "w": int(w), "h": int(h),
-                    "props": {**BASE_PROPS, **copy.deepcopy(props)}}
+                    "props": {**BASE_PROPS, **props}}
             if kind in TEXT_TYPES and kind != "LabelFrame":
                 number = "".join(ch for ch in item_id if ch.isdigit())
                 item["props"]["text"] = item_id.capitalize() if kind != "Radiobutton" else f"Option {number}"
@@ -47518,6 +49559,20 @@ if Adm3var == 4409:
                                    highlightthickness=0, takefocus=0,
                                    command=lambda k=key, v=var: self.apply_property(k, v.get())).pack(side="left")
                     continue
+                if kind == "target":                    # the widgets this scrollbar can scroll, by name
+                    allowed = SCROLL_TARGETS.get(item["props"].get("orient", "vertical"), ())
+                    options = ["(none)"] + [i["id"] for i in self.items if i["type"] in allowed]
+                    current = str(value) if value else "(none)"
+                    if current not in options:
+                        options.append(current)
+                    var = tk.StringVar(value=current)
+                    menu = tk.OptionMenu(cell, var, *options,
+                                         command=lambda v, k=key: self.apply_property(k, v, "target"))
+                    menu.config(font=FONT, bg=FACE, activebackground=FACE, relief="raised", bd=1, highlightthickness=0,
+                                anchor="w", width=14, pady=0)
+                    menu["menu"].config(font=FONT, bg=FACE, activebackground=NAVY, activeforeground=WHITE)
+                    menu.pack(side="left", fill="x", expand=True)
+                    continue
                 if kind == "choice":
                     var = tk.StringVar(value=str(value))
                     options = list(choices) + ([str(value)] if str(value) not in choices else [])
@@ -47612,12 +49667,22 @@ if Adm3var == 4409:
             if item and key == "name":
                 if item["props"].get("command") in ("@auto", f"on_{item['id']}"):
                     item["props"]["command"] = "@auto"
+                for other in self.items:                # the scrollbars attached to it follow the new name
+                    if other["type"] == "Scrollbar" and other["props"].get("target") == item["id"]:
+                        other["props"]["target"] = value
                 item["id"] = value
                 self.selected = value
             elif item and key in ("x", "y", "w", "h"):
                 item[key] = value
             elif item and key == "command" and value == f"on_{item['id']}":
                 item["props"]["command"] = "@auto"
+            elif item and item["type"] == "Scrollbar" and key == "orient":
+                target[key] = value                     # turned: the size turns with it
+                if (value == "vertical") == (item["w"] > item["h"]):
+                    item["w"], item["h"] = item["h"], item["w"]
+                attached = self.item(target.get("target", ""))
+                if attached is not None and attached["type"] not in SCROLL_TARGETS[value]:
+                    target["target"] = ""               # (an Entry has no vertical scrolling)
             else:
                 target[key] = value
             self.render()
@@ -47628,6 +49693,8 @@ if Adm3var == 4409:
         def _convert(self, key, raw, kind, item):
             if kind == "bool":
                 return bool(raw)
+            if kind == "target":
+                return "" if str(raw) in ("", "(none)") else str(raw)
             if kind == "int":
                 try:
                     value = int(str(raw).strip())
@@ -47793,9 +49860,12 @@ if Adm3var == 4409:
             def on_command(name):
                 self.status_main.config(text=f"Test Form: {name}() called")
 
+            built = {}
             for item in self.items:
                 widget = build_widget(window, item, variables, on_command)
                 widget.place(x=item["x"], y=item["y"], width=item["w"], height=item["h"])
+                built[item["id"]] = widget
+            attach_scrollbars(self.items, built)        # the scrollbars move their widgets for real
             self.status_main.config(text="Test Form open: try the widgets; commands appear here")
 
         def show_help(self):
@@ -47808,7 +49878,11 @@ if Adm3var == 4409:
                 "3. Edit properties on the right; press Enter to apply.\n"
                 "   Double-click a widget to edit its text.\n"
                 "4. Drag the grey square in the form's corner to resize the form.\n"
-                "5. F5 tests the form, F7 shows the code, Ctrl+E exports it as a .py file.\n\n"
+                "5. F5 tests the form, F7 shows the code, Ctrl+E exports it as a .py file.\n"
+                "6. VScrollbar / HScrollbar: put it next to a Listbox, Text or Canvas (an Entry: HScrollbar)\n"
+                "   and choose that widget in 'Attached to': in Test Form and in the code they scroll together.\n"
+                "7. Form property 'Win95 look in export' (on by default): the exported .py gets the Windows 95\n"
+                "   title bar and scrollbars and runs on its own, without Bitpack.\n\n"
                 "Widgets are placed with absolute positions (place). A Frame or LabelFrame\n"
                 "drawn behind other widgets groups them visually: use Send to Back.",
                 parent=self)
@@ -47825,8 +49899,7 @@ if Adm3var == 4409:
 
     if __name__ == "__main__":
         main()
-
-       
+        
 if Adm2var == 40:
     bitpack95_validation("40")
     bitpack95_extension("0x00065")
@@ -59799,7 +61872,7 @@ if pingalivevar == 5566:
     
 if readervar == 1993:
     import tkinter as tk
-    from tkinter import filedialog, messagebox, scrolledtext, ttk
+    from tkinter import filedialog, messagebox, scrolledtext #, ttk
     import os
     import re
     import threading
@@ -62236,7 +64309,7 @@ if readervar == 1993:
         
 if hardmvar == 1994:
     import tkinter as tk
-    from tkinter import ttk
+    #from tkinter import ttk
     import psutil
     import threading
     import time
@@ -65203,6 +67276,7 @@ if shellvar == 1996:
 # stprcd                      stprcd (+ product_key)
 # vided                       vided (+ product_key)
 # shiftpl                     shiftpl (+ product_key)
+# ticket                      system (+ product_key)
     # """
 
         # with open(accounts_file_path, "w") as accounts_file:
@@ -66255,7 +68329,8 @@ if w95var == 1998 or w95var1 == 1997:
         pass
     
     def run_instance_checker():
-        from tkinter import ttk, messagebox, filedialog, colorchooser, simpledialog
+        #from tkinter import ttk, messagebox, filedialog, colorchooser, simpledialog
+        from tkinter import messagebox, filedialog, colorchooser, simpledialog
         messagebox = _W95_MESSAGEBOX  # Windows 95 dialogs
         colorchooser = _W95_COLORCHOOSER  # Windows 95 dialogs
         simpledialog = _W95_SIMPLEDIALOG  # Windows 95 dialogs
@@ -67438,6 +69513,846 @@ if w95var == 1998 or w95var1 == 1997:
                 except tk.TclError:
                     pass
 
+        # ----- a Windows 95 list view without ttk (the same calls as the ttk.Treeview it replaces) -------------
+        class W95TreeList(tk.Frame):
+            """A list with columns, drawn with tk only. It answers the ttk.Treeview calls used in Bitpack: heading(),
+            column(), insert(), delete(), get_children(), item(), selection(), selection_set(), yview(), xview(),
+            bind(). Click = select, Ctrl+click = add / remove, Shift+click = a range, right-click selects the row
+            under the mouse (as in Windows), Up / Down / Home / End move, Enter = double-click."""
+            ROW_H, HEAD_H = 18, 20
+
+            def __init__(self, master, columns=(), show="headings", yscrollcommand=None, xscrollcommand=None,
+                         selectmode="extended", height=None, **kwargs):
+                tk.Frame.__init__(self, master, bg=LIGHT, bd=0, highlightthickness=0)
+                self._cols = list(columns)
+                self._head = {c: {"text": c, "command": None} for c in self._cols}
+                self._width = {c: 100 for c in self._cols}
+                self._anchor = {c: "w" for c in self._cols}
+                self._rows, self._values = [], {}             # item ids in order, item id -> values
+                self._selected, self._anchor_row = [], None
+                self._next = 0
+                self._job = None
+                self._mode = selectmode
+                self._user = {}
+                self._top = 0                                   # only the rows on screen are drawn (fast)
+                self._yscroll = yscrollcommand
+                self._font = tkfont.Font(family=FONT[0], size=FONT[1])
+                self._header = tk.Canvas(self, height=self.HEAD_H, bg=FACE, highlightthickness=0, bd=0)
+                self._header.pack(side="top", fill="x")
+                self._body = tk.Canvas(self, bg=LIGHT, highlightthickness=0, bd=0, takefocus=1)
+                self._body.pack(side="top", fill="both", expand=True)
+                self._body.config(xscrollcommand=lambda first, last: (
+                    xscrollcommand(first, last) if xscrollcommand else None, self._header.xview_moveto(first)))
+                self._body.bind("<Configure>", lambda e: self._redraw())
+                self._body.bind("<Button-1>", self._click)
+                self._body.bind("<Control-Button-1>", lambda e: self._click(e, "toggle"))
+                self._body.bind("<Shift-Button-1>", lambda e: self._click(e, "range"))
+                self._body.bind("<MouseWheel>", lambda e: self.yview("scroll", -3 if e.delta > 0 else 3, "units"))
+                self._body.bind("<Button-4>", lambda e: self.yview("scroll", -3, "units"))
+                self._body.bind("<Button-5>", lambda e: self.yview("scroll", 3, "units"))
+                for key, step in (("<Up>", -1), ("<Down>", 1), ("<Prior>", -10), ("<Next>", 10)):
+                    self._body.bind(key, lambda e, s=step: self._move(s))
+                self._body.bind("<Home>", lambda e: self._move(-10 ** 9))
+                self._body.bind("<End>", lambda e: self._move(10 ** 9))
+                self._body.bind("<Return>", self._enter)
+                self._body.bind("<Control-a>", lambda e: (self.selection_set(self._rows), "break")[1])
+                self._header.bind("<Button-1>", self._head_click)
+
+            # ----- the ttk.Treeview calls -------------------------------------------------------------------
+            def heading(self, column, text=None, command=None, **kwargs):
+                if text is not None:
+                    self._head[column]["text"] = text
+                if command is not None:
+                    self._head[column]["command"] = command
+                self._later()
+
+            def column(self, column, width=None, anchor=None, **kwargs):
+                if width is not None:
+                    self._width[column] = int(width)
+                if anchor is not None:
+                    self._anchor[column] = anchor
+                self._later()
+
+            def insert(self, parent, index, iid=None, values=(), **kwargs):
+                self._next += 1
+                iid = iid or "I%03X" % self._next
+                self._values[iid] = tuple(values)
+                if index == "end":
+                    self._rows.append(iid)
+                else:
+                    self._rows.insert(int(index), iid)
+                self._later()                                   # one drawing for a whole batch of rows
+                return iid
+
+            def delete(self, *items):
+                for iid in items:
+                    if iid in self._values:
+                        del self._values[iid]
+                        self._rows.remove(iid)
+                        if iid in self._selected:
+                            self._selected.remove(iid)
+                self._later()
+
+            def get_children(self, item=""):
+                return tuple(self._rows)
+
+            def item(self, iid, option=None, **kwargs):
+                if "values" in kwargs:
+                    self._values[iid] = tuple(kwargs["values"])
+                    self._later()
+                if option == "values":
+                    return self._values[iid]
+                return {"values": self._values[iid], "text": ""}
+
+            def selection(self):
+                return tuple(i for i in self._rows if i in self._selected)
+
+            def selection_set(self, items):
+                items = [items] if isinstance(items, str) else list(items)
+                self._selected = [i for i in items if i in self._values]
+                self._redraw()
+
+            def _shown(self):
+                return max(1, self._body.winfo_height() // self.ROW_H)
+
+            def see(self, iid):
+                if iid in self._rows:
+                    i = self._rows.index(iid)
+                    if i < self._top:
+                        self._top = i
+                    elif i >= self._top + self._shown():
+                        self._top = i - self._shown() + 1
+                    self._redraw()
+
+            def yview(self, *args):
+                total = max(1, len(self._rows))
+                if not args:
+                    return self._top / float(total), min(1.0, (self._top + self._shown()) / float(total))
+                if args[0] == "moveto":
+                    self._top = int(float(args[1]) * total)
+                elif args[0] == "scroll":
+                    self._top += int(args[1]) * (self._shown() if args[2] == "pages" else 1)
+                self._top = max(0, min(self._top, len(self._rows) - self._shown()))
+                self._redraw()
+
+            def xview(self, *args):
+                self._header.xview(*args)
+                return self._body.xview(*args)
+
+            def bind(self, sequence=None, func=None, add=None):
+                """The events of the list go to the drawn rows; a right-click first selects the row under the mouse."""
+                if func is None:
+                    return self._body.bind(sequence)
+                self._user[sequence] = func
+                if sequence in ("<Button-3>", "<ButtonPress-3>"):
+                    return self._body.bind(sequence, lambda e: (self._right(e), func(e))[1], add)
+                return self._body.bind(sequence, func, add)
+
+            def focus_set(self):
+                self._body.focus_set()
+
+            # ----- drawing ---------------------------------------------------------------------------------
+            def _later(self):
+                if self._job is None:
+                    self._job = self.after_idle(self._redraw)
+
+            def _widths(self):
+                widths = [self._width[c] for c in self._cols]
+                room = self._body.winfo_width()
+                if widths and sum(widths) < room:              # the first column takes the free room
+                    widths[0] += room - sum(widths)
+                return widths
+
+            def _fit(self, text, width):
+                key = (text, width)
+                cache = self.__dict__.setdefault("_fits", {})
+                if key not in cache:
+                    fitted = text
+                    if self._font.measure(text) > width:
+                        while fitted and self._font.measure(fitted + "...") > width:
+                            fitted = fitted[:-1]
+                        fitted += "..."
+                    if len(cache) > 5000:
+                        cache.clear()
+                    cache[key] = fitted
+                return cache[key]
+
+            def _redraw(self):
+                self._job = None
+                try:
+                    widths = self._widths()
+                except tk.TclError:
+                    return
+                total = max(sum(widths), 1)
+                h, b = self._header, self._body
+                h.delete("all")
+                x = 0
+                for c, w in zip(self._cols, widths):
+                    h.create_rectangle(x, 0, x + w, self.HEAD_H, fill=FACE, outline="")
+                    h.create_line(x, self.HEAD_H - 1, x, 0, x + w - 1, 0, fill=LIGHT)
+                    h.create_line(x, self.HEAD_H - 1, x + w - 1, self.HEAD_H - 1, x + w - 1, 0, fill=SHADOW)
+                    h.create_text(x + 6, self.HEAD_H // 2, text=self._fit(self._head[c]["text"], w - 10), anchor="w",
+                                  font=FONT, fill=BLACK)
+                    x += w
+                h.config(scrollregion=(0, 0, total, self.HEAD_H))
+                b.delete("all")
+                selected = set(self._selected)
+                self._top = max(0, min(self._top, len(self._rows) - self._shown()))
+                for r, iid in enumerate(self._rows[self._top:self._top + self._shown() + 1]):
+                    y = r * self.ROW_H
+                    on = iid in selected
+                    if on:
+                        b.create_rectangle(0, y, total, y + self.ROW_H, fill=NAVY, outline="")
+                    x = 0
+                    for value, c, w in zip(self._values[iid], self._cols, widths):
+                        anchor = self._anchor[c]
+                        tx = x + w - 6 if anchor == "e" else (x + w // 2 if anchor == "center" else x + 6)
+                        b.create_text(tx, y + self.ROW_H // 2, text=self._fit(str(value), w - 12),
+                                      anchor="center" if anchor == "center" else anchor, font=FONT,
+                                      fill=LIGHT if on else BLACK)
+                        x += w
+                b.config(scrollregion=(0, 0, total, max(1, b.winfo_height())))
+                h.xview_moveto(b.xview()[0])
+                if self._yscroll:
+                    self._yscroll(*self.yview())
+
+            # ----- mouse and keys ---------------------------------------------------------------------------
+            def _row_at(self, event):
+                r = self._top + int(event.y // self.ROW_H)
+                return self._rows[r] if 0 <= r < len(self._rows) else None
+
+            def _click(self, event, how="single"):
+                self._body.focus_set()
+                iid = self._row_at(event)
+                if iid is None:
+                    self._selected = []
+                elif how == "toggle" and self._mode == "extended":
+                    if iid in self._selected:
+                        self._selected.remove(iid)
+                    else:
+                        self._selected.append(iid)
+                    self._anchor_row = iid
+                elif how == "range" and self._mode == "extended" and self._anchor_row in self._rows:
+                    a, z = sorted((self._rows.index(self._anchor_row), self._rows.index(iid)))
+                    self._selected = self._rows[a:z + 1]
+                else:
+                    self._selected, self._anchor_row = [iid], iid
+                self._redraw()
+                self.event_generate("<<TreeviewSelect>>")
+                return "break" if how != "single" else None
+
+            def _right(self, event):
+                iid = self._row_at(event)
+                if iid is None:
+                    self._selected = []
+                elif iid not in self._selected:
+                    self._selected, self._anchor_row = [iid], iid
+                self._redraw()
+
+            def _move(self, step):
+                if not self._rows:
+                    return "break"
+                current = self._rows.index(self._selected[-1]) if self._selected else -1
+                i = max(0, min(len(self._rows) - 1, current + step))
+                self._selected, self._anchor_row = [self._rows[i]], self._rows[i]
+                self._redraw()
+                self.see(self._rows[i])
+                self.event_generate("<<TreeviewSelect>>")
+                return "break"
+
+            def _enter(self, event):
+                func = self._user.get("<Double-1>") or self._user.get("<Double-Button-1>")
+                if func and self._selected:
+                    func(event)
+                return "break"
+
+            def _head_click(self, event):
+                x = self._header.canvasx(event.x)
+                left = 0
+                for c, w in zip(self._cols, self._widths()):
+                    if left <= x < left + w:
+                        if self._head[c]["command"]:
+                            self._head[c]["command"]()
+                        return
+                    left += w
+
+        # ----- a Windows 95 list view without ttk (the same calls as the ttk.Treeview it replaces) -------------
+        class W95TreeList(tk.Frame):
+            """A list with columns, drawn with tk only. It answers the ttk.Treeview calls used in Bitpack: heading(),
+            column(), insert(), delete(), get_children(), item(), selection(), selection_set(), yview(), xview(),
+            bind(). Click = select, Ctrl+click = add / remove, Shift+click = a range, right-click selects the row
+            under the mouse (as in Windows), Up / Down / Home / End move, Enter = double-click."""
+            ROW_H, HEAD_H = 18, 20
+
+            def __init__(self, master, columns=(), show="headings", yscrollcommand=None, xscrollcommand=None,
+                         selectmode="extended", height=None, **kwargs):
+                tk.Frame.__init__(self, master, bg=LIGHT, bd=0, highlightthickness=0)
+                self._cols = list(columns)
+                self._head = {c: {"text": c, "command": None} for c in self._cols}
+                self._width = {c: 100 for c in self._cols}
+                self._anchor = {c: "w" for c in self._cols}
+                self._rows, self._values = [], {}             # item ids in order, item id -> values
+                self._selected, self._anchor_row = [], None
+                self._next = 0
+                self._job = None
+                self._mode = selectmode
+                self._user = {}
+                self._top = 0                                   # only the rows on screen are drawn (fast)
+                self._yscroll = yscrollcommand
+                self._font = tkfont.Font(family=FONT[0], size=FONT[1])
+                self._header = tk.Canvas(self, height=self.HEAD_H, bg=FACE, highlightthickness=0, bd=0)
+                self._header.pack(side="top", fill="x")
+                self._body = tk.Canvas(self, bg=LIGHT, highlightthickness=0, bd=0, takefocus=1)
+                self._body.pack(side="top", fill="both", expand=True)
+                self._body.config(xscrollcommand=lambda first, last: (
+                    xscrollcommand(first, last) if xscrollcommand else None, self._header.xview_moveto(first)))
+                self._body.bind("<Configure>", lambda e: self._redraw())
+                self._body.bind("<Button-1>", self._click)
+                self._body.bind("<Control-Button-1>", lambda e: self._click(e, "toggle"))
+                self._body.bind("<Shift-Button-1>", lambda e: self._click(e, "range"))
+                self._body.bind("<MouseWheel>", lambda e: self.yview("scroll", -3 if e.delta > 0 else 3, "units"))
+                self._body.bind("<Button-4>", lambda e: self.yview("scroll", -3, "units"))
+                self._body.bind("<Button-5>", lambda e: self.yview("scroll", 3, "units"))
+                for key, step in (("<Up>", -1), ("<Down>", 1), ("<Prior>", -10), ("<Next>", 10)):
+                    self._body.bind(key, lambda e, s=step: self._move(s))
+                self._body.bind("<Home>", lambda e: self._move(-10 ** 9))
+                self._body.bind("<End>", lambda e: self._move(10 ** 9))
+                self._body.bind("<Return>", self._enter)
+                self._body.bind("<Control-a>", lambda e: (self.selection_set(self._rows), "break")[1])
+                self._header.bind("<Button-1>", self._head_click)
+
+            # ----- the ttk.Treeview calls -------------------------------------------------------------------
+            def heading(self, column, text=None, command=None, **kwargs):
+                if text is not None:
+                    self._head[column]["text"] = text
+                if command is not None:
+                    self._head[column]["command"] = command
+                self._later()
+
+            def column(self, column, width=None, anchor=None, **kwargs):
+                if width is not None:
+                    self._width[column] = int(width)
+                if anchor is not None:
+                    self._anchor[column] = anchor
+                self._later()
+
+            def insert(self, parent, index, iid=None, values=(), **kwargs):
+                self._next += 1
+                iid = iid or "I%03X" % self._next
+                self._values[iid] = tuple(values)
+                if index == "end":
+                    self._rows.append(iid)
+                else:
+                    self._rows.insert(int(index), iid)
+                self._later()                                   # one drawing for a whole batch of rows
+                return iid
+
+            def delete(self, *items):
+                for iid in items:
+                    if iid in self._values:
+                        del self._values[iid]
+                        self._rows.remove(iid)
+                        if iid in self._selected:
+                            self._selected.remove(iid)
+                self._later()
+
+            def get_children(self, item=""):
+                return tuple(self._rows)
+
+            def item(self, iid, option=None, **kwargs):
+                if "values" in kwargs:
+                    self._values[iid] = tuple(kwargs["values"])
+                    self._later()
+                if option == "values":
+                    return self._values[iid]
+                return {"values": self._values[iid], "text": ""}
+
+            def selection(self):
+                return tuple(i for i in self._rows if i in self._selected)
+
+            def selection_set(self, items):
+                items = [items] if isinstance(items, str) else list(items)
+                self._selected = [i for i in items if i in self._values]
+                self._redraw()
+
+            def _shown(self):
+                return max(1, self._body.winfo_height() // self.ROW_H)
+
+            def see(self, iid):
+                if iid in self._rows:
+                    i = self._rows.index(iid)
+                    if i < self._top:
+                        self._top = i
+                    elif i >= self._top + self._shown():
+                        self._top = i - self._shown() + 1
+                    self._redraw()
+
+            def yview(self, *args):
+                total = max(1, len(self._rows))
+                if not args:
+                    return self._top / float(total), min(1.0, (self._top + self._shown()) / float(total))
+                if args[0] == "moveto":
+                    self._top = int(float(args[1]) * total)
+                elif args[0] == "scroll":
+                    self._top += int(args[1]) * (self._shown() if args[2] == "pages" else 1)
+                self._top = max(0, min(self._top, len(self._rows) - self._shown()))
+                self._redraw()
+
+            def xview(self, *args):
+                self._header.xview(*args)
+                return self._body.xview(*args)
+
+            def bind(self, sequence=None, func=None, add=None):
+                """The events of the list go to the drawn rows; a right-click first selects the row under the mouse."""
+                if func is None:
+                    return self._body.bind(sequence)
+                self._user[sequence] = func
+                if sequence in ("<Button-3>", "<ButtonPress-3>"):
+                    return self._body.bind(sequence, lambda e: (self._right(e), func(e))[1], add)
+                return self._body.bind(sequence, func, add)
+
+            def focus_set(self):
+                self._body.focus_set()
+
+            # ----- drawing ---------------------------------------------------------------------------------
+            def _later(self):
+                if self._job is None:
+                    self._job = self.after_idle(self._redraw)
+
+            def _widths(self):
+                widths = [self._width[c] for c in self._cols]
+                room = self._body.winfo_width()
+                if widths and sum(widths) < room:              # the first column takes the free room
+                    widths[0] += room - sum(widths)
+                return widths
+
+            def _fit(self, text, width):
+                key = (text, width)
+                cache = self.__dict__.setdefault("_fits", {})
+                if key not in cache:
+                    fitted = text
+                    if self._font.measure(text) > width:
+                        while fitted and self._font.measure(fitted + "...") > width:
+                            fitted = fitted[:-1]
+                        fitted += "..."
+                    if len(cache) > 5000:
+                        cache.clear()
+                    cache[key] = fitted
+                return cache[key]
+
+            def _redraw(self):
+                self._job = None
+                try:
+                    widths = self._widths()
+                except tk.TclError:
+                    return
+                total = max(sum(widths), 1)
+                h, b = self._header, self._body
+                h.delete("all")
+                x = 0
+                for c, w in zip(self._cols, widths):
+                    h.create_rectangle(x, 0, x + w, self.HEAD_H, fill=FACE, outline="")
+                    h.create_line(x, self.HEAD_H - 1, x, 0, x + w - 1, 0, fill=LIGHT)
+                    h.create_line(x, self.HEAD_H - 1, x + w - 1, self.HEAD_H - 1, x + w - 1, 0, fill=SHADOW)
+                    h.create_text(x + 6, self.HEAD_H // 2, text=self._fit(self._head[c]["text"], w - 10), anchor="w",
+                                  font=FONT, fill=BLACK)
+                    x += w
+                h.config(scrollregion=(0, 0, total, self.HEAD_H))
+                b.delete("all")
+                selected = set(self._selected)
+                self._top = max(0, min(self._top, len(self._rows) - self._shown()))
+                for r, iid in enumerate(self._rows[self._top:self._top + self._shown() + 1]):
+                    y = r * self.ROW_H
+                    on = iid in selected
+                    if on:
+                        b.create_rectangle(0, y, total, y + self.ROW_H, fill=NAVY, outline="")
+                    x = 0
+                    for value, c, w in zip(self._values[iid], self._cols, widths):
+                        anchor = self._anchor[c]
+                        tx = x + w - 6 if anchor == "e" else (x + w // 2 if anchor == "center" else x + 6)
+                        b.create_text(tx, y + self.ROW_H // 2, text=self._fit(str(value), w - 12),
+                                      anchor="center" if anchor == "center" else anchor, font=FONT,
+                                      fill=LIGHT if on else BLACK)
+                        x += w
+                b.config(scrollregion=(0, 0, total, max(1, b.winfo_height())))
+                h.xview_moveto(b.xview()[0])
+                if self._yscroll:
+                    self._yscroll(*self.yview())
+
+            # ----- mouse and keys ---------------------------------------------------------------------------
+            def _row_at(self, event):
+                r = self._top + int(event.y // self.ROW_H)
+                return self._rows[r] if 0 <= r < len(self._rows) else None
+
+            def _click(self, event, how="single"):
+                self._body.focus_set()
+                iid = self._row_at(event)
+                if iid is None:
+                    self._selected = []
+                elif how == "toggle" and self._mode == "extended":
+                    if iid in self._selected:
+                        self._selected.remove(iid)
+                    else:
+                        self._selected.append(iid)
+                    self._anchor_row = iid
+                elif how == "range" and self._mode == "extended" and self._anchor_row in self._rows:
+                    a, z = sorted((self._rows.index(self._anchor_row), self._rows.index(iid)))
+                    self._selected = self._rows[a:z + 1]
+                else:
+                    self._selected, self._anchor_row = [iid], iid
+                self._redraw()
+                self.event_generate("<<TreeviewSelect>>")
+                return "break" if how != "single" else None
+
+            def _right(self, event):
+                iid = self._row_at(event)
+                if iid is None:
+                    self._selected = []
+                elif iid not in self._selected:
+                    self._selected, self._anchor_row = [iid], iid
+                self._redraw()
+
+            def _move(self, step):
+                if not self._rows:
+                    return "break"
+                current = self._rows.index(self._selected[-1]) if self._selected else -1
+                i = max(0, min(len(self._rows) - 1, current + step))
+                self._selected, self._anchor_row = [self._rows[i]], self._rows[i]
+                self._redraw()
+                self.see(self._rows[i])
+                self.event_generate("<<TreeviewSelect>>")
+                return "break"
+
+            def _enter(self, event):
+                func = self._user.get("<Double-1>") or self._user.get("<Double-Button-1>")
+                if func and self._selected:
+                    func(event)
+                return "break"
+
+            def _head_click(self, event):
+                x = self._header.canvasx(event.x)
+                left = 0
+                for c, w in zip(self._cols, self._widths()):
+                    if left <= x < left + w:
+                        if self._head[c]["command"]:
+                            self._head[c]["command"]()
+                        return
+                    left += w
+
+
+# ---------------------------------------- B. taburi, liste derulante, inlocuitorul pentru ttk --------------
+        # ----- w95dist without ttk: tabs and drop-down lists drawn with tk (the same calls as ttk) -----------------
+        class W95Notebook(tk.Frame):
+            """Windows 95 tabs. The same calls as ttk.Notebook: add(page, text=...), select(), tabs(), index(),
+            tab(), forget(); <<NotebookTabChanged>> when the tab changes. The pages are made with the notebook as
+            their master (as with ttk) and shown one at a time."""
+
+            def __init__(self, master=None, **kwargs):
+                for key in ("style", "padding", "width", "height", "takefocus"):
+                    kwargs.pop(key, None)
+                tk.Frame.__init__(self, master, bg=FACE, **kwargs)
+                self._strip = tk.Frame(self, bg=FACE)
+                self._strip.pack(side="top", fill="x", padx=2)
+                self._page = tk.Frame(self, bg=FACE, bd=2, relief="raised")
+                self._page.pack(side="top", fill="both", expand=True)
+                self._pages, self._labels, self._current = [], {}, None
+
+            def configure(self, cnf=None, **kwargs):
+                for key in ("style", "padding", "width", "height", "takefocus"):
+                    kwargs.pop(key, None)
+                if kwargs or cnf:
+                    return tk.Frame.configure(self, cnf, **kwargs)
+
+            config = configure
+
+            def add(self, child, text="", **kwargs):
+                if child in self._pages:
+                    return self.tab(child, text=text)
+                if isinstance(child, tk.Frame) and str(child.cget("bg")) in ("SystemButtonFace", "#d9d9d9"):
+                    child.configure(bg=FACE)
+                self._pages.append(child)
+                label = tk.Label(self._strip, text=text, font=FONT, bg=FACE, fg=BLACK, bd=2, relief="raised",
+                                 padx=8, pady=1, cursor="hand2")
+                label.pack(side="left", anchor="s", pady=(3, 0))
+                label.bind("<Button-1>", lambda e, c=child: self.select(c))
+                self._labels[child] = label
+                if self._current is None:
+                    self.select(child)
+
+            def _child(self, tab_id):
+                if isinstance(tab_id, int):
+                    return self._pages[tab_id]
+                if isinstance(tab_id, str):
+                    if tab_id == "current":
+                        return self._current
+                    return next((p for p in self._pages if str(p) == tab_id), None)
+                return tab_id
+
+            def select(self, tab_id=None):
+                if tab_id is None:
+                    return str(self._current) if self._current is not None else ""
+                child = self._child(tab_id)
+                if child is None or child is self._current:
+                    return
+                for page in self._pages:
+                    page.pack_forget()
+                    self._labels[page].config(font=FONT, pady=1)
+                    self._labels[page].pack_configure(pady=(3, 0))
+                child.pack(in_=self._page, fill="both", expand=True)
+                self._labels[child].config(font=FONT_B, pady=3)              # the chosen tab stands out
+                self._labels[child].pack_configure(pady=(0, 0))
+                self._current = child
+                self.event_generate("<<NotebookTabChanged>>")
+
+            def tabs(self):
+                return tuple(str(p) for p in self._pages)
+
+            def index(self, tab_id):
+                if tab_id == "end":
+                    return len(self._pages)
+                return self._pages.index(self._child(tab_id))
+
+            def tab(self, tab_id, option=None, **kwargs):
+                child = self._child(tab_id)
+                if "text" in kwargs:
+                    self._labels[child].config(text=kwargs["text"])
+                if option == "text":
+                    return self._labels[child].cget("text")
+                return {"text": self._labels[child].cget("text")}
+
+            def forget(self, tab_id):
+                child = self._child(tab_id)
+                child.pack_forget()
+                self._labels.pop(child).destroy()
+                self._pages.remove(child)
+                if child is self._current:
+                    self._current = None
+                    if self._pages:
+                        self.select(self._pages[0])
+
+        class W95Combobox(tk.Frame):
+            """A Windows 95 drop-down list with the ttk.Combobox calls: textvariable, values, state, get(), set(),
+            current(), ['values'], configure(); <<ComboboxSelected>> when a value is chosen."""
+
+            def __init__(self, master=None, textvariable=None, values=(), width=20, state="normal", font=None,
+                         **kwargs):
+                for key in ("style", "padding", "height", "justify", "postcommand", "takefocus", "exportselection"):
+                    kwargs.pop(key, None)
+                tk.Frame.__init__(self, master, bg=LIGHT, bd=2, relief="sunken")
+                self._values = list(values)
+                self._var = textvariable if textvariable is not None else tk.StringVar(self)
+                self._entry = tk.Entry(self, textvariable=self._var, font=font or FONT, width=width, bd=0,
+                                       highlightthickness=0, bg=LIGHT, fg=BLACK, readonlybackground=LIGHT,
+                                       disabledbackground=FACE, disabledforeground=SHADOW, insertbackground=BLACK)
+                self._entry.pack(side="left", fill="x", expand=True, padx=(2, 0))
+                self._pixel = tk.PhotoImage(master=self, width=1, height=1)
+                marlett = "Marlett" in tkfont.families(self)
+                self._button = tk.Button(self, text="6" if marlett else "v", font=("Marlett", 8) if marlett else FONT_B,
+                                         image=self._pixel, compound="center", width=13, height=13, padx=0, pady=0,
+                                         bg=FACE, activebackground=FACE, bd=2, relief="raised", highlightthickness=0,
+                                         takefocus=0, command=self._open)
+                self._button.pack(side="right")
+                self._entry.bind("<Button-1>", lambda e: self._open() if self._state == "readonly" else None)
+                self._entry.bind("<Down>", lambda e: (self._open(), "break")[1])
+                self._state = "normal"
+                self.configure(state=state)
+                for key, value in kwargs.items():
+                    try:
+                        self._entry.configure(**{key: value})
+                    except tk.TclError:
+                        pass
+
+            def get(self):
+                return self._var.get()
+
+            def set(self, value):
+                self._var.set(value)
+
+            def current(self, index=None):
+                if index is None:
+                    return self._values.index(self.get()) if self.get() in self._values else -1
+                self.set(self._values[index])
+
+            def configure(self, cnf=None, **kwargs):
+                if cnf:
+                    kwargs.update(cnf)
+                if "values" in kwargs:
+                    self._values = list(kwargs.pop("values"))
+                if "state" in kwargs:
+                    self._state = str(kwargs.pop("state"))
+                    self._entry.configure(state={"readonly": "readonly", "disabled": "disabled"}.get(self._state,
+                                                                                                     "normal"))
+                    self._button.configure(state="disabled" if self._state == "disabled" else "normal")
+                if "textvariable" in kwargs:
+                    self._var = kwargs.pop("textvariable")
+                    self._entry.configure(textvariable=self._var)
+                for key in ("style", "padding", "height", "justify", "postcommand"):
+                    kwargs.pop(key, None)
+                if kwargs:
+                    self._entry.configure(**kwargs)
+
+            config = configure
+
+            def cget(self, key):
+                if key == "values":
+                    return tuple(self._values)
+                if key == "state":
+                    return self._state
+                return self._entry.cget(key)
+
+            def __setitem__(self, key, value):
+                self.configure(**{key: value})
+
+            def __getitem__(self, key):
+                return self.cget(key)
+
+            def _open(self):
+                if self._state == "disabled" or not self._values:
+                    return
+                menu = tk.Menu(self, tearoff=0, font=FONT, bg=LIGHT, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                for value in self._values:
+                    menu.add_command(label=str(value), command=lambda v=value: self._choose(v))
+                menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
+
+            def _choose(self, value):
+                self.set(value)
+                self.event_generate("<<ComboboxSelected>>")
+
+        class W95Progressbar(tk.Canvas):
+            """Windows 95 progress blocks with the ttk.Progressbar calls (value, maximum, variable, step, start, stop)."""
+
+            def __init__(self, master=None, orient="horizontal", length=200, mode="determinate", maximum=100, value=0,
+                         variable=None, **kwargs):
+                tk.Canvas.__init__(self, master, width=length, height=18, bg=LIGHT, bd=2, relief="sunken",
+                                   highlightthickness=0)
+                self._max, self._value, self._mode, self._var, self._job = float(maximum), float(value), mode, variable, None
+                if variable is not None:
+                    variable.trace_add("write", lambda *a: self.configure(value=variable.get()))
+                self.bind("<Configure>", lambda e: self._draw())
+
+            def configure(self, cnf=None, **kwargs):
+                if cnf:
+                    kwargs.update(cnf)
+                if "value" in kwargs:
+                    self._value = float(kwargs.pop("value"))
+                if "maximum" in kwargs:
+                    self._max = float(kwargs.pop("maximum")) or 1.0
+                for key in ("style", "mode", "orient", "variable"):
+                    kwargs.pop(key, None)
+                if kwargs:
+                    tk.Canvas.configure(self, **kwargs)
+                self._draw()
+
+            config = configure
+
+            def __setitem__(self, key, value):
+                self.configure(**{key: value})
+
+            def __getitem__(self, key):
+                return {"value": self._value, "maximum": self._max}.get(key) if key in ("value", "maximum") \
+                    else tk.Canvas.cget(self, key)
+
+            def step(self, amount=1.0):
+                self._value = (self._value + amount) % (self._max + 1)
+                self._draw()
+
+            def start(self, interval=50):
+                self.stop()
+
+                def tick():
+                    self.step(self._max / 25.0)
+                    self._job = self.after(interval, tick)
+                tick()
+
+            def stop(self):
+                if self._job:
+                    self.after_cancel(self._job)
+                    self._job = None
+
+            def _draw(self):
+                self.delete("all")
+                width, height = self.winfo_width() - 4, self.winfo_height() - 4
+                share = max(0.0, min(1.0, self._value / self._max if self._max else 0))
+                for i in range(int(max(0, width) * share) // 9):
+                    self.create_rectangle(3 + i * 9, 3, 3 + i * 9 + 7, height + 1, fill=NAVY, outline="")
+
+        class _W95Ttk(object):
+            """Stands in for tkinter.ttk inside w95dist: the same names (ttk.Notebook, ttk.Frame, ttk.Treeview,
+            ttk.Combobox, ttk.Style ...), drawn with tk only, so nothing follows the Windows theme any more.
+            The real ttk is not imported here."""
+            Notebook = W95Notebook
+            Combobox = W95Combobox
+            Treeview = W95TreeList
+            Progressbar = W95Progressbar
+            _TTK_ONLY = ("style", "padding", "bootstyle", "class_")
+
+            def _plain(self, kwargs, **defaults):
+                options = dict(defaults)
+                options.update({k: v for k, v in kwargs.items() if k not in self._TTK_ONLY})
+                return options
+
+            def Frame(self, master=None, **kwargs):
+                return tk.Frame(master, **self._plain(kwargs, bg=FACE))
+
+            def Label(self, master=None, **kwargs):
+                return tk.Label(master, **self._plain(kwargs, bg=FACE, fg=BLACK, font=FONT))
+
+            def Button(self, master=None, **kwargs):
+                return tk.Button(master, **self._plain(kwargs, bg=FACE, fg=BLACK, font=FONT, activebackground=FACE,
+                                                       relief="raised", bd=2, highlightthickness=0))
+
+            def Entry(self, master=None, **kwargs):
+                return tk.Entry(master, **self._plain(kwargs, bg=LIGHT, fg=BLACK, font=FONT, relief="sunken", bd=2,
+                                                      highlightthickness=0))
+
+            def Checkbutton(self, master=None, **kwargs):
+                return tk.Checkbutton(master, **self._plain(kwargs, bg=FACE, fg=BLACK, font=FONT, activebackground=FACE,
+                                                            selectcolor=LIGHT, highlightthickness=0))
+
+            def Radiobutton(self, master=None, **kwargs):
+                return tk.Radiobutton(master, **self._plain(kwargs, bg=FACE, fg=BLACK, font=FONT, activebackground=FACE,
+                                                            selectcolor=LIGHT, highlightthickness=0))
+
+            def LabelFrame(self, master=None, **kwargs):
+                return tk.LabelFrame(master, **self._plain(kwargs, bg=FACE, fg=BLACK, font=FONT, bd=2,
+                                                           relief="groove"))
+
+            def Scrollbar(self, master=None, **kwargs):
+                return tk.Scrollbar(master, **self._plain(kwargs))
+
+            def Separator(self, master=None, orient="horizontal", **kwargs):
+                return tk.Frame(master, bg=SHADOW, bd=1, relief="sunken",
+                                **({"height": 2} if orient == "horizontal" else {"width": 2}))
+
+            class Style(object):
+                """Nothing to style: the widgets above already have the Windows 95 look."""
+
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def configure(self, *args, **kwargs):
+                    return None
+
+                def map(self, *args, **kwargs):
+                    return None
+
+                def lookup(self, *args, **kwargs):
+                    return ""
+
+                def layout(self, *args, **kwargs):
+                    return []
+
+                def theme_names(self):
+                    return ("w95",)
+
+                def theme_use(self, *args):
+                    return "w95"
+
+            def __getattr__(self, name):
+                raise AttributeError("ttk.%s does not exist in w95dist: it runs without ttk (use the tk widget)" % name)
+
+        ttk = _W95Ttk()        # the existing ttk.* calls in w95dist now use the tk widgets above
 
         # ----- Windows 95 message boxes for the applications (instead of the modern Windows ones) -------
         import tkinter.messagebox as _native_messagebox
@@ -67937,7 +70852,7 @@ if w95var == 1998 or w95var1 == 1997:
                 self.icons32_selected = {}
                 self.w95_windows = {}
                 self.active_window = None
-                self._retro_ttk()                       # ttk widgets of the applications: classic Windows look
+                #self._retro_ttk()                       # ttk widgets of the applications: classic Windows look
 
                 self.setup_desktop()
                 self.setup_taskbar()
@@ -68525,24 +71440,24 @@ if w95var == 1998 or w95var1 == 1997:
                                   "#d0d0d0": BLACK}
             RETRO_PANEL_COLOURS = ("#f0f0f0", "#c9c9c9")
 
-            def _retro_ttk(self):
-                """ttk widgets (Notebook, Treeview, Combobox...) with the classic Windows look."""
-                style = ttk.Style(self.rootW95dist)
-                names = style.theme_names()
-                for theme in ("winnative", "classic"):
-                    if theme in names:
-                        style.theme_use(theme)
-                        break
-                style.configure(".", font=FONT)
-                style.configure("Treeview", background=LIGHT, fieldbackground=LIGHT, foreground=BLACK, font=FONT,
-                                rowheight=18)
-                style.map("Treeview", background=[("selected", NAVY)], foreground=[("selected", LIGHT)])
-                style.configure("Treeview.Heading", font=FONT, background=FACE, relief="raised")
-                style.configure("TNotebook", background=FACE)
-                style.configure("TNotebook.Tab", font=FONT, padding=(8, 2), background=FACE)
-                style.configure("TFrame", background=FACE)
-                style.configure("TCombobox", fieldbackground=LIGHT)
-                style.configure("Horizontal.TProgressbar", background=NAVY, troughcolor=LIGHT)
+            # def _retro_ttk(self):
+                # """ttk widgets (Notebook, Treeview, Combobox...) with the classic Windows look."""
+                # style = ttk.Style(self.rootW95dist)
+                # names = style.theme_names()
+                # for theme in ("winnative", "classic"):
+                    # if theme in names:
+                        # style.theme_use(theme)
+                        # break
+                # style.configure(".", font=FONT)
+                # style.configure("Treeview", background=LIGHT, fieldbackground=LIGHT, foreground=BLACK, font=FONT,
+                                # rowheight=18)
+                # style.map("Treeview", background=[("selected", NAVY)], foreground=[("selected", LIGHT)])
+                # style.configure("Treeview.Heading", font=FONT, background=FACE, relief="raised")
+                # style.configure("TNotebook", background=FACE)
+                # style.configure("TNotebook.Tab", font=FONT, padding=(8, 2), background=FACE)
+                # style.configure("TFrame", background=FACE)
+                # style.configure("TCombobox", fieldbackground=LIGHT)
+                # style.configure("Horizontal.TProgressbar", background=NAVY, troughcolor=LIGHT)
 
             def retro_skin(self, window):
                 """Windows 95 frame, title bar, menu bar and fonts for an application window."""
@@ -69236,6 +72151,8 @@ if w95var == 1998 or w95var1 == 1997:
     
     - Activity Monitor Tool (activity/monitor)
     
+    - Ticket System (ticket/system)
+    
     - Sticky Notes (sticky/notes)
 
     - Calculator (calculator/calculator)
@@ -69469,6 +72386,7 @@ if w95var == 1998 or w95var1 == 1997:
     - taskmanager/terminator - Advanced task manager
     - terminal/terminal - Command line terminal interface
     - textreplace/textfind - Text search and replace utility
+    - ticket/system - Ticket system
     - timeline/file - File timeline viewer
     - timetracker/timetracker - Simple time tracker
     - todo/manager - Todo manager
@@ -73336,6 +76254,9 @@ if w95var == 1998 or w95var1 == 1997:
                     """Execută o comandă și afișează output-ul"""
                     nonlocal history_index, input_pos, current_process, command_running
                     
+                    if getattr(terminal_text, "_repair_busy", False):   # a repair command is still working
+                        return
+                    
                     # Adaugă comanda la istoric
                     command_history.append(command)
                     history_index = len(command_history)
@@ -73351,6 +76272,35 @@ if w95var == 1998 or w95var1 == 1997:
                         input_pos = terminal_text.index("end-1c")
                         terminal_text.mark_set("input_mark", input_pos)
                         terminal_text.see("end")
+                        return
+                    
+                    if bpk_repair_key(command) is not None:         # manual repair, with the BPK-DOS delay
+                        terminal_text._repair_busy = True
+                        terminal_text.mark_set("spin_start", "end-1c")
+                        terminal_text.mark_gravity("spin_start", "left")
+
+                        def spin(step=0, remaining=random.randint(1000, 3000)):
+                            nonlocal input_pos
+                            try:
+                                terminal_text.config(state="normal")
+                                if step:
+                                    terminal_text.delete("spin_start", "end-1c")
+                                if remaining <= 0:
+                                    terminal_text.insert("end", bpk_repair_command(command) + "\n\n")
+                                    terminal_text.insert("end", prompt)
+                                    input_pos = terminal_text.index("end-1c")
+                                    terminal_text.mark_set("input_mark", input_pos)
+                                    terminal_text.see("end")
+                                    terminal_text._repair_busy = False
+                                    terminal_text.focus_set()
+                                    return
+                                terminal_text.insert("end", "|/-\\"[step % 4])
+                                terminal_text.see("end")
+                                terminal_text.config(state="disabled")      # nothing can be typed meanwhile
+                                terminal_window.after(120, lambda: spin(step + 1, remaining - 120))
+                            except tk.TclError:                             # the window was closed meanwhile
+                                pass
+                        spin()
                         return
                     
                     # if command.strip() == "exec class mail_client:95":
@@ -73887,6 +76837,10 @@ if w95var == 1998 or w95var1 == 1997:
                         terminal_text.insert("end", "  exec class games:95 - Bitpack Games activation (Tetris, Snake, Minesweeper, Pong)\n")
                         terminal_text.insert("end", "  exec class games:0 - Bitpack Games deactivation\n")
                         terminal_text.insert("end", "  exec class games --status - Are Bitpack Games activated?\n")
+                        terminal_text.insert("end", "\nManual repair (as in the Shell Integrator), in this order:\n")
+                        for repair_name in BPK_REPAIR_COMMANDS:
+                            terminal_text.insert("end", "  %s\n" % repair_name)
+                        terminal_text.insert("end", "\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --export - Export database as bpk95 script to Config/init.bpk95\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --export --sql - Export database as SQL script to Config/init.sql\n")
                         terminal_text.insert("end", "  exec dbo_bitpack --import - Rebuild database from Config/init.bpk95\n")
@@ -74081,6 +77035,9 @@ if w95var == 1998 or w95var1 == 1997:
                 # Gestionăm tastele speciale și comenzile
                 def key_press(event):
                     nonlocal history_index
+                    
+                    if getattr(terminal_text, "_repair_busy", False):   # while a repair command works: no typing
+                        return "break"
                     
                     # Ctrl+C: Copiere text selectat sau oprire comandă
                     if (event.state & 0x4) and event.keysym.lower() == "c":  # Ctrl+C
@@ -78141,7 +81098,8 @@ if w95var == 1998 or w95var1 == 1997:
                 
                 # List with columns
                 columns = ("name", "type", "size", "modified")
-                file_list = ttk.Treeview(list_frame, columns=columns, show="headings",
+                #file_list = ttk.Treeview(list_frame, columns=columns, show="headings",
+                file_list = W95TreeList(list_frame, columns=columns, show="headings",
                                        yscrollcommand=v_scrollbar.set,
                                        xscrollcommand=h_scrollbar.set,
                                        selectmode="extended")
@@ -97602,529 +100560,1110 @@ if archVar == 777666012:
     file_archeologist_95()
         
 if expensevar == 777666013:
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-    import matplotlib
-    from datetime import datetime
-    import numpy as np
     bitpack95_validation("777666013")
-    
-    # Configurarea matplotlib pentru a evita thread-urile persistente
-    matplotlib.use('Agg')  # Folosește backend non-interactiv
-    plt.ioff()  # Dezactivează modul interactiv
 
-    class ExpenseTracker:
-        def __init__(self, root_exps):
-            self.root_exps = root_exps
-            self.root_exps.title("Expense Tracker")
-            self.root_exps.geometry("800x600")
-            self.root_exps.configure(bg='#c0c0c0')
-            
-            # Configurează evenimentul de închidere
-            self.root_exps.protocol("WM_DELETE_WINDOW", self.on_closing)
-            
-            # Windows 95 style settings
-            self.setup_retro_style()
-            
-            # Application data
-            self.expenses = []
-            self.categories = ["Food", "Transport", "Entertainment", 
-                              "Housing", "Clothing", "Healthcare", "Education", "Other"]
-            
-            # Load existing data
-            self.load_data()
-            
-            # Create interface
-            self.create_interface()
-            
-        def on_closing(self):
-            """Gestionează închiderea aplicației"""
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # WINDOWS 95 MESSAGE BOXES - they take the place of the Windows message boxes (messagebox: the same functions,
+    # arguments and returned values). The Expense Tracker uses only these.
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import tkinter as _w95_tk
+    import tkinter.font as _w95_tkfont
+    import tkinter.messagebox as _w95_native_messagebox
+
+
+    class _W95Base(object):
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+
+        @staticmethod
+        def parent_of(parent):
+            if parent is not None:
+                try:
+                    return parent.winfo_toplevel()
+                except (_w95_tk.TclError, AttributeError):
+                    pass
+            root = _w95_tk._default_root
+            if root is None:
+                return None
             try:
-                # Salvează datele înainte de închidere
-                self.save_data()
-                
-                # Închide toate figurile matplotlib
-                plt.close('all')
-                
-                # Curăță memoria matplotlib
-                plt.clf()
-                plt.cla()
-                
-                # Distruge fereastra
-                self.root_exps.destroy()
-                
-                # Forțează ieșirea din aplicație
-                sys.exit(0)
-                
-            except Exception as e:
-                print(f"Error during closing: {e}")
-                # Forțează închiderea chiar dacă apar erori
-                os._exit(0)
-            
-        def setup_retro_style(self):
-            """Configure Windows 95 retro style"""
-            style = ttk.Style()
-            style.theme_use('clam')  # Closest to Windows 95
-            
-            # Windows 95 colors
-            bg_color = '#c0c0c0'
-            button_color = '#c0c0c0'
-            
-            style.configure('Retro.TButton', 
-                           background=button_color,
-                           relief='raised',
-                           borderwidth=2,
-                           font=('MS Sans Serif', 8))
-            
-            style.configure('Retro.TFrame', 
-                           background=bg_color,
-                           relief='raised',
-                           borderwidth=1)
-            
-        def create_interface(self):
-            """Create main interface"""
-            # Main frame
-            main_frame = tk.Frame(self.root_exps, bg='#c0c0c0', relief='raised', bd=1)
-            main_frame.pack(fill='both', expand=True, padx=5, pady=5)
-            
-            # Windows 95 style title
-            title_frame = tk.Frame(main_frame, bg='#008080', relief='raised', bd=2)
-            title_frame.pack(fill='x', pady=(0, 10))
-            
-            title_label = tk.Label(title_frame, text="EXPENSE TRACKER", 
-                                  font=('MS Sans Serif', 12, 'bold'),
-                                  bg='#008080', fg='white')
-            title_label.pack(pady=5)
-            
-            # Frame for adding expense
-            add_frame = tk.LabelFrame(main_frame, text="Add New Expense", 
-                                     font=('MS Sans Serif', 8, 'bold'),
-                                     bg='#c0c0c0', relief='groove', bd=2)
-            add_frame.pack(fill='x', pady=(0, 10), padx=5)
-            
-            # Controls for adding
-            controls_frame = tk.Frame(add_frame, bg='#c0c0c0')
-            controls_frame.pack(fill='x', padx=10, pady=10)
-            
-            # Amount
-            tk.Label(controls_frame, text="Amount ($):", font=('MS Sans Serif', 8),
-                    bg='#c0c0c0').grid(row=0, column=0, sticky='w', padx=(0, 5))
-            self.amount_var = tk.StringVar()
-            amount_entry = tk.Entry(controls_frame, textvariable=self.amount_var,
-                                   font=('MS Sans Serif', 8), relief='sunken', bd=2)
-            amount_entry.grid(row=0, column=1, padx=(0, 10))
-            
-            # Category
-            tk.Label(controls_frame, text="Category:", font=('MS Sans Serif', 8),
-                    bg='#c0c0c0').grid(row=0, column=2, sticky='w', padx=(0, 5))
-            self.category_var = tk.StringVar(value=self.categories[0])
-            category_combo = ttk.Combobox(controls_frame, textvariable=self.category_var,
-                                         values=self.categories, font=('MS Sans Serif', 8),
-                                         state='readonly', width=15)
-            category_combo.grid(row=0, column=3, padx=(0, 10))
-            
-            # Description
-            tk.Label(controls_frame, text="Description:", font=('MS Sans Serif', 8),
-                    bg='#c0c0c0').grid(row=1, column=0, sticky='w', pady=(10, 0))
-            self.desc_var = tk.StringVar()
-            desc_entry = tk.Entry(controls_frame, textvariable=self.desc_var,
-                                 font=('MS Sans Serif', 8), relief='sunken', bd=2, width=40)
-            desc_entry.grid(row=1, column=1, columnspan=2, pady=(10, 0), sticky='ew')
-            
-            # Windows 95 style buttons
-            button_frame = tk.Frame(controls_frame, bg='#c0c0c0')
-            button_frame.grid(row=1, column=3, pady=(10, 0), padx=(10, 0))
-            
-            add_btn = tk.Button(button_frame, text="Add", 
-                               command=self.add_expense,
-                               font=('MS Sans Serif', 8, 'bold'),
-                               bg='#c0c0c0', relief='raised', bd=2,
-                               cursor='hand2', width=8)
-            add_btn.pack(side='left', padx=(0, 5))
-            
-            clear_btn = tk.Button(button_frame, text="Clear All", 
-                                 command=self.clear_all,
-                                 font=('MS Sans Serif', 8),
-                                 bg='#c0c0c0', relief='raised', bd=2,
-                                 cursor='hand2', width=8)
-            clear_btn.pack(side='left')
-            
-            # Frame for statistics and charts
-            stats_frame = tk.Frame(main_frame, bg='#c0c0c0')
-            stats_frame.pack(fill='both', expand=True, padx=5)
-            
-            # Frame for expense list
-            list_frame = tk.LabelFrame(stats_frame, text="Expense History", 
-                                      font=('MS Sans Serif', 8, 'bold'),
-                                      bg='#c0c0c0', relief='groove', bd=2)
-            list_frame.pack(fill='both', expand=True, side='left', padx=(0, 5))
-            
-            # Treeview for expenses
-            columns = ('Date', 'Amount', 'Category', 'Description')
-            self.tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=8)
-            
-            # Configure columns
-            self.tree.heading('Date', text='Date')
-            self.tree.heading('Amount', text='Amount ($)')
-            self.tree.heading('Category', text='Category')
-            self.tree.heading('Description', text='Description')
-            
-            self.tree.column('Date', width=80)
-            self.tree.column('Amount', width=80)
-            self.tree.column('Category', width=100)
-            self.tree.column('Description', width=150)
-            
-            # Scrollbar for treeview
-            scrollbar = ttk.Scrollbar(list_frame, orient='vertical', command=self.tree.yview)
-            self.tree.configure(yscrollcommand=scrollbar.set)
-            
-            self.tree.pack(side='left', fill='both', expand=True, padx=5, pady=5)
-            scrollbar.pack(side='right', fill='y', pady=5)
-            
-            # Bind for deletion
-            self.tree.bind('<Delete>', self.delete_selected)
-            self.tree.bind('<Double-1>', self.edit_expense)
-            
-            # Frame for charts
-            chart_frame = tk.LabelFrame(stats_frame, text="Statistics", 
-                                       font=('MS Sans Serif', 8, 'bold'),
-                                       bg='#c0c0c0', relief='groove', bd=2)
-            chart_frame.pack(fill='both', expand=True, side='right')
-            
-            # Chart buttons
-            chart_buttons = tk.Frame(chart_frame, bg='#c0c0c0')
-            chart_buttons.pack(fill='x', padx=5, pady=5)
-            
-            pie_btn = tk.Button(chart_buttons, text="Pie Chart", 
-                               command=self.show_pie_chart,
-                               font=('MS Sans Serif', 8),
-                               bg='#c0c0c0', relief='raised', bd=2, width=10)
-            pie_btn.pack(side='left', padx=(0, 5))
-            
-            bar_btn = tk.Button(chart_buttons, text="Bar Chart", 
-                               command=self.show_bar_chart,
-                               font=('MS Sans Serif', 8),
-                               bg='#c0c0c0', relief='raised', bd=2, width=10)
-            bar_btn.pack(side='left')
-            
-            # Summary button
-            summary_btn = tk.Button(chart_buttons, text="Summary", 
-                                  command=self.show_summary,
-                                  font=('MS Sans Serif', 8),
-                                  bg='#c0c0c0', relief='raised', bd=2, width=10)
-            summary_btn.pack(side='left', padx=(5, 0))
-            
-            # Frame for chart display
-            self.chart_frame = tk.Frame(chart_frame, bg='#c0c0c0')
-            self.chart_frame.pack(fill='both', expand=True, padx=5, pady=5)
-            
-            # Windows 95 style status bar
-            status_frame = tk.Frame(main_frame, bg='#c0c0c0', relief='sunken', bd=1)
-            status_frame.pack(fill='x', side='bottom')
-            
-            self.status_label = tk.Label(status_frame, text="Ready", 
-                                        font=('MS Sans Serif', 8),
-                                        bg='#c0c0c0', anchor='w')
-            self.status_label.pack(side='left', padx=5, pady=2)
-            
-            self.total_label = tk.Label(status_frame, text="Total: $0.00", 
-                                       font=('MS Sans Serif', 8, 'bold'),
-                                       bg='#c0c0c0', anchor='e')
-            self.total_label.pack(side='right', padx=5, pady=2)
-            
-            # Update display
-            self.update_display()
-            self.show_summary()  # Show summary by default
-            
-        def add_expense(self):
-            """Add a new expense"""
+                focus = root.focus_get()
+                if focus is not None:
+                    return focus.winfo_toplevel()
+            except (KeyError, _w95_tk.TclError):
+                pass
+            return root
+
+        def window(self, parent, title, on_close):
+            win = _w95_tk.Toplevel(parent)
+            win.withdraw()
+            win.overrideredirect(True)
+            win.configure(bg=self.FACE, bd=2, relief="raised")
             try:
-                amount = float(self.amount_var.get())
-                category = self.category_var.get()
-                description = self.desc_var.get() or "No description"
-                
-                if amount <= 0:
-                    messagebox.showerror("Error", "Amount must be greater than 0!")
+                win.transient(parent)
+            except _w95_tk.TclError:
+                pass
+            win.attributes("-topmost", True)
+            bar = _w95_tk.Frame(win, bg=self.NAVY, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            label = _w95_tk.Label(bar, text=title or "", bg=self.NAVY, fg=self.LIGHT, font=self.FONT_B, anchor="w")
+            label.pack(side="left", padx=4, fill="x", expand=True)
+            win._w95_pixel = _w95_tk.PhotoImage(master=win, width=1, height=1)
+            marlett = "Marlett" in _w95_tkfont.families(win)
+            _w95_tk.Button(bar, text="r" if marlett else "X", font=("Marlett", 7) if marlett else self.FONT_B,
+                           image=win._w95_pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=self.FACE,
+                           fg=self.BLACK, bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                           activebackground=self.FACE, command=on_close).pack(side="right", padx=2)
+
+            def press(event):
+                win._w95_drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+            def drag(event):
+                win.geometry("+%d+%d" % (event.x_root - win._w95_drag[0], event.y_root - win._w95_drag[1]))
+            for widget in (bar, label):
+                widget.bind("<ButtonPress-1>", press)
+                widget.bind("<B1-Motion>", drag)
+            return win
+
+        def icon(self, master, kind):
+            c = _w95_tk.Canvas(master, width=34, height=34, bg=self.FACE, highlightthickness=0)
+            if kind == "error":
+                c.create_oval(2, 2, 32, 32, fill="#ff0000", outline="#800000")
+                c.create_line(11, 11, 23, 23, fill="white", width=3)
+                c.create_line(23, 11, 11, 23, fill="white", width=3)
+            elif kind == "warning":
+                c.create_polygon(17, 2, 32, 30, 2, 30, fill="#ffff00", outline=self.BLACK)
+                c.create_text(17, 20, text="!", fill=self.BLACK, font=("Times New Roman", 15, "bold"))
+            else:
+                c.create_oval(2, 2, 32, 32, fill=self.LIGHT, outline=self.BLACK)
+                c.create_text(17, 17, text="?" if kind == "question" else "i", fill="#0000ff",
+                              font=("Times New Roman", 17, "bold"))
+            return c
+
+        def button(self, master, text, command, default=False, width=9):
+            return _w95_tk.Button(master, text=text, command=command, width=width, font=self.FONT_B if default else self.FONT,
+                                  bg=self.FACE, fg=self.BLACK, activebackground=self.FACE, relief="raised", bd=2,
+                                  highlightthickness=1 if default else 0, highlightbackground=self.BLACK, takefocus=0)
+
+        def run(self, win, parent, focus=None):
+            """Centred over the window that asked, in front, modal; the previous modal window gets its grab back."""
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            try:
+                if parent is not None and parent.winfo_viewable():
+                    x = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+                    y = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 3)
+                else:
+                    raise _w95_tk.TclError("no parent")
+            except _w95_tk.TclError:
+                x, y = (win.winfo_screenwidth() - w) // 2, (win.winfo_screenheight() - h) // 3
+            x = max(0, min(x, win.winfo_screenwidth() - w))
+            y = max(0, min(y, win.winfo_screenheight() - h - 30))
+            win.geometry("+%d+%d" % (x, y))
+            previous = None
+            try:
+                previous = win.grab_current()
+            except (_w95_tk.TclError, KeyError):
+                previous = None
+            win.deiconify()
+            win.lift()
+            (focus or win).focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except _w95_tk.TclError:
+                    pass
+            job = win.after(100, take_clicks)
+            win.bind("<Destroy>", lambda e, w=win, j=job: w.after_cancel(j) if e.widget is w else None, add="+")
+            win.wait_window()
+            if previous is not None:
+                try:
+                    if previous.winfo_exists():
+                        previous.grab_set()
+                        previous.focus_force()
+                except _w95_tk.TclError:
+                    pass
+            elif parent is not None:
+                try:
+                    parent.focus_force()
+                except _w95_tk.TclError:
+                    pass
+
+        def box(self, title, text, kind, buttons, default=0, parent=None, detail=None, entry=None, show=None):
+            """-> (button pressed, text typed)."""
+            parent = self.parent_of(parent)
+            if parent is None:                                    # no window open yet: the Windows box is the only way
+                return None, None
+            result = {"value": buttons[-1], "text": None}
+            field = {}
+
+            def answer(value):
+                result["value"] = value
+                if "entry" in field:
+                    result["text"] = field["entry"].get()
+                win.destroy()
+            win = self.window(parent, title, lambda: answer(buttons[-1]))
+            body = _w95_tk.Frame(win, bg=self.FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            self.icon(body, kind).pack(side="left", anchor="n", padx=(0, 12))
+            right = _w95_tk.Frame(body, bg=self.FACE)
+            right.pack(side="left", fill="both", expand=True)
+            _w95_tk.Label(right, text=text or "", font=self.FONT, bg=self.FACE, justify="left",
+                          wraplength=420).pack(anchor="w")
+            if detail:
+                _w95_tk.Label(right, text=detail, font=self.FONT, bg=self.FACE, fg=self.SHADOW, justify="left",
+                              wraplength=420).pack(anchor="w", pady=(6, 0))
+            if entry is not None:
+                e = _w95_tk.Entry(right, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                                  width=42, show=show or "")
+                e.insert(0, entry)
+                e.select_range(0, "end")
+                e.pack(anchor="w", pady=(8, 0), fill="x")
+                e.bind("<Return>", lambda ev: answer(buttons[0]))
+                field["entry"] = e
+            row = _w95_tk.Frame(win, bg=self.FACE)
+            row.pack(pady=(6, 12))
+            for index, label in enumerate(buttons):
+                self.button(row, label, lambda v=label: answer(v), default=index == default).pack(side="left", padx=4)
+            win.bind("<Return>", lambda ev: answer(buttons[default]))
+            win.bind("<Escape>", lambda ev: answer(buttons[-1]))
+            for index, label in enumerate(buttons):                # Y / N / C ... like the Windows 95 boxes
+                win.bind("<Key-%s>" % label[0].lower(), lambda ev, v=label: answer(v) if "entry" not in field else None)
+            try:
+                win.bell()
+            except _w95_tk.TclError:
+                pass
+            self.run(win, parent, field.get("entry"))
+            return result["value"], result["text"]
+
+
+    class _W95MessageBox(_W95Base):
+        """messagebox.showinfo / showwarning / showerror / askquestion / askyesno / askokcancel / askyesnocancel /
+        askretrycancel with the Windows 95 look."""
+
+        @staticmethod
+        def _args(args, kwargs):
+            title = kwargs.pop("title", args[0] if len(args) > 0 else "")
+            message = kwargs.pop("message", args[1] if len(args) > 1 else "")
+            return title, message, kwargs
+
+        def _ask(self, native, kind, buttons, args, kwargs):
+            title, message, opts = self._args(args, kwargs)
+            default = opts.get("default")
+            index = 0
+            if default is not None:
+                for i, b in enumerate(buttons):
+                    if b.lower() == str(default).lower():
+                        index = i
+            icon = {"error": "error", "warning": "warning", "info": "info", "question": "question"}.get(
+                str(opts.get("icon", "")).lower(), kind)
+            value, _text = self.box(title, message, icon, buttons, index, opts.get("parent"), opts.get("detail"))
+            if value is None:                                      # no Tk window: the Windows one
+                return getattr(_w95_native_messagebox, native)(title, message, **opts)
+            return value
+
+        def showinfo(self, *args, **kwargs):
+            self._ask("showinfo", "info", ("OK",), args, kwargs)
+            return "ok"
+
+        def showwarning(self, *args, **kwargs):
+            self._ask("showwarning", "warning", ("OK",), args, kwargs)
+            return "ok"
+
+        def showerror(self, *args, **kwargs):
+            self._ask("showerror", "error", ("OK",), args, kwargs)
+            return "ok"
+
+        def askquestion(self, *args, **kwargs):
+            value = self._ask("askquestion", "question", ("Yes", "No"), args, kwargs)
+            return value if value in ("yes", "no") else ("yes" if value == "Yes" else "no")
+
+        def askyesno(self, *args, **kwargs):
+            value = self._ask("askyesno", "question", ("Yes", "No"), args, kwargs)
+            return value if isinstance(value, bool) else value == "Yes"
+
+        def askokcancel(self, *args, **kwargs):
+            value = self._ask("askokcancel", "question", ("OK", "Cancel"), args, kwargs)
+            return value if isinstance(value, bool) else value == "OK"
+
+        def askretrycancel(self, *args, **kwargs):
+            value = self._ask("askretrycancel", "warning", ("Retry", "Cancel"), args, kwargs)
+            return value if isinstance(value, bool) else value == "Retry"
+
+        def askyesnocancel(self, *args, **kwargs):
+            value = self._ask("askyesnocancel", "question", ("Yes", "No", "Cancel"), args, kwargs)
+            if value is None or isinstance(value, bool):
+                return value
+            return None if value == "Cancel" else value == "Yes"
+
+        def __getattr__(self, name):                                # constants (YES, OK, WARNING ...) as in tkinter
+            return getattr(_w95_native_messagebox, name)
+
+
+    _W95_MESSAGEBOX = _W95MessageBox()
+
+
+    def expense_tracker_95():
+        """Expense Tracker (Windows 95 look, no ttk). The expenses stay in expenses.json, as before.
+        Everything is local to this function: nothing changes the names other Bitpack tools use (ttk, messagebox...)."""
+        import os
+        import sys
+        import json
+        import tkinter as tk
+        import tkinter.font as tkfont
+        from datetime import datetime
+        import matplotlib
+        matplotlib.use("Agg")                                   # no pyplot windows or threads left behind
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+        messagebox = _W95_MESSAGEBOX                            # Windows 95 dialogs
+        FACE, SHADOW, LIGHT, NAVY, TEAL, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#008080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+        LIST_FONT = ("Courier New", 9)
+        IS_WINDOWS = os.name == "nt"
+        W95_CUSTOM_TITLE_BAR = True          # False = the normal Windows title bar
+        TITLE = "Expense Tracker"
+        DATA_FILE = "expenses.json"
+        CATEGORY_FILE = "expense_categories.json"             # the categories (created, renamed, deleted in the tool)
+        DEFAULT_CATEGORIES = ["Food", "Transport", "Entertainment", "Housing", "Clothing", "Healthcare", "Education",
+                              "Other"]
+        MAX_NAME = 30
+        COLUMNS = (("Date", 12, "date"), ("Amount ($)", 14, "amount"), ("Category", 15, "category"),
+                   ("Description", 60, "description"))
+        PIE_COLOURS = ["#ff9999", "#66b3ff", "#99ff99", "#ffcc99", "#ff99cc", "#c2c2f0", "#ffb3e6", "#c4e17f"]
+
+        class ExpenseTracker:
+            def __init__(self, root):
+                self.root = root
+                root.title(TITLE)
+                width, height = min(880, root.winfo_screenwidth() - 40), min(600, root.winfo_screenheight() - 80)
+                root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                               max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+                root.minsize(720, 480)
+                root.configure(bg=FACE)
+                root.protocol("WM_DELETE_WINDOW", self.on_closing)
+                self.custom_frame = IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+                self.maximized = False
+                self.normal_geometry = None
+                self.minimizing = False
+                self.expenses = []
+                self.rows = []                                  # list line -> the expense it shows
+                self.sort_key, self.sort_reverse = "date", True
+                self.editing = None                             # the expense being changed (Save replaces it)
+                self.categories = []
+                self.load_data()
+                self.load_categories()
+                self._make_icon()
+                self.create_title_bar()
+                self.create_interface()
+                self.update_display()
+                self.show_summary()
+                if self.custom_frame:                           # the Windows 95 title bar instead of the Windows one
+                    root.configure(bd=2, relief="raised")
+                    root.after(10, self._enable_custom_frame)
+                    root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+
+            # ----- the Windows 95 window frame (as in the other Bitpack tools) ---------------------------------------
+            def _make_icon(self):
+                icon = tk.PhotoImage(master=self.root, width=16, height=16)
+                for x0, y0, x1, y1, colour in ((1, 3, 15, 13, BLACK), (2, 4, 14, 12, "#00a000"), (2, 6, 14, 7, "#006000"),
+                                               (5, 8, 11, 11, "#80e080"), (7, 8, 9, 11, "#006000"), (3, 9, 4, 10, LIGHT),
+                                               (12, 9, 13, 10, LIGHT)):
+                    icon.put(colour, to=(x0, y0, x1, y1))
+                self.icon = icon
+                try:
+                    self.root.iconphoto(True, icon)
+                except tk.TclError:
+                    pass
+
+            def create_title_bar(self):
+                root = self.root
+                marlett = "Marlett" in tkfont.families(root)
+                self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                               else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+                self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+                self._pixel = tk.PhotoImage(master=root, width=1, height=1)
+                if not self.custom_frame:
                     return
-                
-                expense = {
-                    'date': datetime.now().strftime('%Y-%m-%d'),
-                    'amount': amount,
-                    'category': category,
-                    'description': description
-                }
-                
-                self.expenses.append(expense)
+                bar = tk.Frame(root, bg=NAVY, height=20)
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+                bar.pack_propagate(False)
+                icon = tk.Label(bar, image=self.icon, bg=NAVY)
+                icon.pack(side="left", padx=(2, 3))
+                title = tk.Label(bar, text=TITLE, bg=NAVY, fg=LIGHT, font=FONT_B, anchor="w")
+                title.pack(side="left", fill="x", expand=True)
+                self.caption_parts = (bar, title, icon)
+                self.caption_button(bar, "close", self.on_closing).pack(side="right", padx=(2, 2))
+                self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+                self.btn_max.pack(side="right")
+                self.caption_button(bar, "min", self.minimize).pack(side="right")
+                for widget in self.caption_parts:
+                    widget.bind("<ButtonPress-1>", self._caption_press)
+                    widget.bind("<B1-Motion>", self._caption_drag)
+                    widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+                root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+                root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+                root.bind("<Map>", self._on_map)
+
+            def caption_button(self, parent, key, command):
+                return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                 compound="center", width=12, height=10, padx=0, pady=0, bg=FACE, fg=BLACK,
+                                 activebackground=FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+            def _set_caption_active(self, active):
+                for widget in self.caption_parts:
+                    widget.config(bg=NAVY if active else SHADOW)
+                self.caption_parts[1].config(fg=LIGHT if active else FACE)
+
+            def _enable_custom_frame(self):
+                self.root.overrideredirect(True)
+                self.root.update_idletasks()
+                # the taskbar button is set once Tk has finished making the window borderless (set at once, Tk took it
+                # back when it showed the window again, so the program had no button in the taskbar)
+                self.root.after(30, self._apply_taskbar_style)
+
+            def _apply_taskbar_style(self, attempt=0):
+                root = self.root
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                except (ImportError, AttributeError):
+                    return                                      # not Windows
+                try:
+                    hwnd = user32.GetParent(root.winfo_id())
+                    if not hwnd:
+                        raise OSError("the window is not there yet")
+                    style = user32.GetWindowLongW(hwnd, -20)
+                    user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)   # app window, not tool window
+                except Exception:
+                    if attempt < 6:
+                        root.after(100, lambda: self._apply_taskbar_style(attempt + 1))
+                    return
+                root.withdraw()
+                root.after(20, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+                if attempt < 3:
+                    root.after(400, lambda: self._check_taskbar(attempt + 1))
+
+            def _check_taskbar(self, attempt):
+                """Shown again, the window can lose its taskbar button: then the style is set once more."""
+                try:
+                    import ctypes
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.GetParent(self.root.winfo_id())
+                    if hwnd and not user32.GetWindowLongW(hwnd, -20) & 0x00040000:
+                        self._apply_taskbar_style(attempt)
+                except Exception:
+                    pass
+
+            def _on_map(self, event):
+                """Back from the taskbar after Minimize: the Windows 95 bar again (without the Windows one)."""
+                if event.widget is self.root and self.minimizing and self.root.state() == "normal":
+                    self.minimizing = False
+                    self.root.overrideredirect(True)
+                    self.root.after(10, self._apply_taskbar_style)
+
+            def minimize(self):
+                if self.custom_frame:
+                    self.minimizing = True
+                    self.root.overrideredirect(False)          # Tk cannot minimize a window without the Windows frame
+                self.root.iconify()
+
+            def toggle_maximize(self):
+                root = self.root
+                if self.maximized:
+                    root.geometry(self.normal_geometry)
+                else:
+                    self.normal_geometry = root.geometry()
+                    x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                    if IS_WINDOWS:                              # the work area: the Windows taskbar stays visible
+                        try:
+                            import ctypes
+                            from ctypes import wintypes
+                            rect = wintypes.RECT()
+                            ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                            x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                        except Exception:
+                            pass
+                    root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+                self.maximized = not self.maximized
+                if hasattr(self, "btn_max"):
+                    self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+            def _caption_press(self, event):
+                self.root.lift()
+                self._drag = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+
+            def _caption_drag(self, event):
+                if not self.maximized:
+                    self.root.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+            def _grip_press(self, event):
+                self._resize = (event.x_root, event.y_root, self.root.winfo_width(), self.root.winfo_height())
+
+            def _grip_drag(self, event):
+                if not self.maximized:
+                    x0, y0, width, height = self._resize
+                    self.root.geometry("%dx%d" % (max(720, width + event.x_root - x0), max(480, height + event.y_root - y0)))
+
+            def _focus_on_click(self, event):
+                """A window without the Windows title bar does not take the keyboard back by itself once another window
+                had it: a click in a text field gives it the keyboard again."""
+                if isinstance(event.widget, (tk.Entry, tk.Text, tk.Listbox)):
+                    try:
+                        event.widget.focus_force()
+                    except tk.TclError:
+                        pass
+
+            # ----- small helpers -------------------------------------------------------------------------------
+            def button(self, parent, text, command, width=10, default=False):
+                return tk.Button(parent, text=text, command=command, width=width, font=FONT_B if default else FONT,
+                                 bg=FACE, fg=BLACK, activebackground=FACE, relief="raised", bd=2, takefocus=0,
+                                 highlightthickness=1 if default else 0, highlightbackground=BLACK)
+
+            def entry(self, parent, variable, width):
+                return tk.Entry(parent, textvariable=variable, font=FONT, bg=LIGHT, relief="sunken", bd=2,
+                                highlightthickness=0, width=width)
+
+            def group(self, parent, title):
+                return tk.LabelFrame(parent, text=" %s " % title, font=FONT_B, bg=FACE, bd=2, relief="groove")
+
+            # ----- the window --------------------------------------------------------------------------------------
+            def create_interface(self):
+                main = tk.Frame(self.root, bg=FACE)
+                main.pack(fill="both", expand=True, padx=5, pady=5)
+                title = tk.Frame(main, bg=TEAL, bd=2, relief="raised")
+                title.pack(fill="x", pady=(0, 8))
+                tk.Label(title, text="EXPENSE TRACKER", font=("MS Sans Serif", 12, "bold"), bg=TEAL,
+                         fg=LIGHT).pack(pady=5)
+
+                add = self.group(main, "Add New Expense")
+                add.pack(fill="x", pady=(0, 8))
+                form = tk.Frame(add, bg=FACE)
+                form.pack(fill="x", padx=10, pady=8)
+                self.amount_var = tk.StringVar()
+                self.category_var = tk.StringVar(value=self.categories[0])
+                self.desc_var = tk.StringVar()
+                tk.Label(form, text="Amount ($):", font=FONT, bg=FACE).grid(row=0, column=0, sticky="w", padx=(0, 5))
+                amount = self.entry(form, self.amount_var, 14)
+                amount.grid(row=0, column=1, sticky="w", padx=(0, 12))
+                tk.Label(form, text="Category:", font=FONT, bg=FACE).grid(row=0, column=2, sticky="w", padx=(0, 5))
+                pick = tk.Frame(form, bg=FACE)
+                pick.grid(row=0, column=3, sticky="w")
+                menu = tk.OptionMenu(pick, self.category_var, *self.categories)
+                menu.config(font=FONT, bg=LIGHT, activebackground=LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                            width=14, anchor="w")
+                menu["menu"].config(font=FONT, bg=FACE, activebackground=NAVY, activeforeground=LIGHT)
+                menu.pack(side="left")
+                self.category_menu = menu
+                self.button(pick, "Categories...", self.manage_categories, width=11).pack(side="left", padx=(4, 0))
+                tk.Label(form, text="Description:", font=FONT, bg=FACE).grid(row=1, column=0, sticky="w", pady=(8, 0))
+                desc = self.entry(form, self.desc_var, 46)
+                desc.grid(row=1, column=1, columnspan=3, sticky="ew", pady=(8, 0))
+                buttons = tk.Frame(form, bg=FACE)
+                buttons.grid(row=0, column=4, rowspan=2, sticky="ne", padx=(14, 0))
+                self.add_button = self.button(buttons, "Add", self.add_expense, default=True)
+                self.add_button.pack(fill="x")
+                self.cancel_button = self.button(buttons, "Cancel Edit", self.cancel_edit)
+                self.button(buttons, "Clear All", self.clear_all).pack(fill="x", pady=(4, 0))
+                for widget in (amount, desc):
+                    widget.bind("<Return>", lambda e: self.add_expense())
+
+                status = tk.Frame(main, bg=FACE)
+                status.pack(fill="x", side="bottom", pady=(4, 0))       # first, so it always keeps its place
+                if self.custom_frame:                           # the size grip (the Windows frame is gone)
+                    grip = tk.Canvas(status, width=14, height=14, bg=FACE, bd=0, highlightthickness=0,
+                                     cursor="size_nw_se" if IS_WINDOWS else "bottom_right_corner")
+                    for i in (2, 6, 10):
+                        grip.create_line(13, i, i, 13, fill=LIGHT)
+                        grip.create_line(13, i + 1, i + 1, 13, fill=SHADOW)
+                        grip.create_line(13, i + 2, i + 2, 13, fill=SHADOW)
+                    grip.pack(side="right", anchor="se")
+                    grip.bind("<ButtonPress-1>", self._grip_press)
+                    grip.bind("<B1-Motion>", self._grip_drag)
+                self.total_label = tk.Label(status, text="Total: $0.00", font=FONT_B, bg=FACE, relief="sunken", bd=1,
+                                            width=22, anchor="e", padx=4)
+                self.total_label.pack(side="right", padx=1)
+                self.status_label = tk.Label(status, text="Ready", font=FONT, bg=FACE, relief="sunken", bd=1, anchor="w",
+                                             padx=4)
+                self.status_label.pack(side="left", fill="x", expand=True, padx=1)
+
+                body = tk.Frame(main, bg=FACE)
+                body.pack(fill="both", expand=True)
+                history = self.group(body, "Expense History")
+                history.pack(side="left", fill="both", expand=True, padx=(0, 5))
+                holder = tk.Frame(history, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True, padx=5, pady=5)
+                vbar = tk.Scrollbar(holder, orient="vertical")
+                vbar.pack(side="right", fill="y")
+                hbar = tk.Scrollbar(holder, orient="horizontal")
+                hbar.pack(side="bottom", fill="x")
+                self.char_w = tkfont.Font(font=LIST_FONT).measure("0")
+                self.header = tk.Listbox(holder, font=LIST_FONT, height=1, bg=FACE, fg=BLACK, bd=0, highlightthickness=0,
+                                         activestyle="none", selectbackground=FACE, selectforeground=BLACK,
+                                         exportselection=False, cursor="hand2")
+                self.header.pack(side="top", fill="x")
+                self.listbox = tk.Listbox(holder, font=LIST_FONT, bg=LIGHT, fg=BLACK, bd=0, highlightthickness=0,
+                                          selectmode="extended", activestyle="none", selectbackground=NAVY,
+                                          selectforeground=LIGHT, exportselection=False, yscrollcommand=vbar.set,
+                                          width=48)
+                self.listbox.pack(side="top", fill="both", expand=True)
+                vbar.config(command=self.listbox.yview)
+
+                def xview(*args):
+                    self.listbox.xview(*args)
+                    self.header.xview(*args)
+                hbar.config(command=xview)
+                self.listbox.config(xscrollcommand=lambda first, last: (hbar.set(first, last),
+                                                                       self.header.xview_moveto(first)))
+                self.header.bind("<ButtonRelease-1>", self.header_click)
+                self.listbox.bind("<Delete>", lambda e: self.delete_selected())
+                self.listbox.bind("<Double-Button-1>", lambda e: self.edit_expense())
+                self.listbox.bind("<Button-3>", self.context_menu)
+
+                stats = self.group(body, "Statistics")
+                stats.pack(side="right", fill="both", expand=True)
+                row = tk.Frame(stats, bg=FACE)
+                row.pack(fill="x", padx=5, pady=5)
+                self.button(row, "Summary", self.show_summary).pack(side="left")
+                self.button(row, "Pie Chart", self.show_pie_chart).pack(side="left", padx=4)
+                self.button(row, "Bar Chart", self.show_bar_chart).pack(side="left")
+                self.chart_frame = tk.Frame(stats, bg=FACE, bd=2, relief="sunken")
+                self.chart_frame.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+
+            def status(self, text):
+                self.status_label.config(text=text)
+
+            # ----- the list ----------------------------------------------------------------------------------------
+            def _line(self, values):
+                parts = []
+                for (title, width, key), value in zip(COLUMNS, values):
+                    text = str(value)
+                    if len(text) > width - 1:
+                        text = text[:width - 2] + "~"
+                    parts.append(text.rjust(width - 2) + "  " if key == "amount" else text.ljust(width))
+                return " " + "".join(parts)
+
+            def draw_header(self):
+                titles = [title + ((" v" if self.sort_reverse else " ^") if key == self.sort_key else "")
+                          for title, _w, key in COLUMNS]
+                self.header.delete(0, "end")
+                self.header.insert("end", self._line(titles))
+
+            def header_click(self, event):
+                """A click on a column title sorts by it; a second click reverses the order."""
+                self.header.selection_clear(0, "end")
+                total = len(self._line([""] * len(COLUMNS))) * self.char_w
+                x = event.x + self.header.xview()[0] * total
+                position = self.char_w
+                for _title, width, key in COLUMNS:
+                    if position <= x < position + width * self.char_w:
+                        self.sort_reverse = not self.sort_reverse if self.sort_key == key else key in ("date", "amount")
+                        self.sort_key = key
+                        self.update_display()
+                        return
+                    position += width * self.char_w
+
+            def update_display(self):
+                key = self.sort_key
+                self.rows = sorted(self.expenses, reverse=self.sort_reverse,
+                                   key=lambda e: e[key] if key == "amount" else str(e[key]).lower())
+                self.draw_header()
+                self.listbox.delete(0, "end")
+                for e in self.rows:
+                    self.listbox.insert("end", self._line((e["date"], "%.2f" % e["amount"], e["category"],
+                                                           e["description"])))
+                    if e is self.editing:
+                        self.listbox.itemconfig("end", fg=SHADOW)
+                self.total_label.config(text="Total: $%.2f" % sum(e["amount"] for e in self.expenses))
+
+            def selected(self):
+                return [self.rows[i] for i in self.listbox.curselection() if i < len(self.rows)]
+
+            def context_menu(self, event):
+                index = self.listbox.nearest(event.y)
+                if index >= 0 and index not in self.listbox.curselection():
+                    self.listbox.selection_clear(0, "end")
+                    self.listbox.selection_set(index)
+                menu = tk.Menu(self.root, tearoff=0, font=FONT, bg=FACE, fg=BLACK, activebackground=NAVY,
+                               activeforeground=LIGHT)
+                menu.add_command(label="Edit...", command=self.edit_expense)
+                menu.add_command(label="Delete", command=self.delete_selected)
+                try:
+                    menu.tk_popup(event.x_root, event.y_root)
+                finally:
+                    menu.grab_release()
+
+            # ----- adding, changing, deleting ------------------------------------------------------------------------
+            def add_expense(self):
+                text = self.amount_var.get().strip().replace(",", ".")
+                try:
+                    amount = round(float(text), 2)
+                except ValueError:
+                    messagebox.showerror("Error", "Please enter a valid amount!", parent=self.root)
+                    return
+                if amount <= 0:
+                    messagebox.showerror("Error", "Amount must be greater than 0!", parent=self.root)
+                    return
+                category = self.category_var.get()
+                description = self.desc_var.get().strip() or "No description"
+                if self.editing is not None:                  # Save: the same expense, with its own date
+                    self.editing.update(amount=amount, category=category, description=description)
+                    self.status("Changed: $%.2f - %s" % (amount, category))
+                    self.cancel_edit(quiet=True)
+                else:
+                    self.expenses.append({"date": datetime.now().strftime("%Y-%m-%d"), "amount": amount,
+                                          "category": category, "description": description})
+                    self.status("Added: $%.2f - %s" % (amount, category))
+                    self.amount_var.set("")
+                    self.desc_var.set("")
                 self.save_data()
                 self.update_display()
-                
-                # Clear form
-                self.amount_var.set('')
-                self.desc_var.set('')
-                
-                self.status_label.config(text=f"Added: ${amount:.2f} - {category}")
-                
-            except ValueError:
-                messagebox.showerror("Error", "Please enter a valid amount!")
-                
-        def delete_selected(self, event=None):
-            """Delete selected expense"""
-            selected = self.tree.selection()
-            if selected:
-                if messagebox.askyesno("Confirm", "Are you sure you want to delete this expense?"):
-                    item = self.tree.item(selected[0])
-                    date_str = item['values'][0]
-                    amount = float(item['values'][1])
-                    
-                    # Find and delete from list
-                    for i, expense in enumerate(self.expenses):
-                        if (expense['date'] == date_str and 
-                            expense['amount'] == amount):
-                            del self.expenses[i]
-                            break
-                    
+                self.refresh_chart()
+
+            def edit_expense(self):
+                """Double-click (or right-click > Edit): the expense goes into the form; Save changes it in place."""
+                rows = self.selected()
+                if not rows:
+                    return
+                self.editing = rows[0]
+                self.amount_var.set("%.2f" % self.editing["amount"])
+                self.category_var.set(self.editing["category"])
+                self.desc_var.set("" if self.editing["description"] == "No description" else self.editing["description"])
+                self.add_button.config(text="Save")
+                self.cancel_button.pack(fill="x", pady=(4, 0), after=self.add_button)
+                self.update_display()
+                self.status("Editing the expense of %s - change it and press Save" % self.editing["date"])
+
+            def cancel_edit(self, quiet=False):
+                self.editing = None
+                self.amount_var.set("")
+                self.desc_var.set("")
+                self.add_button.config(text="Add")
+                self.cancel_button.pack_forget()
+                if not quiet:
+                    self.update_display()
+                    self.status("Edit cancelled")
+
+            def delete_selected(self):
+                rows = self.selected()
+                if not rows:
+                    return
+                text = "this expense" if len(rows) == 1 else "these %d expenses" % len(rows)
+                if not messagebox.askyesno("Confirm", "Are you sure you want to delete %s?" % text, parent=self.root):
+                    return
+                for row in rows:                                  # exactly the selected ones (not by date and amount)
+                    self.expenses = [e for e in self.expenses if e is not row]
+                    if row is self.editing:
+                        self.cancel_edit(quiet=True)
+                self.save_data()
+                self.update_display()
+                self.refresh_chart()
+                self.status("%d expense(s) deleted" % len(rows))
+
+            def clear_all(self):
+                if not self.expenses:
+                    return
+                if messagebox.askyesno("Warning", "Are you sure you want to delete ALL expenses?\n"
+                                       "This action cannot be undone!", icon="warning", parent=self.root):
+                    self.expenses = []
+                    self.cancel_edit(quiet=True)
                     self.save_data()
                     self.update_display()
-                    self.status_label.config(text="Expense deleted")
-        
-        def clear_all(self):
-            """Delete all expenses"""
-            if messagebox.askyesno("Warning", "Are you sure you want to delete ALL expenses?\nThis action cannot be undone!"):
-                self.expenses.clear()
-                self.save_data()
+                    self.refresh_chart()
+                    self.status("All expenses cleared")
+
+            # ----- categories ----------------------------------------------------------------------------------------
+            def load_categories(self):
+                """The saved list (or the usual eight the first time); a category still used by an expense is kept."""
+                names = []
+                try:
+                    if os.path.exists(CATEGORY_FILE):
+                        with open(CATEGORY_FILE, "r", encoding="utf-8") as fh:
+                            names = [str(n).strip() for n in json.load(fh) if str(n).strip()]
+                except (OSError, ValueError, TypeError):
+                    names = []
+                names = names or list(DEFAULT_CATEGORIES)
+                for e in self.expenses:
+                    if e["category"].lower() not in [n.lower() for n in names]:
+                        names.append(e["category"])
+                seen, self.categories = set(), []
+                for name in names:
+                    if name.lower() not in seen:
+                        seen.add(name.lower())
+                        self.categories.append(name)
+
+            def save_categories(self):
+                try:
+                    with open(CATEGORY_FILE, "w", encoding="utf-8") as fh:
+                        json.dump(self.categories, fh, ensure_ascii=False, indent=2)
+                except OSError as exc:
+                    messagebox.showerror("Error", "Could not save the categories: %s" % exc, parent=self.root)
+
+            def category_problem(self, name, current=None):
+                """None if the name can be used, otherwise the reason."""
+                if not name:
+                    return "The name cannot be empty."
+                if len(name) > MAX_NAME:
+                    return "The name can have at most %d characters." % MAX_NAME
+                for other in self.categories:
+                    if other.lower() == name.lower() and other != current:
+                        return "There is already a category named '%s'." % other
+                return None
+
+            def usage(self, name):
+                used = [e for e in self.expenses if e["category"] == name]
+                return len(used), sum(e["amount"] for e in used)
+
+            def add_category(self, name):
+                self.categories.append(name)
+                self.save_categories()
+                self.after_category_change()
+
+            def rename_category(self, old, new):
+                """The new name everywhere: the list, every expense of the category and the form."""
+                self.categories[self.categories.index(old)] = new
+                changed = 0
+                for e in self.expenses:
+                    if e["category"] == old:
+                        e["category"] = new
+                        changed += 1
+                if self.category_var.get() == old:
+                    self.category_var.set(new)
+                self.save_categories()
+                if changed:
+                    self.save_data()
+                self.after_category_change()
+                return changed
+
+            def delete_category(self, name, move_to=None):
+                """Takes the category away; its expenses go to move_to (they are never deleted with it)."""
+                moved = 0
+                if move_to:
+                    for e in self.expenses:
+                        if e["category"] == name:
+                            e["category"] = move_to
+                            moved += 1
+                self.categories.remove(name)
+                if self.category_var.get() == name:
+                    self.category_var.set(move_to or self.categories[0])
+                self.save_categories()
+                if moved:
+                    self.save_data()
+                self.after_category_change()
+                return moved
+
+            def move_category(self, name, step):
+                i = self.categories.index(name)
+                j = max(0, min(len(self.categories) - 1, i + step))
+                self.categories.insert(j, self.categories.pop(i))
+                self.save_categories()
+                self.after_category_change()
+
+            def after_category_change(self):
+                menu = self.category_menu["menu"]
+                menu.delete(0, "end")
+                for name in self.categories:
+                    menu.add_command(label=name, command=tk._setit(self.category_var, name))
+                if self.category_var.get() not in self.categories:
+                    self.category_var.set(self.categories[0])
                 self.update_display()
-                self.status_label.config(text="All expenses cleared")
-        
-        def edit_expense(self, event=None):
-            """Allow editing an expense"""
-            selected = self.tree.selection()
-            if selected:
-                item = self.tree.item(selected[0])
-                values = item['values']
-                
-                # Populate form with existing data
-                self.amount_var.set(str(values[1]))
-                self.category_var.set(values[2])
-                self.desc_var.set(values[3])
-                
-                # Delete old expense
-                self.delete_selected()
-                
-        def update_display(self):
-            """Update display with current data"""
-            # Clear treeview
-            for item in self.tree.get_children():
-                self.tree.delete(item)
-                
-            # Add expenses
-            total = 0
-            for expense in sorted(self.expenses, key=lambda x: x['date'], reverse=True):
-                self.tree.insert('', 'end', values=(
-                    expense['date'],
-                    f"{expense['amount']:.2f}",
-                    expense['category'],
-                    expense['description']
-                ))
-                total += expense['amount']
-                
-            # Update total
-            self.total_label.config(text=f"Total: ${total:.2f}")
-            
-        def show_summary(self):
-            """Show summary statistics"""
-            # Clear chart frame
-            for widget in self.chart_frame.winfo_children():
-                widget.destroy()
-                
-            if not self.expenses:
-                no_data_label = tk.Label(self.chart_frame, text="No expenses to display\n\nAdd some expenses to see statistics!", 
-                                       font=('MS Sans Serif', 10),
-                                       bg='#c0c0c0', fg='#666666',
-                                       justify='center')
-                no_data_label.pack(expand=True)
-                return
-            
-            # Calculate statistics
-            total = sum(expense['amount'] for expense in self.expenses)
-            count = len(self.expenses)
-            avg = total / count if count > 0 else 0
-            
-            category_totals = {}
-            for expense in self.expenses:
-                cat = expense['category']
-                category_totals[cat] = category_totals.get(cat, 0) + expense['amount']
-            
-            top_category = max(category_totals.items(), key=lambda x: x[1]) if category_totals else ("None", 0)
-            
-            # Create summary display
-            summary_frame = tk.Frame(self.chart_frame, bg='#c0c0c0', relief='sunken', bd=1)
-            summary_frame.pack(fill='both', expand=True, padx=10, pady=10)
-            
-            tk.Label(summary_frame, text="EXPENSE SUMMARY", 
-                    font=('MS Sans Serif', 10, 'bold'),
-                    bg='#c0c0c0').pack(pady=(10, 20))
-            
-            # Statistics
-            stats_text = f"""Total Expenses: ${total:.2f}
-    Number of Transactions: {count}
-    Average per Transaction: ${avg:.2f}
-    Top Category: {top_category[0]} (${top_category[1]:.2f})
+                self.refresh_chart()
 
-    Categories Breakdown:"""
-            
-            tk.Label(summary_frame, text=stats_text, 
-                    font=('MS Sans Serif', 9),
-                    bg='#c0c0c0', justify='left').pack(pady=(0, 10))
-            
-            # Category breakdown
-            for category, amount in sorted(category_totals.items(), key=lambda x: x[1], reverse=True):
-                percentage = (amount / total) * 100 if total > 0 else 0
-                category_text = f"{category}: ${amount:.2f} ({percentage:.1f}%)"
-                tk.Label(summary_frame, text=category_text, 
-                        font=('MS Sans Serif', 8),
-                        bg='#c0c0c0', fg='#333333').pack(anchor='w', padx=20)
-            
-            self.status_label.config(text="Summary displayed")
-            
-        def show_pie_chart(self):
-            """Display pie chart by categories"""
-            if not self.expenses:
-                messagebox.showinfo("Info", "No expenses to display!")
-                return
-                
-            # Calculate totals by category
-            category_totals = {}
-            for expense in self.expenses:
-                cat = expense['category']
-                category_totals[cat] = category_totals.get(cat, 0) + expense['amount']
-            
-            # Clear chart frame
-            for widget in self.chart_frame.winfo_children():
-                widget.destroy()
-                
-            # Create chart
-            fig, ax = plt.subplots(figsize=(6, 4))
-            fig.patch.set_facecolor('#c0c0c0')
-            
-            colors = ['#ff9999', '#66b3ff', '#99ff99', '#ffcc99', 
-                     '#ff99cc', '#c2c2f0', '#ffb3e6', '#c4e17f']
-            
-            wedges, texts, autotexts = ax.pie(category_totals.values(), 
-                                             labels=category_totals.keys(),
-                                             autopct='%1.1f%%',
-                                             colors=colors[:len(category_totals)],
-                                             startangle=90)
-            
-            ax.set_title('Expenses by Category', fontsize=12, fontweight='bold')
-            
-            # Integrate into tkinter
-            canvas = FigureCanvasTkAgg(fig, self.chart_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill='both', expand=True)
-            
-            self.status_label.config(text="Pie chart displayed")
-            
-        def show_bar_chart(self):
-            """Display bar chart by categories"""
-            if not self.expenses:
-                messagebox.showinfo("Info", "No expenses to display!")
-                return
-                
-            # Calculate totals by category
-            category_totals = {}
-            for expense in self.expenses:
-                cat = expense['category']
-                category_totals[cat] = category_totals.get(cat, 0) + expense['amount']
-            
-            # Clear chart frame
-            for widget in self.chart_frame.winfo_children():
-                widget.destroy()
-                
-            # Create chart
-            fig, ax = plt.subplots(figsize=(6, 4))
-            fig.patch.set_facecolor('#c0c0c0')
-            
-            categories = list(category_totals.keys())
-            amounts = list(category_totals.values())
-            
-            bars = ax.bar(categories, amounts, color='#4CAF50', alpha=0.8)
-            ax.set_title('Expenses by Category', fontsize=12, fontweight='bold')
-            ax.set_ylabel('Amount ($)')
-            ax.tick_params(axis='x', rotation=45)
-            
-            # Add values on bars
-            for bar, amount in zip(bars, amounts):
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2., height,
-                       f'${amount:.0f}',
-                       ha='center', va='bottom', fontsize=9)
-            
-            plt.tight_layout()
-            
-            # Integrate into tkinter
-            canvas = FigureCanvasTkAgg(fig, self.chart_frame)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill='both', expand=True)
-            
-            self.status_label.config(text="Bar chart displayed")
-            
-        def save_data(self):
-            """Save data to JSON file"""
-            try:
-                with open('expenses.json', 'w', encoding='utf-8') as f:
-                    json.dump(self.expenses, f, ensure_ascii=False, indent=2)
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not save data: {e}")
-                
-        def load_data(self):
-            """Load data from JSON file"""
-            try:
-                if os.path.exists('expenses.json'):
-                    with open('expenses.json', 'r', encoding='utf-8') as f:
-                        self.expenses = json.load(f)
-            except Exception as e:
-                messagebox.showwarning("Warning", f"Could not load data: {e}")
-                self.expenses = []
+            def ask_name(self, parent, title, text, initial=""):
+                """A Windows 95 box with a text field (the same box as the messages). -> the name, or None."""
+                value, typed = _W95_MESSAGEBOX.box(title, text, "question", ("OK", "Cancel"), 0, parent, entry=initial)
+                return typed.strip() if value == "OK" and typed is not None else None
 
-    def main():
-        root_exps = tk.Tk()
-        
-        # Windows 95 configurations
-        root_exps.configure(bg='#c0c0c0')
-        
-        # Try to set icon (optional)
+            def manage_categories(self):
+                """Categories: add, rename, delete (its expenses move to another category) and order them."""
+                box = _W95_MESSAGEBOX
+                win = box.window(self.root, "Categories", lambda: win.destroy())
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=10, pady=(10, 6))
+                left = tk.Frame(body, bg=FACE)
+                left.pack(side="left", fill="both", expand=True)
+                tk.Label(left, text=" %-22s%9s %12s" % ("Category", "Expenses", "Total ($)"), font=LIST_FONT, bg=FACE,
+                         anchor="w").pack(fill="x")
+                holder = tk.Frame(left, bg=LIGHT, bd=2, relief="sunken")
+                holder.pack(fill="both", expand=True)
+                scroll = tk.Scrollbar(holder, orient="vertical")
+                scroll.pack(side="right", fill="y")
+                names = tk.Listbox(holder, font=LIST_FONT, width=46, height=12, bd=0, highlightthickness=0, bg=LIGHT,
+                                   selectbackground=NAVY, selectforeground=LIGHT, activestyle="none",
+                                   exportselection=False, yscrollcommand=scroll.set)
+                names.pack(side="left", fill="both", expand=True)
+                scroll.config(command=names.yview)
+                info = tk.Label(left, text="", font=FONT, bg=FACE, fg=SHADOW, anchor="w", justify="left")
+                info.pack(fill="x", pady=(4, 0))
+                side = tk.Frame(body, bg=FACE)
+                side.pack(side="left", fill="y", padx=(10, 0))
+
+                def fill(select=None):
+                    names.delete(0, "end")
+                    for name in self.categories:
+                        count, total = self.usage(name)
+                        shown = name if len(name) <= 21 else name[:20] + "~"
+                        names.insert("end", " %-22s%9d %12.2f" % (shown, count, total))
+                    if select in self.categories:
+                        i = self.categories.index(select)
+                        names.selection_set(i)
+                        names.see(i)
+                    info.config(text="%d categories. A deleted category's expenses move to the category you choose."
+                                % len(self.categories))
+
+                def current():
+                    picked = names.curselection()
+                    return self.categories[picked[0]] if picked else None
+
+                def need(name, what):
+                    if name is None:
+                        box.showinfo("Categories", "Select a category to %s." % what, parent=win)
+                    return name is not None
+
+                def add():
+                    name = self.ask_name(win, "New Category", "Name of the new category:")
+                    while name is not None:
+                        problem = self.category_problem(name)
+                        if problem is None:
+                            self.add_category(name)
+                            self.status("Category added: %s" % name)
+                            fill(name)
+                            return
+                        box.showwarning("New Category", problem, parent=win)
+                        name = self.ask_name(win, "New Category", "Name of the new category:", name)
+
+                def rename():
+                    old = current()
+                    if not need(old, "rename"):
+                        return
+                    name = self.ask_name(win, "Rename Category", "New name for '%s':" % old, old)
+                    while name is not None and name != old:
+                        problem = self.category_problem(name, current=old)
+                        if problem is None:
+                            changed = self.rename_category(old, name)
+                            self.status("Category '%s' renamed to '%s'%s" % (old, name, (" - %d expense(s) changed" % changed)
+                                                                               if changed else ""))
+                            fill(name)
+                            return
+                        box.showwarning("Rename Category", problem, parent=win)
+                        name = self.ask_name(win, "Rename Category", "New name for '%s':" % old, name)
+
+                def delete():
+                    name = current()
+                    if not need(name, "delete"):
+                        return
+                    if len(self.categories) == 1:
+                        box.showwarning("Delete Category", "There must be at least one category.", parent=win)
+                        return
+                    count, total = self.usage(name)
+                    if count == 0:
+                        if box.askyesno("Delete Category", "Delete the category '%s'?" % name, parent=win):
+                            self.delete_category(name)
+                            self.status("Category deleted: %s" % name)
+                            fill()
+                        return
+                    target = self.ask_move_to(win, name, count, total)
+                    if target:
+                        self.delete_category(name, move_to=target)
+                        self.status("Category '%s' deleted - %d expense(s) moved to '%s'" % (name, count, target))
+                        fill(target)
+
+                def move(step):
+                    name = current()
+                    if need(name, "move"):
+                        self.move_category(name, step)
+                        fill(name)
+
+                for text, command in (("Add...", add), ("Rename...", rename), ("Delete...", delete), (None, None),
+                                      ("Move Up", lambda: move(-1)), ("Move Down", lambda: move(1))):
+                    if text is None:
+                        tk.Frame(side, bg=FACE, height=10).pack()
+                        continue
+                    self.button(side, text, command, width=11).pack(fill="x", pady=(0, 3))
+                row = tk.Frame(win, bg=FACE)
+                row.pack(fill="x", padx=10, pady=(0, 10))
+                self.button(row, "Close", win.destroy, width=10, default=True).pack(side="right")
+                names.bind("<Double-Button-1>", lambda e: rename())
+                names.bind("<Delete>", lambda e: delete())
+                names.bind("<Insert>", lambda e: add())
+                win.bind("<Escape>", lambda e: win.destroy())
+                fill(self.category_var.get())
+                names.focus_set()
+                box.run(win, self.root, names)
+
+            def ask_move_to(self, parent, name, count, total):
+                """Where the expenses of a category that is being deleted go. -> the category, or None (Cancel)."""
+                box = _W95_MESSAGEBOX
+                others = [c for c in self.categories if c != name]
+                result = {"value": None}
+                win = box.window(parent, "Delete Category", lambda: win.destroy())
+                body = tk.Frame(win, bg=FACE)
+                body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+                box.icon(body, "warning").pack(side="left", anchor="n", padx=(0, 12))
+                right = tk.Frame(body, bg=FACE)
+                right.pack(side="left", fill="both", expand=True)
+                tk.Label(right, text="The category '%s' is used by %d expense(s) ($%.2f).\nThe expenses are kept: "
+                         "choose the category they move to." % (name, count, total), font=FONT, bg=FACE,
+                         justify="left", wraplength=360).pack(anchor="w")
+                line = tk.Frame(right, bg=FACE)
+                line.pack(anchor="w", pady=(10, 0))
+                tk.Label(line, text="Move them to:", font=FONT, bg=FACE).pack(side="left")
+                target = tk.StringVar(value="Other" if "Other" in others else others[0])
+                menu = tk.OptionMenu(line, target, *others)
+                menu.config(font=FONT, bg=LIGHT, activebackground=LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                            width=18, anchor="w")
+                menu["menu"].config(font=FONT, bg=FACE, activebackground=NAVY, activeforeground=LIGHT)
+                menu.pack(side="left", padx=(6, 0))
+
+                def ok():
+                    result["value"] = target.get()
+                    win.destroy()
+                row = tk.Frame(win, bg=FACE)
+                row.pack(pady=(8, 12))
+                self.button(row, "Move and Delete", ok, width=15, default=True).pack(side="left", padx=4)
+                self.button(row, "Cancel", win.destroy, width=10).pack(side="left", padx=4)
+                win.bind("<Return>", lambda e: ok())
+                win.bind("<Escape>", lambda e: win.destroy())
+                box.run(win, parent)
+                return result["value"]
+
+            # ----- statistics ----------------------------------------------------------------------------------------
+            def totals(self):
+                result = {}
+                for e in self.expenses:
+                    result[e["category"]] = result.get(e["category"], 0) + e["amount"]
+                return dict(sorted(result.items(), key=lambda item: item[1], reverse=True))
+
+            def clear_chart(self):
+                for widget in self.chart_frame.winfo_children():
+                    widget.destroy()
+
+            def refresh_chart(self):
+                {"summary": self.show_summary, "pie": self.show_pie_chart,
+                 "bar": self.show_bar_chart}.get(getattr(self, "chart", "summary"), self.show_summary)(quiet=True)
+
+            def show_summary(self, quiet=False):
+                self.chart = "summary"
+                self.clear_chart()
+                if not self.expenses:
+                    tk.Label(self.chart_frame, text="No expenses to display\n\nAdd some expenses to see statistics!",
+                             font=("MS Sans Serif", 10), bg=FACE, fg=SHADOW, justify="center").pack(expand=True)
+                    return
+                total = sum(e["amount"] for e in self.expenses)
+                count = len(self.expenses)
+                totals = self.totals()
+                top = next(iter(totals.items()))
+                box = tk.Frame(self.chart_frame, bg=FACE)
+                box.pack(fill="both", expand=True, padx=10, pady=10)
+                tk.Label(box, text="EXPENSE SUMMARY", font=("MS Sans Serif", 10, "bold"), bg=FACE).pack(pady=(4, 12))
+                lines = ["Total Expenses: $%.2f" % total, "Number of Transactions: %d" % count,
+                         "Average per Transaction: $%.2f" % (total / count), "Top Category: %s ($%.2f)" % top, "",
+                         "Categories Breakdown:"]
+                tk.Label(box, text="\n".join(lines), font=FONT, bg=FACE, justify="left").pack(anchor="w")
+                for category, amount in totals.items():
+                    tk.Label(box, text="%s: $%.2f (%.1f%%)" % (category, amount, amount * 100.0 / total), font=FONT,
+                             bg=FACE, fg="#333333").pack(anchor="w", padx=16)
+                if not quiet:
+                    self.status("Summary displayed")
+
+            def _figure(self, title):
+                fig = Figure(figsize=(5, 4), dpi=90, facecolor=FACE)
+                ax = fig.add_subplot(111)
+                ax.set_title(title, fontsize=11, fontweight="bold")
+                return fig, ax
+
+            def _show_figure(self, fig):
+                self.clear_chart()
+                canvas = FigureCanvasTkAgg(fig, self.chart_frame)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill="both", expand=True)
+
+            def show_pie_chart(self, quiet=False):
+                if not self.expenses:
+                    if quiet:
+                        return self.show_summary(quiet=True)
+                    messagebox.showinfo("Info", "No expenses to display!", parent=self.root)
+                    return
+                self.chart = "pie"
+                totals = self.totals()
+                fig, ax = self._figure("Expenses by Category")
+                ax.pie(list(totals.values()), labels=list(totals.keys()), autopct="%1.1f%%", startangle=90,
+                       colors=PIE_COLOURS[:len(totals)], textprops={"fontsize": 8})
+                ax.axis("equal")
+                self._show_figure(fig)
+                if not quiet:
+                    self.status("Pie chart displayed")
+
+            def show_bar_chart(self, quiet=False):
+                if not self.expenses:
+                    if quiet:
+                        return self.show_summary(quiet=True)
+                    messagebox.showinfo("Info", "No expenses to display!", parent=self.root)
+                    return
+                self.chart = "bar"
+                totals = self.totals()
+                fig, ax = self._figure("Expenses by Category")
+                bars = ax.bar(list(totals.keys()), list(totals.values()), color="#4CAF50", alpha=0.85)
+                ax.set_ylabel("Amount ($)")
+                ax.tick_params(axis="x", rotation=45, labelsize=8)
+                for bar, amount in zip(bars, totals.values()):
+                    ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height(), "$%.0f" % amount, ha="center",
+                            va="bottom", fontsize=8)
+                fig.tight_layout()
+                self._show_figure(fig)
+                if not quiet:
+                    self.status("Bar chart displayed")
+
+            # ----- file ----------------------------------------------------------------------------------------------
+            def save_data(self):
+                try:
+                    with open(DATA_FILE, "w", encoding="utf-8") as fh:
+                        json.dump(self.expenses, fh, ensure_ascii=False, indent=2)
+                except OSError as exc:
+                    messagebox.showerror("Error", "Could not save data: %s" % exc, parent=self.root)
+
+            def load_data(self):
+                if not os.path.exists(DATA_FILE):
+                    return
+                try:
+                    with open(DATA_FILE, "r", encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    for e in data:                                # a damaged line no longer stops the whole list
+                        try:
+                            self.expenses.append({"date": str(e.get("date", "")), "amount": float(e.get("amount", 0)),
+                                                  "category": str(e.get("category", "Other")),
+                                                  "description": str(e.get("description", "")) or "No description"})
+                        except (TypeError, ValueError, AttributeError):
+                            continue
+                except (OSError, ValueError) as exc:
+                    self.root.after(300, lambda: messagebox.showwarning("Warning", "Could not load data: %s" % exc,
+                                                                        parent=self.root))
+
+            def on_closing(self):
+                self.save_data()
+                self.root.destroy()
+
+        root = tk.Tk()
         try:
-            root_exps.iconbitmap('money.ico')
-        except:
+            root.iconbitmap("money.ico")
+        except tk.TclError:
             pass
-        
-        app = ExpenseTracker(root_exps)
-        
-        # Windows 95 style welcome message
-        messagebox.showinfo("Expense Tracker", 
-                           "Welcome to Expense Tracker!\n\n" +
-                           "Features:\n" +
-                           "• Add expenses with categories\n" +
-                           "• View interactive charts\n" +
-                           "• Edit: double-click on expense\n" +
-                           "• Delete: select and press Delete\n\n" +
-                           "All data is saved automatically!")
-        
-        try:
-            root_exps.mainloop()
-        except KeyboardInterrupt:
-            app.on_closing()
-        finally:
-            # Asigură-te că procesul se închide complet
-            try:
-                plt.close('all')
-                sys.exit(0)
-            except:
-                os._exit(0)
+        ExpenseTracker(root)
+        root.after(400, lambda: messagebox.showinfo(
+            "Expense Tracker", "Welcome to Expense Tracker!\n\nFeatures:\n- Add expenses with categories\n"
+            "- View charts\n- Edit: double-click an expense\n- Delete: select and press Delete\n"
+            "- Sort: click a column title\n- Categories...: add, rename or delete categories\n\nAll data is saved automatically!", parent=root))
+        root.mainloop()
+        sys.exit(0)                                               # as before: the tool ends Bitpack when it closes
 
-    if __name__ == "__main__":
-        main()
-        
+    expense_tracker_95()
+    
 if scrpVar == 777666014:
     from datetime import datetime
     bitpack95_validation("777666014")
@@ -102362,7 +105901,7 @@ if muapdash == 777666092:
             quickfinder:file quizmaker:quizmaker quiz:test recovery:tunnel regextest:regextest renamemanager:renamer
             repbld:repbld safe:checker screenrec:screenrec script:agent shell:integrator shiftpl:shiftpl sql:comp sql:designer
             sql:diagram sql:executor sql:explorer sql:sql sql:querycreator sqlmanagementstudio:sqlmanagementstudio
-            sticky:notes stprcd:stprcd system:realtime taskmanager:terminator terminal:terminal textreplace:textfind
+            sticky:notes stprcd:stprcd system:realtime taskmanager:terminator terminal:terminal textreplace:textfind ticket:system
             timeline:file timetracker:timetracker todo:manager topology:network traffic:network commander:total
             universal:converter user:nopass versioncontrol:versioncontrol vided:vided whiteboard:presentation
             whoisonmynetwork:whoisonmynetwork winreg:reg zipmanager:zipmngr zippass:wordsmith""".split()]
@@ -253818,3 +257357,3911 @@ if shiftplvar == 333432:
 
     if __name__ == "__main__":
         shift_planner_95_main()
+
+if tichetvar == 8796:
+    bitpack95_validation("8796")
+    
+# ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # WINDOWS 95 DIALOGS - they take the place of the Windows message boxes, input boxes and colour dialog
+    # (messagebox / simpledialog / colorchooser: the same functions, arguments and returned values), and
+    # W95Toplevel gives the other windows of the tool the Windows 95 title bar.
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import tkinter as _w95_tk
+    import tkinter.font as _w95_tkfont
+    import tkinter.messagebox as _w95_native_messagebox
+    import tkinter.simpledialog as _w95_native_simpledialog
+    import tkinter.colorchooser as _w95_native_colorchooser
+
+
+    class _W95Base(object):
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+
+        @staticmethod
+        def parent_of(parent):
+            if parent is not None:
+                try:
+                    return parent.winfo_toplevel()
+                except (_w95_tk.TclError, AttributeError):
+                    pass
+            root = _w95_tk._default_root
+            if root is None:
+                return None
+            try:
+                focus = root.focus_get()
+                if focus is not None:
+                    return focus.winfo_toplevel()
+            except (KeyError, _w95_tk.TclError):
+                pass
+            return root
+
+        def window(self, parent, title, on_close):
+            win = _w95_tk.Toplevel(parent)
+            win.withdraw()
+            win.overrideredirect(True)
+            win.configure(bg=self.FACE, bd=2, relief="raised")
+            try:
+                win.transient(parent)
+            except _w95_tk.TclError:
+                pass
+            win.attributes("-topmost", True)
+            bar = _w95_tk.Frame(win, bg=self.NAVY, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            label = _w95_tk.Label(bar, text=title or "", bg=self.NAVY, fg=self.LIGHT, font=self.FONT_B, anchor="w")
+            label.pack(side="left", padx=4, fill="x", expand=True)
+            win._w95_pixel = _w95_tk.PhotoImage(master=win, width=1, height=1)
+            marlett = "Marlett" in _w95_tkfont.families(win)
+            _w95_tk.Button(bar, text="r" if marlett else "X", font=("Marlett", 7) if marlett else self.FONT_B,
+                           image=win._w95_pixel, compound="center", width=12, height=10, padx=0, pady=0, bg=self.FACE,
+                           fg=self.BLACK, bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                           activebackground=self.FACE, command=on_close).pack(side="right", padx=2)
+
+            def press(event):
+                win._w95_drag = (event.x_root - win.winfo_x(), event.y_root - win.winfo_y())
+
+            def drag(event):
+                win.geometry("+%d+%d" % (event.x_root - win._w95_drag[0], event.y_root - win._w95_drag[1]))
+            for widget in (bar, label):
+                widget.bind("<ButtonPress-1>", press)
+                widget.bind("<B1-Motion>", drag)
+            return win
+
+        def icon(self, master, kind):
+            c = _w95_tk.Canvas(master, width=34, height=34, bg=self.FACE, highlightthickness=0)
+            if kind == "error":
+                c.create_oval(2, 2, 32, 32, fill="#ff0000", outline="#800000")
+                c.create_line(11, 11, 23, 23, fill="white", width=3)
+                c.create_line(23, 11, 11, 23, fill="white", width=3)
+            elif kind == "warning":
+                c.create_polygon(17, 2, 32, 30, 2, 30, fill="#ffff00", outline=self.BLACK)
+                c.create_text(17, 20, text="!", fill=self.BLACK, font=("Times New Roman", 15, "bold"))
+            else:
+                c.create_oval(2, 2, 32, 32, fill=self.LIGHT, outline=self.BLACK)
+                c.create_text(17, 17, text="?" if kind == "question" else "i", fill="#0000ff",
+                              font=("Times New Roman", 17, "bold"))
+            return c
+
+        def button(self, master, text, command, default=False, width=9):
+            return _w95_tk.Button(master, text=text, command=command, width=width, font=self.FONT_B if default else self.FONT,
+                                  bg=self.FACE, fg=self.BLACK, activebackground=self.FACE, relief="raised", bd=2,
+                                  highlightthickness=1 if default else 0, highlightbackground=self.BLACK, takefocus=0)
+
+        def run(self, win, parent, focus=None):
+            """Centred over the window that asked, in front, modal; the previous modal window gets its grab back."""
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            try:
+                if parent is not None and parent.winfo_viewable():
+                    x = parent.winfo_rootx() + max(0, (parent.winfo_width() - w) // 2)
+                    y = parent.winfo_rooty() + max(0, (parent.winfo_height() - h) // 3)
+                else:
+                    raise _w95_tk.TclError("no parent")
+            except _w95_tk.TclError:
+                x, y = (win.winfo_screenwidth() - w) // 2, (win.winfo_screenheight() - h) // 3
+            x = max(0, min(x, win.winfo_screenwidth() - w))
+            y = max(0, min(y, win.winfo_screenheight() - h - 30))
+            win.geometry("+%d+%d" % (x, y))
+            previous = None
+            try:
+                previous = win.grab_current()
+            except (_w95_tk.TclError, KeyError):
+                previous = None
+            win.deiconify()
+            win.lift()
+            (focus or win).focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except _w95_tk.TclError:
+                    pass
+            job = win.after(100, take_clicks)
+            win.bind("<Destroy>", lambda e, w=win, j=job: w.after_cancel(j) if e.widget is w else None, add="+")
+            win.wait_window()
+            if previous is not None:
+                try:
+                    if previous.winfo_exists():
+                        previous.grab_set()
+                        previous.focus_force()
+                except _w95_tk.TclError:
+                    pass
+            elif parent is not None:
+                try:
+                    parent.focus_force()
+                except _w95_tk.TclError:
+                    pass
+
+        def box(self, title, text, kind, buttons, default=0, parent=None, detail=None, entry=None, show=None):
+            """-> (button pressed, text typed)."""
+            parent = self.parent_of(parent)
+            if parent is None:                                    # no window open yet: the Windows box is the only way
+                return None, None
+            result = {"value": buttons[-1], "text": None}
+            field = {}
+
+            def answer(value):
+                result["value"] = value
+                if "entry" in field:
+                    result["text"] = field["entry"].get()
+                win.destroy()
+            win = self.window(parent, title, lambda: answer(buttons[-1]))
+            body = _w95_tk.Frame(win, bg=self.FACE)
+            body.pack(fill="both", expand=True, padx=14, pady=(12, 6))
+            self.icon(body, kind).pack(side="left", anchor="n", padx=(0, 12))
+            right = _w95_tk.Frame(body, bg=self.FACE)
+            right.pack(side="left", fill="both", expand=True)
+            _w95_tk.Label(right, text=text or "", font=self.FONT, bg=self.FACE, justify="left",
+                          wraplength=420).pack(anchor="w")
+            if detail:
+                _w95_tk.Label(right, text=detail, font=self.FONT, bg=self.FACE, fg=self.SHADOW, justify="left",
+                              wraplength=420).pack(anchor="w", pady=(6, 0))
+            if entry is not None:
+                e = _w95_tk.Entry(right, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                                  width=42, show=show or "")
+                e.insert(0, entry)
+                e.select_range(0, "end")
+                e.pack(anchor="w", pady=(8, 0), fill="x")
+                e.bind("<Return>", lambda ev: answer(buttons[0]))
+                field["entry"] = e
+            row = _w95_tk.Frame(win, bg=self.FACE)
+            row.pack(pady=(6, 12))
+            for index, label in enumerate(buttons):
+                self.button(row, label, lambda v=label: answer(v), default=index == default).pack(side="left", padx=4)
+            win.bind("<Return>", lambda ev: answer(buttons[default]))
+            win.bind("<Escape>", lambda ev: answer(buttons[-1]))
+            for index, label in enumerate(buttons):                # Y / N / C ... like the Windows 95 boxes
+                win.bind("<Key-%s>" % label[0].lower(), lambda ev, v=label: answer(v) if "entry" not in field else None)
+            try:
+                win.bell()
+            except _w95_tk.TclError:
+                pass
+            self.run(win, parent, field.get("entry"))
+            return result["value"], result["text"]
+
+
+    class _W95MessageBox(_W95Base):
+        """messagebox.showinfo / showwarning / showerror / askquestion / askyesno / askokcancel / askyesnocancel /
+        askretrycancel with the Windows 95 look."""
+
+        @staticmethod
+        def _args(args, kwargs):
+            title = kwargs.pop("title", args[0] if len(args) > 0 else "")
+            message = kwargs.pop("message", args[1] if len(args) > 1 else "")
+            return title, message, kwargs
+
+        def _ask(self, native, kind, buttons, args, kwargs):
+            title, message, opts = self._args(args, kwargs)
+            default = opts.get("default")
+            index = 0
+            if default is not None:
+                for i, b in enumerate(buttons):
+                    if b.lower() == str(default).lower():
+                        index = i
+            icon = {"error": "error", "warning": "warning", "info": "info", "question": "question"}.get(
+                str(opts.get("icon", "")).lower(), kind)
+            value, _text = self.box(title, message, icon, buttons, index, opts.get("parent"), opts.get("detail"))
+            if value is None:                                      # no Tk window: the Windows one
+                return getattr(_w95_native_messagebox, native)(title, message, **opts)
+            return value
+
+        def showinfo(self, *args, **kwargs):
+            self._ask("showinfo", "info", ("OK",), args, kwargs)
+            return "ok"
+
+        def showwarning(self, *args, **kwargs):
+            self._ask("showwarning", "warning", ("OK",), args, kwargs)
+            return "ok"
+
+        def showerror(self, *args, **kwargs):
+            self._ask("showerror", "error", ("OK",), args, kwargs)
+            return "ok"
+
+        def askquestion(self, *args, **kwargs):
+            value = self._ask("askquestion", "question", ("Yes", "No"), args, kwargs)
+            return value if value in ("yes", "no") else ("yes" if value == "Yes" else "no")
+
+        def askyesno(self, *args, **kwargs):
+            value = self._ask("askyesno", "question", ("Yes", "No"), args, kwargs)
+            return value if isinstance(value, bool) else value == "Yes"
+
+        def askokcancel(self, *args, **kwargs):
+            value = self._ask("askokcancel", "question", ("OK", "Cancel"), args, kwargs)
+            return value if isinstance(value, bool) else value == "OK"
+
+        def askretrycancel(self, *args, **kwargs):
+            value = self._ask("askretrycancel", "warning", ("Retry", "Cancel"), args, kwargs)
+            return value if isinstance(value, bool) else value == "Retry"
+
+        def askyesnocancel(self, *args, **kwargs):
+            value = self._ask("askyesnocancel", "question", ("Yes", "No", "Cancel"), args, kwargs)
+            if value is None or isinstance(value, bool):
+                return value
+            return None if value == "Cancel" else value == "Yes"
+
+        def __getattr__(self, name):                                # constants (YES, OK, WARNING ...) as in tkinter
+            return getattr(_w95_native_messagebox, name)
+
+
+    class _W95SimpleDialog(_W95Base):
+        """simpledialog.askstring / askinteger / askfloat with the Windows 95 look."""
+
+        def _ask(self, title, prompt, kwargs, convert, kind):
+            initial = kwargs.get("initialvalue")
+            low, high = kwargs.get("minvalue"), kwargs.get("maxvalue")
+            text = "" if initial is None else str(initial)
+            while True:
+                value, typed = self.box(title, prompt, "question", ("OK", "Cancel"), 0, kwargs.get("parent"),
+                                        entry=text, show=kwargs.get("show"))
+                if value is None:
+                    return getattr(_w95_native_simpledialog, "ask" + kind)(title, prompt, **kwargs)
+                if value != "OK":
+                    return None
+                if convert is None:
+                    return typed
+                try:
+                    number = convert(typed.strip().replace(",", ".") if kind == "float" else typed.strip())
+                except ValueError:
+                    _W95_MESSAGEBOX.showwarning("Illegal value", "Not %s.\nPlease try again." % (
+                        "an integer" if kind == "integer" else "a number"), parent=kwargs.get("parent"))
+                    text = typed
+                    continue
+                if low is not None and number < low:
+                    _W95_MESSAGEBOX.showwarning("Too small", "The allowed minimum value is %s.\nPlease try again." % low,
+                                                parent=kwargs.get("parent"))
+                    text = typed
+                    continue
+                if high is not None and number > high:
+                    _W95_MESSAGEBOX.showwarning("Too large", "The allowed maximum value is %s.\nPlease try again." % high,
+                                                parent=kwargs.get("parent"))
+                    text = typed
+                    continue
+                return number
+
+        def askstring(self, title, prompt, **kwargs):
+            return self._ask(title, prompt, kwargs, None, "string")
+
+        def askinteger(self, title, prompt, **kwargs):
+            return self._ask(title, prompt, kwargs, int, "integer")
+
+        def askfloat(self, title, prompt, **kwargs):
+            return self._ask(title, prompt, kwargs, float, "float")
+
+        def __getattr__(self, name):
+            return getattr(_w95_native_simpledialog, name)
+
+
+    class _W95ColorChooser(_W95Base):
+        """colorchooser.askcolor with the Windows 95 'Color' dialog: basic and custom colours, the spectrum and the
+        luminance bar, Red / Green / Blue and hex. Returns ((r, g, b), '#rrggbb') or (None, None), as tkinter does.
+        The custom colours are the ones of the Bitpack Color Picker (when its table exists)."""
+        BASIC = ["#ff8080", "#ffff80", "#80ff80", "#00ff80", "#80ffff", "#0080ff", "#ff80c0", "#ff80ff",
+                 "#ff0000", "#ffff00", "#80ff00", "#00ff40", "#00ffff", "#0080c0", "#8080c0", "#ff00ff",
+                 "#804040", "#ff8040", "#00ff00", "#008080", "#004080", "#8080ff", "#800040", "#ff0080",
+                 "#800000", "#ff8000", "#008000", "#008040", "#0000ff", "#0000a0", "#800080", "#8000ff",
+                 "#400000", "#804000", "#004000", "#004040", "#000080", "#000040", "#400040", "#400080",
+                 "#000000", "#808000", "#808040", "#808080", "#408080", "#c0c0c0", "#400040", "#ffffff"]
+        DB = "Config/dbo_bitpack.db"
+
+        def __init__(self):
+            self.custom = None
+            self.spectrum_rows = None
+
+        def _load_custom(self):
+            if self.custom is not None:
+                return
+            self.custom = ["#ffffff"] * 16
+            try:
+                import sqlite3
+                import os as _os
+                if _os.path.exists(self.DB):
+                    conn = sqlite3.connect(self.DB, timeout=3)
+                    try:
+                        for pos, hx in conn.execute("SELECT position, hex FROM color_picker_colors WHERE kind = 'custom'"):
+                            if 0 <= pos < 16:
+                                self.custom[pos] = hx
+                    finally:
+                        conn.close()
+            except Exception:
+                pass
+
+        def _save_custom(self):
+            try:
+                import sqlite3
+                import os as _os
+                if not _os.path.isdir(_os.path.dirname(self.DB)):
+                    return
+                conn = sqlite3.connect(self.DB, timeout=3)
+                try:
+                    with conn:
+                        conn.execute("CREATE TABLE IF NOT EXISTS color_picker_colors (kind TEXT NOT NULL, position INTEGER "
+                                     "NOT NULL, hex TEXT NOT NULL, PRIMARY KEY (kind, position))")
+                        conn.execute("DELETE FROM color_picker_colors WHERE kind = 'custom'")
+                        conn.executemany("INSERT INTO color_picker_colors (kind, position, hex) VALUES ('custom', ?, ?)",
+                                         list(enumerate(self.custom)))
+                finally:
+                    conn.close()
+            except Exception:
+                pass
+
+        @staticmethod
+        def _rgb(colour, widget):
+            try:
+                r, g, b = widget.winfo_rgb(colour)
+                return r // 257, g // 257, b // 257
+            except (_w95_tk.TclError, TypeError):
+                return None
+
+        @staticmethod
+        def _hex(rgb):
+            return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(c)))) for c in rgb)
+
+        def askcolor(self, color=None, **options):
+            import colorsys
+            parent = self.parent_of(options.get("parent"))
+            if parent is None:
+                return _w95_native_colorchooser.askcolor(color, **options)
+            self._load_custom()
+            start = self._rgb(options.get("initialcolor", color) or "#000000", parent) or (0, 0, 0)
+            state = {"rgb": start, "ok": False, "slot": next((i for i, c in enumerate(self.custom) if c == "#ffffff"), 0)}
+            h0, l0, s0 = colorsys.rgb_to_hls(*[c / 255.0 for c in start])
+            hsl = {"h": h0 * 360, "s": s0 * 100, "l": l0 * 100}
+            win = self.window(parent, options.get("title") or "Color", lambda: win.destroy())
+            body = _w95_tk.Frame(win, bg=self.FACE)
+            body.pack(padx=8, pady=8)
+            left = _w95_tk.Frame(body, bg=self.FACE)
+            left.grid(row=0, column=0, sticky="n")
+            SW, SH = 20, 16
+
+            def palette(master, cols, rows):
+                c = _w95_tk.Canvas(master, width=cols * (SW + 4) + 2, height=rows * (SH + 4) + 2, bg=self.FACE,
+                                   highlightthickness=0)
+                c.cols, c.rows = cols, rows
+                return c
+            _w95_tk.Label(left, text="Basic colors:", font=self.FONT, bg=self.FACE, underline=0).pack(anchor="w")
+            basic = palette(left, 8, 6)
+            basic.pack(anchor="w")
+            _w95_tk.Label(left, text="Custom colors:", font=self.FONT, bg=self.FACE, underline=0).pack(anchor="w",
+                                                                                                  pady=(6, 0))
+            custom = palette(left, 8, 2)
+            custom.pack(anchor="w")
+            right = _w95_tk.Frame(body, bg=self.FACE)
+            right.grid(row=0, column=1, sticky="n", padx=(10, 0))
+            SPW, SPH = 150, 120
+            top = _w95_tk.Frame(right, bg=self.FACE)
+            top.pack(anchor="w")
+            frame = _w95_tk.Frame(top, bg=self.FACE, bd=2, relief="sunken")
+            frame.pack(side="left")
+            spec = _w95_tk.Canvas(frame, width=SPW, height=SPH, highlightthickness=0, cursor="crosshair")
+            spec.pack()
+            image = _w95_tk.PhotoImage(master=win, width=SPW, height=SPH)
+            win._w95_image = image
+            if self.spectrum_rows is None:
+                rows = []
+                for y in range(SPH):
+                    s = 1 - y / float(SPH - 1)
+                    rows.append("{" + " ".join(self._hex([v * 255 for v in colorsys.hls_to_rgb(x / float(SPW), 0.5, s)])
+                                               for x in range(SPW)) + "}")
+                self.spectrum_rows = " ".join(rows)
+            image.put(self.spectrum_rows)
+            spec.create_image(0, 0, image=image, anchor="nw")
+            frame = _w95_tk.Frame(top, bg=self.FACE, bd=2, relief="sunken")
+            frame.pack(side="left", padx=(6, 0))
+            lum = _w95_tk.Canvas(frame, width=12, height=SPH, highlightthickness=0)
+            lum.pack()
+            lum_image = _w95_tk.PhotoImage(master=win, width=12, height=SPH)
+            win._w95_lum = lum_image
+            lum.create_image(0, 0, image=lum_image, anchor="nw")
+            arrow = _w95_tk.Canvas(top, width=9, height=SPH + 6, bg=self.FACE, highlightthickness=0)
+            arrow.pack(side="left")
+            row = _w95_tk.Frame(right, bg=self.FACE)
+            row.pack(anchor="w", pady=(6, 0))
+            prev = _w95_tk.Frame(row, bg=self.FACE, bd=2, relief="sunken")
+            prev.pack(side="left", anchor="n")
+            preview = _w95_tk.Canvas(prev, width=56, height=40, highlightthickness=0)
+            preview.pack()
+            fields = _w95_tk.Frame(row, bg=self.FACE)
+            fields.pack(side="left", padx=(8, 0))
+            entries = {}
+            for i, (label, key) in enumerate((("Red:", "r"), ("Green:", "g"), ("Blue:", "b"), ("Hex:", "hex"))):
+                _w95_tk.Label(fields, text=label, font=self.FONT, bg=self.FACE).grid(row=i, column=0, sticky="e")
+                e = _w95_tk.Entry(fields, font=self.FONT, bg=self.LIGHT, relief="sunken", bd=2, highlightthickness=0,
+                                  width=8 if key == "hex" else 5, justify="right")
+                e.grid(row=i, column=1, sticky="w", pady=1)
+                entries[key] = e
+
+            def draw():
+                rgb = state["rgb"]
+                hx = self._hex(rgb)
+                preview.delete("all")
+                preview.create_rectangle(0, 0, 56, 40, fill=hx, outline="")
+                for key, value in zip("rgb", rgb):
+                    if win.focus_get() is not entries[key]:
+                        entries[key].delete(0, "end")
+                        entries[key].insert(0, str(int(value)))
+                if win.focus_get() is not entries["hex"]:
+                    entries["hex"].delete(0, "end")
+                    entries["hex"].insert(0, hx.upper())
+                for canvas, colours in ((basic, self.BASIC), (custom, self.custom)):
+                    canvas.delete("all")
+                    for i, colour in enumerate(colours):
+                        x, y = 2 + (i % canvas.cols) * (SW + 4), 2 + (i // canvas.cols) * (SH + 4)
+                        canvas.create_line(x - 1, y + SH + 1, x - 1, y - 1, x + SW + 1, y - 1, fill=self.SHADOW)
+                        canvas.create_line(x - 1, y + SH + 1, x + SW + 1, y + SH + 1, x + SW + 1, y - 1, fill=self.LIGHT)
+                        canvas.create_rectangle(x, y, x + SW, y + SH, fill=colour, outline=self.BLACK)
+                        if colour.lower() == hx or (canvas is custom and i == state["slot"]):
+                            canvas.create_rectangle(x - 2, y - 2, x + SW + 2, y + SH + 2, outline=self.BLACK, dash=(1, 1))
+                spec.delete("cross")
+                cx, cy = hsl["h"] / 360.0 * SPW, (100 - hsl["s"]) / 100.0 * (SPH - 1)
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    spec.create_line(cx + dx * 3, cy + dy * 3, cx + dx * 8, cy + dy * 8, fill=self.BLACK, width=3,
+                                     tags="cross")
+                colours = [self._hex([v * 255 for v in colorsys.hls_to_rgb(hsl["h"] / 360.0, 1 - y / float(SPH - 1),
+                                                                             hsl["s"] / 100.0)]) for y in range(SPH)]
+                lum_image.put(" ".join("{" + " ".join([c] * 12) + "}" for c in colours))
+                arrow.delete("all")
+                ay = (100 - hsl["l"]) / 100.0 * (SPH - 1) + 2
+                arrow.create_polygon(1, ay, 8, ay - 5, 8, ay + 5, fill=self.BLACK)
+
+            def set_rgb(rgb):
+                state["rgb"] = tuple(max(0, min(255, int(round(c)))) for c in rgb)
+                h, l, s = colorsys.rgb_to_hls(*[c / 255.0 for c in state["rgb"]])
+                if s > 0 and 0 < l < 1:
+                    hsl["h"] = h * 360
+                hsl["s"], hsl["l"] = s * 100, l * 100
+                draw()
+
+            def set_hsl():
+                state["rgb"] = tuple(int(round(v * 255)) for v in colorsys.hls_to_rgb(hsl["h"] / 360.0, hsl["l"] / 100.0,
+                                                                                     hsl["s"] / 100.0))
+                draw()
+
+            def pick(canvas, colours, event):
+                col, rw = (event.x - 2) // (SW + 4), (event.y - 2) // (SH + 4)
+                if 0 <= col < canvas.cols and 0 <= rw < canvas.rows:
+                    i = rw * canvas.cols + col
+                    if canvas is custom:
+                        state["slot"] = i
+                    set_rgb(self._rgb(colours[i], win))
+
+            def on_spec(event):
+                hsl["h"] = max(0, min(SPW - 1, event.x)) * 360.0 / SPW
+                hsl["s"] = 100 - max(0, min(SPH - 1, event.y)) * 100.0 / (SPH - 1)
+                if not 5 < hsl["l"] < 95:
+                    hsl["l"] = 50.0
+                set_hsl()
+
+            def on_lum(event):
+                hsl["l"] = 100 - max(0, min(SPH - 1, event.y - (2 if event.widget is arrow else 0))) * 100.0 / (SPH - 1)
+                set_hsl()
+
+            def typed(event=None):
+                text = entries["hex"].get().strip()
+                if event is not None and event.widget is entries["hex"]:
+                    value = self._rgb(text if text.startswith("#") else "#" + text, win) if text else None
+                    if value and len(text.lstrip("#")) in (3, 6):
+                        set_rgb(value)
+                    return
+                try:
+                    set_rgb([max(0, min(255, int(entries[k].get() or 0))) for k in "rgb"])
+                except ValueError:
+                    pass
+
+            def add_custom():
+                self.custom[state["slot"]] = self._hex(state["rgb"])
+                state["slot"] = (state["slot"] + 1) % 16
+                self._save_custom()
+                draw()
+
+            def ok():
+                state["ok"] = True
+                win.destroy()
+            basic.bind("<Button-1>", lambda e: pick(basic, self.BASIC, e))
+            basic.bind("<Double-Button-1>", lambda e: (pick(basic, self.BASIC, e), ok()))
+            custom.bind("<Button-1>", lambda e: pick(custom, self.custom, e))
+            for widget, handler in ((spec, on_spec), (lum, on_lum), (arrow, on_lum)):
+                widget.bind("<Button-1>", handler)
+                widget.bind("<B1-Motion>", handler)
+            for key, e in entries.items():
+                e.bind("<KeyRelease>", typed)
+                e.bind("<Return>", lambda ev: (typed(ev), ok()))
+            buttons = _w95_tk.Frame(win, bg=self.FACE)
+            buttons.pack(fill="x", padx=8, pady=(0, 8))
+            self.button(buttons, "OK", ok, default=True, width=8).pack(side="left")
+            self.button(buttons, "Cancel", win.destroy, width=8).pack(side="left", padx=4)
+            self.button(buttons, "Add to Custom Colors", add_custom, width=20).pack(side="right")
+            win.bind("<Escape>", lambda e: win.destroy())
+            set_rgb(start)
+            self.run(win, parent)
+            if not state["ok"]:
+                return None, None
+            return state["rgb"], self._hex(state["rgb"])
+
+        def __getattr__(self, name):
+            return getattr(_w95_native_colorchooser, name)
+
+
+    class W95Toplevel(_w95_tk.Toplevel):
+        """A Toplevel with the Windows 95 title bar instead of the Windows one: the window is built as before, the bar is
+        put on top of what it holds (pack or grid), the close button does what the window's close does."""
+
+        def __init__(self, *args, **kwargs):
+            _w95_tk.Toplevel.__init__(self, *args, **kwargs)
+            self._w95_position_given = False
+            self.overrideredirect(True)
+            try:                                                    # stays above the window that opened it
+                owner = self.master.winfo_toplevel() if self.master is not None else None
+                if owner is not None and owner.winfo_viewable():    # (a hidden owner would keep this window hidden too)
+                    self.transient(owner)
+            except _w95_tk.TclError:
+                pass
+            self.configure(bd=2, relief="raised")
+            self._w95_bar = _w95_tk.Frame(self, bg=_W95Base.NAVY, height=20)
+            self._w95_bar.pack_propagate(False)
+            self._w95_title = _w95_tk.Label(self._w95_bar, text="", bg=_W95Base.NAVY, fg=_W95Base.LIGHT,
+                                            font=_W95Base.FONT_B, anchor="w")
+            self._w95_title.pack(side="left", padx=4, fill="x", expand=True)
+            self._w95_pixel = _w95_tk.PhotoImage(master=self, width=1, height=1)
+            marlett = "Marlett" in _w95_tkfont.families(self)
+            glyphs = {"close": "r", "max": "1", "restore": "2"} if marlett else {"close": "X", "max": "[]", "restore": "="}
+            self._w95_glyphs = glyphs
+            font = ("Marlett", 7) if marlett else _W95Base.FONT_B
+            self._w95_close = _w95_tk.Button(self._w95_bar, text=glyphs["close"], font=font, image=self._w95_pixel,
+                                             compound="center", width=12, height=10, padx=0, pady=0, bg=_W95Base.FACE,
+                                             bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                                             activebackground=_W95Base.FACE, command=self._w95_close_window)
+            self._w95_close.pack(side="right", padx=2)
+            self._w95_max = None
+            self._w95_maximized = None
+            self._w95_bar.place(x=0, y=0, relwidth=1)               # moved into the layout once it is built
+            for widget in (self._w95_bar, self._w95_title):
+                widget.bind("<ButtonPress-1>", self._w95_press)
+                widget.bind("<B1-Motion>", self._w95_drag)
+            self.bind("<ButtonPress-1>", self._w95_focus_click, add="+")
+            self.after_idle(self._w95_settle)
+
+        def title(self, string=None):
+            if string is None:
+                return _w95_tk.Toplevel.title(self)
+            _w95_tk.Toplevel.title(self, string)
+            if "_w95_title" in self.__dict__:                       # (tkinter sets a title before the bar exists)
+                self._w95_title.config(text=string)
+
+        wm_title = title
+
+        def geometry(self, newGeometry=None):
+            if newGeometry is not None and ("+" in str(newGeometry) or "-" in str(newGeometry)):
+                self._w95_position_given = True
+            return _w95_tk.Toplevel.geometry(self, newGeometry)
+
+        wm_geometry = geometry
+
+        def _w95_close_window(self):
+            handler = self.protocol("WM_DELETE_WINDOW")
+            if handler:
+                self.tk.call(handler)
+            else:
+                self.destroy()
+
+        def _w95_press(self, event):
+            self._w95_drag_from = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
+
+        def _w95_drag(self, event):
+            if self._w95_maximized is None:
+                self.geometry("+%d+%d" % (event.x_root - self._w95_drag_from[0], event.y_root - self._w95_drag_from[1]))
+
+        def _w95_focus_click(self, event):
+            """A window without the Windows frame does not take the keyboard by itself: a click gives it."""
+            if isinstance(event.widget, (_w95_tk.Entry, _w95_tk.Text, _w95_tk.Listbox, _w95_tk.Spinbox)):
+                try:
+                    event.widget.focus_force()
+                except _w95_tk.TclError:
+                    pass
+
+        def _w95_settle(self):
+            try:
+                if not self.winfo_exists():
+                    return
+            except _w95_tk.TclError:
+                return
+            bar = self._w95_bar
+            bar.place_forget()
+            packed = [w for w in self.pack_slaves() if w is not bar]
+            gridded = [w for w in self.grid_slaves() if w is not bar]
+            if gridded and not packed:
+                cols, rows = self.grid_size()
+                for r in range(rows - 1, -1, -1):                   # everything one row down
+                    conf = self.grid_rowconfigure(r)
+                    self.grid_rowconfigure(r + 1, weight=conf.get("weight", 0), minsize=conf.get("minsize", 0),
+                                           pad=conf.get("pad", 0))
+                self.grid_rowconfigure(0, weight=0, minsize=0, pad=0)
+                for w in gridded:
+                    info = w.grid_info()
+                    w.grid_configure(row=int(info["row"]) + 1)
+                bar.grid(row=0, column=0, columnspan=max(1, cols), sticky="ew", padx=1, pady=(1, 0))
+            elif packed:
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0), before=packed[0])
+            else:
+                bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            self._w95_title.config(text=_w95_tk.Toplevel.title(self))
+            try:
+                resizable = any(self.resizable())
+            except _w95_tk.TclError:
+                resizable = False
+            if resizable:
+                self._w95_max = _w95_tk.Button(bar, text=self._w95_glyphs["max"], font=self._w95_close.cget("font"),
+                                               image=self._w95_pixel, compound="center", width=12, height=10, padx=0,
+                                               pady=0, bg=_W95Base.FACE, bd=2, relief="raised", highlightthickness=0,
+                                               takefocus=0, activebackground=_W95Base.FACE, command=self._w95_toggle_max)
+                self._w95_max.pack(side="right", after=self._w95_close)     # left of Close
+                for widget in (bar, self._w95_title):
+                    widget.bind("<Double-Button-1>", lambda e: self._w95_toggle_max())
+                grip = _w95_tk.Canvas(self, width=13, height=13, bg=_W95Base.FACE, bd=0, highlightthickness=0,
+                                      cursor="size_nw_se" if self.tk.call("tk", "windowingsystem") == "win32"
+                                      else "bottom_right_corner")
+                for i in (2, 6, 10):
+                    grip.create_line(12, i, i, 12, fill=_W95Base.LIGHT)
+                    grip.create_line(12, i + 1, i + 1, 12, fill=_W95Base.SHADOW)
+                grip.place(relx=1.0, rely=1.0, anchor="se")
+                grip.bind("<ButtonPress-1>", lambda e: setattr(self, "_w95_resize", (e.x_root, e.y_root,
+                                                                                      self.winfo_width(),
+                                                                                      self.winfo_height())))
+                grip.bind("<B1-Motion>", self._w95_resize_drag)
+            self.update_idletasks()
+            if not self._w95_position_given:                    # centred over the window that opened it
+                master = self.master.winfo_toplevel() if self.master is not None else None
+                w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+                try:
+                    if self.winfo_width() > 1:
+                        w, h = max(w, self.winfo_width()), max(h, self.winfo_height())
+                    x = master.winfo_rootx() + max(0, (master.winfo_width() - w) // 2)
+                    y = master.winfo_rooty() + max(0, (master.winfo_height() - h) // 3)
+                except (_w95_tk.TclError, AttributeError):
+                    x, y = (self.winfo_screenwidth() - w) // 2, (self.winfo_screenheight() - h) // 3
+                _w95_tk.Toplevel.geometry(self, "+%d+%d" % (max(0, x), max(0, y)))
+            try:
+                if self.grab_current() is self:
+                    self.attributes("-topmost", True)          # a modal window stays in front of the tool
+            except (_w95_tk.TclError, KeyError):
+                pass
+            self.lift()
+
+        def _w95_resize_drag(self, event):
+            if self._w95_maximized is None:
+                x0, y0, w0, h0 = self._w95_resize
+                _w95_tk.Toplevel.geometry(self, "%dx%d" % (max(200, w0 + event.x_root - x0), max(120, h0 + event.y_root - y0)))
+
+        def _w95_toggle_max(self):
+            if self._w95_maximized is not None:
+                _w95_tk.Toplevel.geometry(self, self._w95_maximized)
+                self._w95_maximized = None
+                self._w95_max.config(text=self._w95_glyphs["max"])
+                return
+            self._w95_maximized = _w95_tk.Toplevel.geometry(self)
+            x, y, w, h = 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
+            try:
+                import ctypes
+                from ctypes import wintypes
+                rect = wintypes.RECT()
+                ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                x, y, w, h = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+            except Exception:
+                pass
+            _w95_tk.Toplevel.geometry(self, "%dx%d+%d+%d" % (w, h, x, y))
+            self._w95_max.config(text=self._w95_glyphs["restore"])
+
+
+    def w95_frame(win):
+        """Nothing to do for a window made with W95Toplevel (kept for a window made elsewhere)."""
+        return win
+
+
+    _W95_MESSAGEBOX = _W95MessageBox()
+    _W95_SIMPLEDIALOG = _W95SimpleDialog()
+    _W95_COLORCHOOSER = _W95ColorChooser()
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    messagebox = _W95_MESSAGEBOX
+    simpledialog = _W95_SIMPLEDIALOG
+    colorchooser = _W95_COLORCHOOSER
+
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # WINDOWS 95 MAIN WINDOW - the title bar, the taskbar button, the menu bar and the status bar of the tool
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    class W95App(object):
+        FACE, SHADOW, LIGHT, NAVY, BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+        FONT = ("MS Sans Serif", 8)
+        FONT_B = ("MS Sans Serif", 8, "bold")
+
+        def __init__(self, root, title, on_close, width=900, height=600, min_size=(600, 400), icon_colours=None):
+            import os as _os
+            import tkinter as _tk
+            import tkinter.font as _tkfont
+            self.tk = _tk
+            self.root = root
+            self.app_title = title
+            self.on_close = on_close
+            self.is_windows = _os.name == "nt"
+            self.custom_frame = self.is_windows
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
+            self.min_size = min_size
+            width = min(width, root.winfo_screenwidth() - 40)
+            height = min(height, root.winfo_screenheight() - 80)
+            root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                           max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+            root.minsize(*min_size)
+            root.configure(bg=self.FACE)
+            root.title(title)
+            root.protocol("WM_DELETE_WINDOW", on_close)
+            icon = _tk.PhotoImage(width=16, height=16)
+            a, b = icon_colours or ("#808000", "#ffff00")
+            icon.put(self.BLACK, to=(2, 1, 14, 15))
+            for y0 in (2, 6, 10):
+                icon.put(a, to=(3, y0, 13, y0 + 3))
+                icon.put(b, to=(4, y0 + 1, 12, y0 + 2))
+            self.icon = icon
+            marlett = "Marlett" in _tkfont.families(root)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = _tk.PhotoImage(width=1, height=1)
+            bar = _tk.Frame(root, bg=self.NAVY, height=20)
+            bar.pack(side="top", fill="x", padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon_label = _tk.Label(bar, image=self.icon, bg=self.NAVY)
+            icon_label.pack(side="left", padx=(2, 3))
+            self.title_label = _tk.Label(bar, text=title, bg=self.NAVY, fg=self.LIGHT, font=self.FONT_B, anchor="w")
+            self.title_label.pack(side="left", fill="x", expand=True)
+            self.caption_parts = (bar, self.title_label, icon_label)
+            self.caption_button(bar, "close", on_close).pack(side="right", padx=(2, 2))
+            self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+            self.btn_max.pack(side="right")
+            self.caption_button(bar, "min", self.minimize).pack(side="right")
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._press)
+                widget.bind("<B1-Motion>", self._drag)
+                widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._active(True) if e.widget is root else None, add="+")
+            root.bind("<Deactivate>", lambda e: self._active(False) if e.widget is root else None, add="+")
+            root.bind("<Map>", self._on_map, add="+")
+            self.menubar = _tk.Frame(root, bg=self.FACE)
+            self.menubar.pack(side="top", fill="x")
+            status = _tk.Frame(root, bg=self.FACE)
+            status.pack(side="bottom", fill="x", padx=2, pady=(0, 2))
+            grip = _tk.Canvas(status, width=14, height=14, bg=self.FACE, bd=0, highlightthickness=0,
+                              cursor="size_nw_se" if self.is_windows else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=self.LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=self.SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=self.SHADOW)
+            grip.pack(side="right", anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.status_frame = status
+            self.status_label = _tk.Label(status, text="Ready", font=self.FONT, bg=self.FACE, relief="sunken", bd=1,
+                                          anchor="w", padx=4)
+            self.status_label.pack(side="left", fill="x", expand=True, padx=1)
+            self.body = _tk.Frame(root, bg=self.FACE)
+            self.body.pack(fill="both", expand=True)
+            if self.custom_frame:
+                root.configure(bd=2, relief="raised")
+                root.after(10, self._enable_custom_frame)
+            root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+
+        # ----- the parts --------------------------------------------------------------------------------
+        def caption_button(self, parent, key, command):
+            return self.tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                                  compound="center", width=12, height=10, padx=0, pady=0, bg=self.FACE, fg=self.BLACK,
+                                  activebackground=self.FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0)
+
+        def status_field(self, text="", width=20):
+            label = self.tk.Label(self.status_frame, text=text, font=self.FONT, bg=self.FACE, relief="sunken", bd=1,
+                                  width=width)
+            label.pack(side="right", padx=1, before=self.status_label)
+            return label
+
+        def status(self, text):
+            self.status_label.config(text=text)
+
+        def set_title(self, text):
+            self.root.title(text)
+            self.title_label.config(text=text)
+
+        def from_menu(self, action):
+            """Menu commands run after the menu has closed (a box opened inside the menu's click could keep the
+            clicks captured on Windows)."""
+            return lambda: self.root.after(10, action)
+
+        def add_menu(self, text, items):
+            """items: (label, accelerator, command) / None (separator) / ("check", label, variable, command) /
+            ("cascade", label, tk.Menu). Returns the tk.Menu."""
+            tk = self.tk
+            button = tk.Menubutton(self.menubar, text=text, font=self.FONT, bg=self.FACE, fg=self.BLACK,
+                                   activebackground=self.NAVY, activeforeground=self.LIGHT, relief="flat", bd=0, padx=6,
+                                   pady=2, underline=0, takefocus=0, highlightthickness=0)
+            button.pack(side="left")
+            menu = tk.Menu(button, tearoff=0, font=self.FONT, bg=self.FACE, fg=self.BLACK, activebackground=self.NAVY,
+                           activeforeground=self.LIGHT)
+            for item in items:
+                if item is None:
+                    menu.add_separator()
+                elif item[0] == "check":
+                    menu.add_checkbutton(label=item[1], variable=item[2], command=self.from_menu(item[3]))
+                elif item[0] == "cascade":
+                    menu.add_cascade(label=item[1], menu=item[2])
+                else:
+                    menu.add_command(label=item[0], accelerator=item[1], command=self.from_menu(item[2]))
+            button.config(menu=menu)
+            return menu
+
+        def sub_menu(self):
+            return self.tk.Menu(self.menubar, tearoff=0, font=self.FONT, bg=self.FACE, fg=self.BLACK,
+                                activebackground=self.NAVY, activeforeground=self.LIGHT)
+
+        # ----- frame behaviour ---------------------------------------------------------------------------
+        def _active(self, active):
+            for widget in self.caption_parts:
+                widget.config(bg=self.NAVY if active else self.SHADOW)
+            self.title_label.config(fg=self.LIGHT if active else self.FACE)
+
+        def _enable_custom_frame(self):
+            self.root.overrideredirect(True)
+            self.root.update_idletasks()
+            # the taskbar button is set once Tk has finished making the window borderless (set at once, Tk took
+            # it back when it showed the window again, so the program had no button in the taskbar)
+            self.root.after(30, self._apply_taskbar_style)
+
+        def _apply_taskbar_style(self, attempt=0):
+            root = self.root
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+            except (ImportError, AttributeError):
+                return
+            try:
+                hwnd = user32.GetParent(root.winfo_id())
+                if not hwnd:
+                    raise OSError("the window is not there yet")
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                if attempt < 6:
+                    root.after(100, lambda: self._apply_taskbar_style(attempt + 1))
+                return
+            root.withdraw()
+            root.after(20, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+            if attempt < 3:
+                root.after(400, lambda: self._check_taskbar(attempt + 1))
+
+        def _check_taskbar(self, attempt):
+            """Shown again, the window can lose its taskbar button: then the style is set once more."""
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(self.root.winfo_id())
+                if hwnd and not user32.GetWindowLongW(hwnd, -20) & 0x00040000:
+                    self._apply_taskbar_style(attempt)
+            except Exception:
+                pass
+
+        def _on_map(self, event):
+            if event.widget is self.root and self.minimizing and self.root.state() == "normal":
+                self.minimizing = False
+                self.root.overrideredirect(True)
+                self.root.after(10, self._apply_taskbar_style)
+
+        def minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.root.overrideredirect(False)
+            self.root.iconify()
+
+        def toggle_maximize(self):
+            root = self.root
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if self.is_windows:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _press(self, event):
+            self._drag_from = (event.x_root - self.root.winfo_x(), event.y_root - self.root.winfo_y())
+
+        def _drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.root.geometry("+%d+%d" % (event.x_root - self._drag_from[0], event.y_root - self._drag_from[1]))
+
+        def _grip_press(self, event):
+            self._resize = (event.x_root, event.y_root, self.root.winfo_width(), self.root.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.root.geometry("%dx%d" % (max(self.min_size[0], width + event.x_root - x0),
+                                              max(self.min_size[1], height + event.y_root - y0)))
+
+        def _focus_on_click(self, event):
+            """A window without the Windows title bar does not take the keyboard back by itself: a click in a text
+            field gives it the keyboard again."""
+            if isinstance(event.widget, (self.tk.Entry, self.tk.Text, self.tk.Listbox)):
+                try:
+                    event.widget.focus_force()
+                except self.tk.TclError:
+                    pass
+
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # TICKET DESK 95 - engine: areas, people, tags, support levels, the ticket workflow, SLA, history, export
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import os
+    import sys
+    import sqlite3
+    import datetime as dt
+    import traceback
+    import tkinter as tk
+    from tkinter import filedialog
+
+    TD_APP_NAME = "Ticket System"
+    TD_VERSION = "1.0"
+    TD_PRIORITIES = {1: "Critical", 2: "High", 3: "Normal", 4: "Low"}
+    TD_STATUSES = ("New", "Open", "In progress", "On hold", "Resolved", "Closed")
+    TD_OPEN_STATUSES = ("New", "Open", "In progress", "On hold")
+    # the stations of a ticket's path (the flow graph): where a ticket can be at any moment
+    TD_STAGES = ("logged", "triage", "l1", "l2", "hold", "resolved", "closed")
+    TD_STAGE_NAMES = {"logged": "Logged", "triage": "Triage", "l1": "Level 1", "l2": "Level 2", "hold": "On hold",
+                      "resolved": "Resolved", "closed": "Closed"}
+    TD_DEFAULT_AREAS = [("Hardware", "Computers, monitors, peripherals"), ("Software", "Applications and licences"),
+                        ("Network", "Connection, Wi-Fi, VPN"), ("Accounts and access", "Logins, passwords, rights"),
+                        ("Printers", "Printing and scanning")]
+    TD_DEFAULT_TAGS = [("Incident", "class", "#ffb0b0"), ("Service request", "class", "#b0d0ff"),
+                       ("Question", "class", "#d0ffd0"), ("Change", "class", "#ffe0a0"),
+                       ("Solved", "close", "#a0e0a0"), ("Workaround", "close", "#ffff90"),
+                       ("Duplicate", "close", "#d0d0d0"), ("Cancelled by requester", "close", "#e0c0ff"),
+                       ("No reply from requester", "close", "#ffd0a0"), ("Not reproducible", "close", "#c0e0ff")]
+    TD_DEFAULT_HOLD_REASONS = "Waiting for requester|Waiting for vendor|Waiting for parts|Scheduled for later"
+    # the messages of a ticket's stream (they do not move the ticket; kept in ticket_desk_events with these kinds)
+    TD_MESSAGE_KINDS = {"note": "Internal note", "to requester": "Reply to requester",
+                        "from requester": "Message from requester"}
+
+
+    def _td_app_dir():
+        if getattr(sys, "frozen", False):
+            return os.path.dirname(os.path.abspath(sys.executable))
+        try:
+            return os.path.dirname(os.path.abspath(__file__))
+        except NameError:
+            return os.getcwd()
+
+
+    TD_DB_PATH = os.path.join(_td_app_dir(), "Config", "dbo_bitpack.db")
+    TD_SCHEMA = [
+        "CREATE TABLE IF NOT EXISTS ticket_desk_areas (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, "
+        "description TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_agents (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, "
+        "email TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_area_members (area_id INTEGER NOT NULL, agent_id INTEGER NOT NULL, "
+        "level INTEGER NOT NULL, PRIMARY KEY (area_id, agent_id, level))",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_tags (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, "
+        "kind TEXT NOT NULL DEFAULT 'class', color TEXT NOT NULL DEFAULT '#ffffff', active INTEGER NOT NULL DEFAULT 1, "
+        "sort_order INTEGER NOT NULL DEFAULT 0, UNIQUE (kind, name))",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, "
+        "description TEXT NOT NULL DEFAULT '', requester TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', "
+        "area_id INTEGER, priority INTEGER NOT NULL DEFAULT 3, status TEXT NOT NULL DEFAULT 'New', "
+        "level INTEGER NOT NULL DEFAULT 0, assignee_id INTEGER, close_tag_id INTEGER, "
+        "resolution TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL, resolved_at TEXT, "
+        "closed_at TEXT, hold_reason TEXT NOT NULL DEFAULT '', hold_from_status TEXT NOT NULL DEFAULT '', "
+        "hold_since TEXT, hold_seconds INTEGER NOT NULL DEFAULT 0, escalations INTEGER NOT NULL DEFAULT 0, "
+        "returns INTEGER NOT NULL DEFAULT 0, reassignments INTEGER NOT NULL DEFAULT 0, "
+        "holds INTEGER NOT NULL DEFAULT 0, reopens INTEGER NOT NULL DEFAULT 0)",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_ticket_tags (ticket_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, "
+        "PRIMARY KEY (ticket_id, tag_id))",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ticket_id INTEGER NOT NULL, "
+        "at TEXT NOT NULL, actor TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, from_stage TEXT NOT NULL DEFAULT '', "
+        "to_stage TEXT NOT NULL DEFAULT '', from_status TEXT NOT NULL DEFAULT '', to_status TEXT NOT NULL DEFAULT '', "
+        "from_agent TEXT NOT NULL DEFAULT '', to_agent TEXT NOT NULL DEFAULT '', from_area TEXT NOT NULL DEFAULT '', "
+        "to_area TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '')",
+        "CREATE INDEX IF NOT EXISTS ticket_desk_events_ticket ON ticket_desk_events (ticket_id, id)",
+        "CREATE TABLE IF NOT EXISTS ticket_desk_settings (id INTEGER PRIMARY KEY CHECK (id = 1), "
+        "level1_enabled INTEGER NOT NULL DEFAULT 1, level2_enabled INTEGER NOT NULL DEFAULT 1, "
+        "auto_assign INTEGER NOT NULL DEFAULT 1, require_class_tag INTEGER NOT NULL DEFAULT 1, "
+        "sla_critical REAL NOT NULL DEFAULT 4, sla_high REAL NOT NULL DEFAULT 8, sla_normal REAL NOT NULL DEFAULT 24, "
+        "sla_low REAL NOT NULL DEFAULT 72, hold_reasons TEXT NOT NULL DEFAULT '" + TD_DEFAULT_HOLD_REASONS + "', "
+        "acting_as TEXT NOT NULL DEFAULT '', last_view TEXT NOT NULL DEFAULT 'open')",
+    ]
+
+
+    class TDError(Exception):
+        """An action that the rules do not allow; the message says why (shown to the user as it is)."""
+
+
+    # ───────────────────────────────────────── time ─────────────────────────────────────────────────────
+    def td_stamp(moment):
+        return moment.strftime("%Y-%m-%d %H:%M:%S")
+
+
+    def td_parse(text):
+        return dt.datetime.strptime(text, "%Y-%m-%d %H:%M:%S") if text else None
+
+
+    def td_span(seconds):
+        """3d 4h / 2h 15m / 12m / 0m"""
+        seconds = int(max(0, seconds))
+        days, rest = divmod(seconds, 86400)
+        hours, rest = divmod(rest, 3600)
+        minutes = rest // 60
+        if days:
+            return "%dd %dh" % (days, hours)
+        if hours:
+            return "%dh %02dm" % (hours, minutes)
+        return "%dm" % minutes
+
+
+    def td_code(ticket_id):
+        return "T-%05d" % ticket_id
+
+
+    def td_stage(status, level):
+        if status == "New":
+            return "triage"
+        if status in ("Open", "In progress"):
+            return "l2" if level == 2 else "l1"
+        return {"On hold": "hold", "Resolved": "resolved", "Closed": "closed"}.get(status, "triage")
+
+
+    # ───────────────────────────────────────── the database ─────────────────────────────────────────────
+    class TDStore(object):
+        def __init__(self, path=TD_DB_PATH, clock=None):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self.conn = sqlite3.connect(path, timeout=10)
+            self.conn.row_factory = sqlite3.Row
+            self.clock = clock or dt.datetime.now                         # (the tests move the clock)
+            with self.conn:
+                for sql in TD_SCHEMA:                                     # the same tables as in setup_database_ALL()
+                    self.conn.execute(sql)
+                if not self.conn.execute("SELECT COUNT(*) FROM ticket_desk_areas").fetchone()[0]:
+                    for i, (name, text) in enumerate(TD_DEFAULT_AREAS):
+                        self.conn.execute("INSERT INTO ticket_desk_areas (name, description, sort_order) VALUES (?,?,?)",
+                                          (name, text, i))
+                if not self.conn.execute("SELECT COUNT(*) FROM ticket_desk_tags").fetchone()[0]:
+                    for i, (name, kind, color) in enumerate(TD_DEFAULT_TAGS):
+                        self.conn.execute("INSERT INTO ticket_desk_tags (name, kind, color, sort_order) VALUES (?,?,?,?)",
+                                          (name, kind, color, i))
+                self.conn.execute("INSERT OR IGNORE INTO ticket_desk_settings (id) VALUES (1)")
+
+        def now(self):
+            return self.clock().replace(microsecond=0)
+
+        def close(self):
+            try:
+                self.conn.close()
+            except sqlite3.Error:
+                pass
+
+        def q(self, sql, args=()):
+            return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+        def one(self, sql, args=()):
+            row = self.conn.execute(sql, args).fetchone()
+            return dict(row) if row else None
+
+        # ----- settings ----------------------------------------------------------------------------------
+        def settings(self):
+            s = self.one("SELECT * FROM ticket_desk_settings WHERE id = 1")
+            s["hold_reason_list"] = [r for r in s["hold_reasons"].split("|") if r.strip()]
+            return s
+
+        def save_settings(self, **values):
+            cols = [k for k in values if k not in ("id", "hold_reason_list")]
+            if cols:
+                with self.conn:
+                    self.conn.execute("UPDATE ticket_desk_settings SET %s WHERE id = 1" %
+                                      ", ".join("%s = ?" % c for c in cols), [values[c] for c in cols])
+
+        def sla_hours(self, priority, settings=None):
+            s = settings or self.settings()
+            return float(s[{1: "sla_critical", 2: "sla_high", 3: "sla_normal", 4: "sla_low"}.get(priority, "sla_normal")])
+
+        # ----- areas, people, membership -------------------------------------------------------------------
+        def areas(self, include_inactive=True):
+            return self.q("SELECT * FROM ticket_desk_areas %s ORDER BY sort_order, name" %
+                          ("" if include_inactive else "WHERE active = 1"))
+
+        def area(self, area_id):
+            return self.one("SELECT * FROM ticket_desk_areas WHERE id = ?", (area_id,)) if area_id else None
+
+        def save_area(self, area_id, name, description, active):
+            name = name.strip()
+            if not name:
+                raise TDError("The area needs a name.")
+            clash = self.one("SELECT id FROM ticket_desk_areas WHERE lower(name) = lower(?) AND id != ?", (name, area_id or 0))
+            if clash:
+                raise TDError("There is already an area called '%s'." % name)
+            with self.conn:
+                if area_id:
+                    self.conn.execute("UPDATE ticket_desk_areas SET name = ?, description = ?, active = ? WHERE id = ?",
+                                      (name, description.strip(), int(active), area_id))
+                    return area_id
+                order = self.one("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM ticket_desk_areas")["n"]
+                return self.conn.execute("INSERT INTO ticket_desk_areas (name, description, active, sort_order) "
+                                         "VALUES (?,?,?,?)", (name, description.strip(), int(active), order)).lastrowid
+
+        def delete_area(self, area_id):
+            """Deleted when no ticket uses it; otherwise only deactivated (the history keeps its name). -> 'deleted' or
+            'deactivated'"""
+            used = self.one("SELECT COUNT(*) AS n FROM ticket_desk_tickets WHERE area_id = ?", (area_id,))["n"]
+            with self.conn:
+                if used:
+                    self.conn.execute("UPDATE ticket_desk_areas SET active = 0 WHERE id = ?", (area_id,))
+                    return "deactivated"
+                self.conn.execute("DELETE FROM ticket_desk_area_members WHERE area_id = ?", (area_id,))
+                self.conn.execute("DELETE FROM ticket_desk_areas WHERE id = ?", (area_id,))
+                return "deleted"
+
+        def agents(self, include_inactive=True):
+            return self.q("SELECT * FROM ticket_desk_agents %s ORDER BY sort_order, name" %
+                          ("" if include_inactive else "WHERE active = 1"))
+
+        def agent(self, agent_id):
+            return self.one("SELECT * FROM ticket_desk_agents WHERE id = ?", (agent_id,)) if agent_id else None
+
+        def agent_by_name(self, name):
+            return self.one("SELECT * FROM ticket_desk_agents WHERE name = ?", (name,)) if name else None
+
+        def save_agent(self, agent_id, name, email, active):
+            name = name.strip()
+            if not name:
+                raise TDError("The person needs a name.")
+            clash = self.one("SELECT id FROM ticket_desk_agents WHERE lower(name) = lower(?) AND id != ?", (name, agent_id or 0))
+            if clash:
+                raise TDError("There is already a person called '%s'." % name)
+            with self.conn:
+                if agent_id:
+                    old = self.agent(agent_id)
+                    self.conn.execute("UPDATE ticket_desk_agents SET name = ?, email = ?, active = ? WHERE id = ?",
+                                      (name, email.strip(), int(active), agent_id))
+                    if old and old["name"] != name and self.settings()["acting_as"] == old["name"]:
+                        self.conn.execute("UPDATE ticket_desk_settings SET acting_as = ? WHERE id = 1", (name,))
+                    return agent_id
+                order = self.one("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM ticket_desk_agents")["n"]
+                return self.conn.execute("INSERT INTO ticket_desk_agents (name, email, active, sort_order) VALUES (?,?,?,?)",
+                                         (name, email.strip(), int(active), order)).lastrowid
+
+        def delete_agent(self, agent_id):
+            used = self.one("SELECT COUNT(*) AS n FROM ticket_desk_tickets WHERE assignee_id = ?", (agent_id,))["n"]
+            with self.conn:
+                self.conn.execute("DELETE FROM ticket_desk_area_members WHERE agent_id = ?", (agent_id,))
+                if used:
+                    self.conn.execute("UPDATE ticket_desk_agents SET active = 0 WHERE id = ?", (agent_id,))
+                    return "deactivated"
+                self.conn.execute("DELETE FROM ticket_desk_agents WHERE id = ?", (agent_id,))
+                return "deleted"
+
+        def members(self, area_id, level, active_only=True):
+            return self.q("SELECT a.* FROM ticket_desk_area_members m JOIN ticket_desk_agents a ON a.id = m.agent_id "
+                          "WHERE m.area_id = ? AND m.level = ? %s ORDER BY a.sort_order, a.name" %
+                          ("AND a.active = 1" if active_only else ""), (area_id, level))
+
+        def set_members(self, area_id, level, agent_ids):
+            with self.conn:
+                self.conn.execute("DELETE FROM ticket_desk_area_members WHERE area_id = ? AND level = ?", (area_id, level))
+                for agent_id in agent_ids:
+                    self.conn.execute("INSERT OR IGNORE INTO ticket_desk_area_members (area_id, agent_id, level) "
+                                      "VALUES (?,?,?)", (area_id, agent_id, level))
+
+        def agent_areas(self, agent_id):
+            return self.q("SELECT m.level, ar.name FROM ticket_desk_area_members m JOIN ticket_desk_areas ar "
+                          "ON ar.id = m.area_id WHERE m.agent_id = ? ORDER BY m.level, ar.sort_order", (agent_id,))
+
+        def open_load(self):
+            """{agent_id: open tickets} - for the automatic assignment (the least busy person gets the ticket)."""
+            rows = self.q("SELECT assignee_id, COUNT(*) AS n FROM ticket_desk_tickets WHERE assignee_id IS NOT NULL "
+                          "AND status IN ('Open', 'In progress', 'On hold') GROUP BY assignee_id")
+            return {r["assignee_id"]: r["n"] for r in rows}
+
+        # ----- tags --------------------------------------------------------------------------------------
+        def tags(self, kind=None, include_inactive=True):
+            where, args = [], []
+            if kind:
+                where.append("kind = ?")
+                args.append(kind)
+            if not include_inactive:
+                where.append("active = 1")
+            return self.q("SELECT * FROM ticket_desk_tags %s ORDER BY sort_order, name" %
+                          ("WHERE " + " AND ".join(where) if where else ""), args)
+
+        def tag(self, tag_id):
+            return self.one("SELECT * FROM ticket_desk_tags WHERE id = ?", (tag_id,)) if tag_id else None
+
+        def save_tag(self, tag_id, name, kind, color, active):
+            name = name.strip()
+            if not name:
+                raise TDError("The tag needs a name.")
+            clash = self.one("SELECT id FROM ticket_desk_tags WHERE kind = ? AND lower(name) = lower(?) AND id != ?",
+                             (kind, name, tag_id or 0))
+            if clash:
+                raise TDError("There is already a %s tag called '%s'." % ("closing" if kind == "close" else
+                                                                          "classification", name))
+            with self.conn:
+                if tag_id:
+                    self.conn.execute("UPDATE ticket_desk_tags SET name = ?, color = ?, active = ? WHERE id = ?",
+                                      (name, color, int(active), tag_id))
+                    return tag_id
+                order = self.one("SELECT COALESCE(MAX(sort_order), -1) + 1 AS n FROM ticket_desk_tags")["n"]
+                return self.conn.execute("INSERT INTO ticket_desk_tags (name, kind, color, active, sort_order) "
+                                         "VALUES (?,?,?,?,?)", (name, kind, color, int(active), order)).lastrowid
+
+        def delete_tag(self, tag_id):
+            used = self.one("SELECT (SELECT COUNT(*) FROM ticket_desk_ticket_tags WHERE tag_id = ?) + "
+                            "(SELECT COUNT(*) FROM ticket_desk_tickets WHERE close_tag_id = ?) AS n", (tag_id, tag_id))["n"]
+            with self.conn:
+                if used:
+                    self.conn.execute("UPDATE ticket_desk_tags SET active = 0 WHERE id = ?", (tag_id,))
+                    return "deactivated"
+                self.conn.execute("DELETE FROM ticket_desk_tags WHERE id = ?", (tag_id,))
+                return "deleted"
+
+        def ticket_tags(self, ticket_id):
+            return self.q("SELECT t.* FROM ticket_desk_ticket_tags x JOIN ticket_desk_tags t ON t.id = x.tag_id "
+                          "WHERE x.ticket_id = ? ORDER BY t.sort_order, t.name", (ticket_id,))
+
+        # ----- tickets -----------------------------------------------------------------------------------
+        def ticket(self, ticket_id):
+            return self.one("SELECT * FROM ticket_desk_tickets WHERE id = ?", (ticket_id,))
+
+        def tickets(self):
+            """All tickets with the names the list shows (area, assignee, closing tag)."""
+            return self.q("SELECT t.*, ar.name AS area_name, ag.name AS assignee_name, ct.name AS close_tag_name "
+                          "FROM ticket_desk_tickets t LEFT JOIN ticket_desk_areas ar ON ar.id = t.area_id "
+                          "LEFT JOIN ticket_desk_agents ag ON ag.id = t.assignee_id "
+                          "LEFT JOIN ticket_desk_tags ct ON ct.id = t.close_tag_id ORDER BY t.id DESC")
+
+        def message_summary(self):
+            """{ticket_id: (number of messages, kind of the last message)} for the list and the 'to answer' view."""
+            kinds = tuple(TD_MESSAGE_KINDS)
+            marks = ",".join("?" * len(kinds))
+            result = {}
+            for r in self.q("SELECT ticket_id, COUNT(*) AS n, MAX(id) AS last FROM ticket_desk_events WHERE kind IN (%s) "
+                            "GROUP BY ticket_id" % marks, kinds):
+                result[r["ticket_id"]] = [r["n"], r["last"]]
+            if result:
+                lasts = {r["id"]: r["kind"] for r in self.q("SELECT id, kind FROM ticket_desk_events WHERE id IN (%s)" %
+                                                             ",".join(str(v[1]) for v in result.values()))}
+                for ticket_id, value in result.items():
+                    result[ticket_id] = (value[0], lasts.get(value[1], ""))
+            return result
+
+        def events(self, ticket_id):
+            return self.q("SELECT * FROM ticket_desk_events WHERE ticket_id = ? ORDER BY id", (ticket_id,))
+
+        def all_events(self, since=None):
+            if since:
+                return self.q("SELECT * FROM ticket_desk_events WHERE at >= ? ORDER BY id", (td_stamp(since),))
+            return self.q("SELECT * FROM ticket_desk_events ORDER BY id")
+
+
+    # ───────────────────────────────────────── the workflow (one class: every rule in one place) ────────
+    class TDDesk(object):
+        """Every change to a ticket goes through here: the rules are checked, the ticket is updated and one event is
+        written to its history (the history drives the flow graph and the timeline)."""
+
+        def __init__(self, store):
+            self.store = store
+
+        # ----- helpers -----------------------------------------------------------------------------------
+        def actor(self):
+            return self.store.settings()["acting_as"] or "Dispatcher"
+
+        def _names(self, t):
+            area = self.store.area(t["area_id"])
+            agent = self.store.agent(t["assignee_id"])
+            return (area["name"] if area else ""), (agent["name"] if agent else "")
+
+        def _log(self, ticket_id, kind, before, after, note="", when=None, actor=None):
+            area_b, agent_b = self._names(before) if before else ("", "")
+            area_a, agent_a = self._names(after)
+            stage_b = td_stage(before["status"], before["level"]) if before else "logged"
+            stage_a = td_stage(after["status"], after["level"])
+            self.store.conn.execute(
+                "INSERT INTO ticket_desk_events (ticket_id, at, actor, kind, from_stage, to_stage, from_status, to_status, "
+                "from_agent, to_agent, from_area, to_area, note) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (ticket_id, td_stamp(when or self.store.now()), actor or self.actor(), kind, stage_b, stage_a,
+                 before["status"] if before else "", after["status"], agent_b, agent_a, area_b, area_a, note.strip()))
+
+        def _update(self, ticket_id, kind, note="", actor=None, **changes):
+            """Writes the changes and the event in one transaction (actor: who wrote it, if not the person acting)."""
+            store = self.store
+            before = store.ticket(ticket_id)
+            if before is None:
+                raise TDError("The ticket no longer exists.")
+            now = store.now()
+            changes["updated"] = td_stamp(now)
+            with store.conn:
+                store.conn.execute("UPDATE ticket_desk_tickets SET %s WHERE id = ?" %
+                                   ", ".join("%s = ?" % c for c in changes), list(changes.values()) + [ticket_id])
+                self._log(ticket_id, kind, before, store.ticket(ticket_id), note, now, actor)
+            return store.ticket(ticket_id)
+
+        def _need(self, t, statuses, action):
+            if t["status"] not in statuses:
+                raise TDError("'%s' is not possible while the ticket is %s." % (action, t["status"]))
+
+        def _need_note(self, note, what):
+            if not (note or "").strip():
+                raise TDError("Write %s: it stays in the ticket's history." % what)
+
+        def levels(self):
+            s = self.store.settings()
+            return [lvl for lvl, on in ((1, s["level1_enabled"]), (2, s["level2_enabled"])) if on]
+
+        def entry_level(self):
+            """The level a triaged ticket goes to: Level 1, or Level 2 when Level 1 support is off."""
+            return self.levels()[0] if self.levels() else 1
+
+        def auto_agent(self, area_id, level):
+            """The least busy member of the area at that level (by open tickets), or None."""
+            members = self.store.members(area_id, level)
+            if not members:
+                return None
+            load = self.store.open_load()
+            return min(members, key=lambda a: (load.get(a["id"], 0), a["sort_order"], a["name"]))["id"]
+
+        def _pick_agent(self, area_id, level, assignee):
+            """assignee: an agent id, "auto" or None (the queue: nobody)."""
+            if assignee == "auto":
+                return self.auto_agent(area_id, level) if self.store.settings()["auto_assign"] else None
+            return assignee
+
+        def _hold_end(self, t):
+            """Seconds to add to hold_seconds when the ticket leaves On hold."""
+            since = td_parse(t["hold_since"])
+            return int((self.store.now() - since).total_seconds()) if since else 0
+
+        # ----- the actions -------------------------------------------------------------------------------
+        def create(self, title, requester, description="", contact="", priority=3, area_id=None, tag_ids=()):
+            title, requester = (title or "").strip(), (requester or "").strip()
+            if not title:
+                raise TDError("The ticket needs a title (what is the problem or the request?).")
+            if not requester:
+                raise TDError("Write who asked for it (the requester).")
+            store = self.store
+            now = td_stamp(store.now())
+            with store.conn:
+                ticket_id = store.conn.execute(
+                    "INSERT INTO ticket_desk_tickets (title, description, requester, contact, area_id, priority, status, "
+                    "level, created, updated) VALUES (?,?,?,?,?,?,'New',0,?,?)",
+                    (title, description.strip(), requester, contact.strip(), area_id, int(priority), now, now)).lastrowid
+                for tag_id in tag_ids:
+                    store.conn.execute("INSERT OR IGNORE INTO ticket_desk_ticket_tags VALUES (?,?)", (ticket_id, tag_id))
+                self._log(ticket_id, "logged", None, store.ticket(ticket_id), "Logged by %s for %s" % (self.actor(),
+                                                                                                       requester))
+            return store.ticket(ticket_id)
+
+        def triage(self, ticket_id, area_id, priority, tag_ids, level=None, assignee="auto", note=""):
+            """New -> Level 1 (or Level 2): area, priority and classification are decided here."""
+            store = self.store
+            t = store.ticket(ticket_id)
+            self._need(t, ("New",), "Triage")
+            if not area_id:
+                raise TDError("Choose the area the ticket belongs to.")
+            if store.settings()["require_class_tag"] and not tag_ids:
+                raise TDError("Choose at least one classification tag (the rules ask for it: Setup > Support levels).")
+            level = level or self.entry_level()
+            if level not in self.levels():
+                raise TDError("Level %d support is turned off (Setup > Support levels)." % level)
+            agent_id = self._pick_agent(area_id, level, assignee)
+            with store.conn:
+                store.conn.execute("DELETE FROM ticket_desk_ticket_tags WHERE ticket_id = ?", (ticket_id,))
+                for tag_id in tag_ids:
+                    store.conn.execute("INSERT OR IGNORE INTO ticket_desk_ticket_tags VALUES (?,?)", (ticket_id, tag_id))
+            area = store.area(area_id)
+            text = "Area %s, priority %s, sent to Level %d" % (area["name"], TD_PRIORITIES[int(priority)], level)
+            if level == 2 and 1 in self.levels():
+                text += " directly"
+            return self._update(ticket_id, "triaged", (text + ". " + note).strip(), area_id=area_id, priority=int(priority),
+                                level=level, status="Open", assignee_id=agent_id)
+
+        def start(self, ticket_id):
+            """Open -> In progress, by the person acting (takes it if nobody has it)."""
+            store = self.store
+            t = store.ticket(ticket_id)
+            self._need(t, ("Open",), "Start work")
+            me = store.agent_by_name(store.settings()["acting_as"])
+            if not me:
+                raise TDError("Choose who you are in 'Acting as' (the toolbar) to start work on a ticket.")
+            changes = {"status": "In progress", "assignee_id": me["id"]}
+            if t["assignee_id"] and t["assignee_id"] != me["id"]:
+                changes["reassignments"] = t["reassignments"] + 1
+            return self._update(ticket_id, "started", "", **changes)
+
+        def assign(self, ticket_id, agent_id, note=""):
+            """Another person at the same level (agent_id None = back to the queue)."""
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("Open", "In progress", "On hold"), "Assign")
+            if agent_id == t["assignee_id"]:
+                raise TDError("The ticket is already with this person.")
+            changes = {"assignee_id": agent_id}
+            if t["assignee_id"]:                                          # a first assignment is not a re-assignment
+                changes["reassignments"] = t["reassignments"] + 1
+            if t["status"] == "In progress":                              # the new person has not started yet
+                changes["status"] = "Open"
+            return self._update(ticket_id, "reassigned" if t["assignee_id"] else "assigned", note, **changes)
+
+        def change_area(self, ticket_id, area_id, note=""):
+            """Wrong area: to another area at the same level (counts as a re-assignment)."""
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("Open", "In progress"), "Change area")
+            if not area_id or area_id == t["area_id"]:
+                raise TDError("Choose a different area.")
+            self._need_note(note, "why the ticket changes area")
+            agent_id = self._pick_agent(area_id, t["level"], "auto")
+            return self._update(ticket_id, "rerouted", note, area_id=area_id, assignee_id=agent_id, status="Open",
+                                reassignments=t["reassignments"] + 1)
+
+        def escalate(self, ticket_id, note, assignee="auto"):
+            """Level 1 -> Level 2."""
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("Open", "In progress"), "Escalate")
+            if t["level"] != 1:
+                raise TDError("Only a Level 1 ticket can be escalated.")
+            if 2 not in self.levels():
+                raise TDError("Level 2 support is turned off (Setup > Support levels).")
+            self._need_note(note, "what Level 1 tried and why Level 2 is needed")
+            return self._update(ticket_id, "escalated", note, level=2, status="Open",
+                                assignee_id=self._pick_agent(t["area_id"], 2, assignee), escalations=t["escalations"] + 1)
+
+        def send_back(self, ticket_id, target, note):
+            """A return ('retrimitere'): Level 2 -> Level 1 (target 'l1') or back to triage (target 'triage')."""
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("Open", "In progress"), "Send back")
+            self._need_note(note, "why the ticket is sent back")
+            if target == "l1":
+                if t["level"] != 2:
+                    raise TDError("Only a Level 2 ticket can be sent back to Level 1.")
+                if 1 not in self.levels():
+                    raise TDError("Level 1 support is turned off (Setup > Support levels).")
+                return self._update(ticket_id, "sent back", note, level=1, status="Open",
+                                    assignee_id=self._pick_agent(t["area_id"], 1, "auto"), returns=t["returns"] + 1)
+            return self._update(ticket_id, "sent back", note, level=0, status="New", assignee_id=None,
+                                returns=t["returns"] + 1)
+
+        def suspend(self, ticket_id, reason, note=""):
+            """On hold (the SLA clock stops) until it is resumed."""
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("New", "Open", "In progress"), "Suspend")
+            if not (reason or "").strip():
+                raise TDError("Choose why the ticket waits.")
+            text = reason.strip() + (": " + note.strip() if note.strip() else "")
+            return self._update(ticket_id, "suspended", text, status="On hold", hold_reason=reason.strip(),
+                                hold_from_status=t["status"], hold_since=td_stamp(self.store.now()), holds=t["holds"] + 1)
+
+        def resume(self, ticket_id, note=""):
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("On hold",), "Resume")
+            back = t["hold_from_status"] or "Open"
+            level = t["level"]
+            if back != "New" and level not in self.levels():               # its level was turned off meanwhile
+                level = self.entry_level()
+            return self._update(ticket_id, "resumed", note, status=back, level=level, hold_reason="", hold_since=None,
+                                hold_seconds=t["hold_seconds"] + self._hold_end(t))
+
+        def resolve(self, ticket_id, close_tag_id, resolution):
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("New", "Open", "In progress", "On hold"), "Resolve")
+            tag = self.store.tag(close_tag_id)
+            if not tag or tag["kind"] != "close":
+                raise TDError("Choose the closing tag (how the ticket ended).")
+            self._need_note(resolution, "the resolution (what was done)")
+            changes = dict(status="Resolved", close_tag_id=close_tag_id, resolution=resolution.strip(),
+                           resolved_at=td_stamp(self.store.now()))
+            if t["status"] == "On hold":
+                changes.update(hold_reason="", hold_since=None, hold_seconds=t["hold_seconds"] + self._hold_end(t))
+            return self._update(ticket_id, "resolved", "%s: %s" % (tag["name"], resolution.strip()), **changes)
+
+        def close(self, ticket_id, note=""):
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("Resolved",), "Close")
+            return self._update(ticket_id, "closed", note, status="Closed", closed_at=td_stamp(self.store.now()))
+
+        def reopen(self, ticket_id, note):
+            """Resolved / Closed -> back to the level that resolved it (or the first level that is on)."""
+            t = self.store.ticket(ticket_id)
+            self._need(t, ("Resolved", "Closed"), "Reopen")
+            self._need_note(note, "why the ticket is reopened")
+            if t["level"] in self.levels():
+                level, status, agent = t["level"], "Open", t["assignee_id"]
+            elif t["level"] == 0:                                         # resolved straight from triage
+                level, status, agent = 0, "New", None
+            else:
+                level, status, agent = self.entry_level(), "Open", self._pick_agent(t["area_id"], self.entry_level(), "auto")
+            return self._update(ticket_id, "reopened", note, status=status, level=level, assignee_id=agent,
+                                close_tag_id=None, resolution="", resolved_at=None, closed_at=None,
+                                reopens=t["reopens"] + 1)
+
+        def add_message(self, ticket_id, kind, text):
+            """A message in the ticket's stream: an internal note, a reply to the requester, or what the requester
+            answered (written in the requester's name). The ticket does not move."""
+            if kind not in TD_MESSAGE_KINDS:
+                raise TDError("Unknown kind of message.")
+            if not (text or "").strip():
+                raise TDError("Write the message first.")
+            t = self.store.ticket(ticket_id)
+            if t["status"] == "Closed":
+                raise TDError("The ticket is closed: reopen it to write in it.")
+            changes = {}
+            return self._update(ticket_id, kind, text, actor=t["requester"] if kind == "from requester" else None, **changes)
+
+        def add_note(self, ticket_id, note):
+            return self.add_message(ticket_id, "note", note)
+
+        def edit_details(self, ticket_id, title, requester, contact, description, priority, tag_ids):
+            t = self.store.ticket(ticket_id)
+            if t["status"] == "Closed":
+                raise TDError("The ticket is closed: reopen it to change it.")
+            if not (title or "").strip() or not (requester or "").strip():
+                raise TDError("The ticket needs a title and a requester.")
+            store = self.store
+            with store.conn:
+                store.conn.execute("DELETE FROM ticket_desk_ticket_tags WHERE ticket_id = ?", (ticket_id,))
+                for tag_id in tag_ids:
+                    store.conn.execute("INSERT OR IGNORE INTO ticket_desk_ticket_tags VALUES (?,?)", (ticket_id, tag_id))
+            what = []
+            if int(priority) != t["priority"]:
+                what.append("priority %s -> %s" % (TD_PRIORITIES[t["priority"]], TD_PRIORITIES[int(priority)]))
+            if title.strip() != t["title"]:
+                what.append("title")
+            return self._update(ticket_id, "edited", ("Changed " + ", ".join(what)) if what else "Details changed",
+                                title=title.strip(), requester=requester.strip(), contact=contact.strip(),
+                                description=description.strip(), priority=int(priority))
+
+        def level_switch_moves(self, level1_enabled, level2_enabled):
+            """When a support level is turned off, its open tickets have to go to the other level: -> [(ticket, level)]"""
+            moves = []
+            for t in self.store.q("SELECT * FROM ticket_desk_tickets WHERE status IN ('Open', 'In progress', 'On hold')"):
+                if t["level"] == 1 and not level1_enabled and level2_enabled:
+                    moves.append((t, 2))
+                elif t["level"] == 2 and not level2_enabled and level1_enabled:
+                    moves.append((t, 1))
+            return moves
+
+        def move_level(self, ticket_id, level, why):
+            t = self.store.ticket(ticket_id)
+            status = "Open" if t["status"] == "In progress" else t["status"]
+            return self._update(ticket_id, "moved", why, level=level, status=status,
+                                assignee_id=self._pick_agent(t["area_id"], level, "auto"))
+
+        # ----- what can be done now (the buttons follow this) ----------------------------------------------
+        def allowed(self, t):
+            """{action: (allowed, why not)} for the ticket as it is."""
+            if t is None:
+                return {}
+            levels = self.levels()
+            st, lvl = t["status"], t["level"]
+            me = self.store.agent_by_name(self.store.settings()["acting_as"])
+            a = {}
+            a["triage"] = (st == "New", "Only a New ticket is triaged.")
+            a["start"] = (st == "Open" and me is not None,
+                          "Choose who you are in 'Acting as' first." if st == "Open" else "Only an Open ticket can be started.")
+            a["assign"] = (st in ("Open", "In progress", "On hold"), "Triage the ticket first." if st == "New"
+                           else "The ticket is finished.")
+            a["area"] = (st in ("Open", "In progress"), "Possible while the ticket is Open or In progress.")
+            a["escalate"] = (st in ("Open", "In progress") and lvl == 1 and 2 in levels,
+                             "Level 2 support is off." if 2 not in levels else "Only a Level 1 ticket (Open or In progress).")
+            a["back_l1"] = (st in ("Open", "In progress") and lvl == 2 and 1 in levels,
+                            "Level 1 support is off." if 1 not in levels else "Only a Level 2 ticket (Open or In progress).")
+            a["back_triage"] = (st in ("Open", "In progress"), "Possible while the ticket is Open or In progress.")
+            a["suspend"] = (st in ("New", "Open", "In progress"), "Not possible while the ticket is %s." % st)
+            a["resume"] = (st == "On hold", "Only a ticket On hold is resumed.")
+            a["resolve"] = (st in TD_OPEN_STATUSES, "The ticket is already %s." % st)
+            a["close"] = (st == "Resolved", "Only a Resolved ticket is closed.")
+            a["reopen"] = (st in ("Resolved", "Closed"), "Only a Resolved or Closed ticket is reopened.")
+            a["note"] = (st != "Closed", "The ticket is closed: reopen it to write in it.")
+            a["edit"] = (st != "Closed", "Reopen the ticket to change it.")
+            return a
+
+
+    # ───────────────────────────────────────── SLA, guidance ────────────────────────────────────────────
+    def td_sla(store, t, settings=None, now=None):
+        """(hours allowed, seconds used, seconds left or None when finished, paused). The clock stops On hold."""
+        now = now or store.now()
+        allowed = store.sla_hours(t["priority"], settings)
+        end = td_parse(t["resolved_at"]) or now
+        used = (end - td_parse(t["created"])).total_seconds() - t["hold_seconds"]
+        paused = t["status"] == "On hold"
+        if paused and t["hold_since"]:
+            used -= (now - td_parse(t["hold_since"])).total_seconds()
+        left = None if t["status"] in ("Resolved", "Closed") else allowed * 3600 - used
+        return allowed, max(0, used), left, paused
+
+
+    def td_sla_text(store, t, settings=None):
+        allowed, used, left, paused = td_sla(store, t, settings)
+        if left is None:
+            return "met" if used <= allowed * 3600 else "missed by " + td_span(used - allowed * 3600)
+        if paused:
+            return "paused, " + (td_span(left) + " left" if left >= 0 else "over by " + td_span(-left))
+        return td_span(left) + " left" if left >= 0 else "OVER by " + td_span(-left)
+
+
+    def td_guidance(store, t):
+        """One sentence: where the ticket is and what has to happen next."""
+        area = store.area(t["area_id"])
+        agent = store.agent(t["assignee_id"])
+        area_name = area["name"] if area else "no area"
+        lvl = "Level %d" % t["level"]
+        st = t["status"]
+        if st == "New":
+            if t["returns"]:
+                return "Sent back to triage: check the area and the level again, then triage it."
+            return "Waiting for triage: choose the area, the priority, the classification and the level."
+        if st == "Open":
+            if agent:
+                return "In the %s queue of %s, given to %s, who has not started yet." % (lvl, area_name, agent["name"])
+            return "In the %s queue of %s: nobody has it yet. Assign it or let someone start work." % (lvl, area_name)
+        if st == "In progress":
+            return "%s is working on it (%s, %s)." % (agent["name"] if agent else "Somebody", lvl, area_name)
+        if st == "On hold":
+            since = td_parse(t["hold_since"])
+            wait = td_span((store.now() - since).total_seconds()) if since else ""
+            return "Suspended for %s: %s. The SLA clock is stopped; resume it when the answer comes." % (wait, t["hold_reason"])
+        tag = store.tag(t["close_tag_id"])
+        if st == "Resolved":
+            return "Resolved (%s). Close it once the requester confirms, or reopen it." % (tag["name"] if tag else "-")
+        return "Closed (%s)." % (tag["name"] if tag else "-")
+
+
+    # ───────────────────────────────────────── the path of a ticket (graph data) ────────────────────────
+    TD_EDGE_KIND = {"escalated": "forward", "triaged": "forward", "resolved": "forward", "closed": "forward",
+                    "logged": "forward", "sent back": "back", "reopened": "reopen", "suspended": "hold",
+                    "resumed": "hold", "moved": "moved"}
+    TD_LOOP_KINDS = ("reassigned", "rerouted", "assigned")
+
+
+    def td_path(store, ticket_id, now=None):
+        """Everything the graphs need about one ticket:
+           steps: [(number, event)] for every event except notes
+           edges: {(from_stage, to_stage): [step numbers]}
+           loops: {stage: [(number, event)]} re-assignments, area changes, start of work inside a stage
+           stays: [(stage, start, end, agent)] one stay per stage visit (the timeline bars)
+           time:  {stage: seconds}, visited: set of stages, current: stage"""
+        now = now or store.now()
+        t = store.ticket(ticket_id)
+        events = store.events(ticket_id)
+        steps, edges, loops, stays = [], {}, {}, []
+        number = 0
+        current, since, agent = None, None, ""
+        for e in events:
+            if e["kind"] in TD_MESSAGE_KINDS:
+                continue
+            number += 1
+            steps.append((number, e))
+            at = td_parse(e["at"])
+            if e["kind"] == "logged":
+                edges.setdefault(("logged", "triage"), []).append(number)
+                current, since, agent = "triage", at, e["to_agent"]
+                continue
+            if e["from_stage"] != e["to_stage"]:
+                edges.setdefault((e["from_stage"], e["to_stage"]), []).append(number)
+                if current is not None:
+                    stays.append((current, since, at, agent))
+                current, since = e["to_stage"], at
+            elif e["kind"] in TD_LOOP_KINDS or e["from_agent"] != e["to_agent"] or e["from_area"] != e["to_area"]:
+                # a new person or a new area inside the same station (a loop on the station in the graph)
+                loops.setdefault(e["to_stage"], []).append((number, e))
+                if e["from_agent"] != e["to_agent"] and current is not None:    # a new person: a new piece of the bar
+                    stays.append((current, since, at, agent))
+                    since = at
+            agent = e["to_agent"]
+        if current is not None:
+            end = td_parse(t["closed_at"]) if current == "closed" else now
+            stays.append((current, since, end or now, agent))
+        time = {}
+        for stage, start, end, _a in stays:
+            if stage != "closed":
+                time[stage] = time.get(stage, 0) + max(0, (end - start).total_seconds())
+        visited = {"logged"} | {s for s, _a, _b, _c in stays}
+        return {"ticket": t, "steps": steps, "edges": edges, "loops": loops, "stays": stays, "time": time,
+                "visited": visited, "current": td_stage(t["status"], t["level"]), "notes":
+                [e for e in events if e["kind"] in TD_MESSAGE_KINDS]}
+
+
+    def td_overview(store, days=30):
+        """The whole desk: open tickets per stage, transitions in the last days, the suspended ones and the counters."""
+        tickets = store.tickets()
+        counts = {s: 0 for s in TD_STAGES}
+        for t in tickets:
+            counts[td_stage(t["status"], t["level"])] += 1
+        counts["logged"] = sum(1 for t in tickets if td_parse(t["created"]) >= store.now() - dt.timedelta(days=days))
+        edges = {}
+        for e in store.all_events(store.now() - dt.timedelta(days=days)):
+            if e["kind"] == "logged":
+                edges[("logged", "triage")] = edges.get(("logged", "triage"), 0) + 1
+            elif e["from_stage"] != e["to_stage"]:
+                key = (e["from_stage"], e["to_stage"])
+                edges[key] = edges.get(key, 0) + 1
+        open_t = [t for t in tickets if t["status"] in TD_OPEN_STATUSES]
+        settings = store.settings()
+        overdue = [t for t in open_t if (td_sla(store, t, settings)[2] or 0) < 0]
+        hold = {}
+        for t in open_t:
+            if t["status"] == "On hold":
+                hold[t["hold_reason"]] = hold.get(t["hold_reason"], 0) + 1
+        return {"counts": counts, "edges": edges, "open": len(open_t), "overdue": len(overdue), "hold": hold,
+                "sent_back": sum(1 for t in open_t if t["returns"]), "reassigned": sum(1 for t in open_t if t["reassignments"]),
+                "reopened": sum(1 for t in open_t if t["reopens"]), "days": days}
+
+
+    # ───────────────────────────────────────── export ───────────────────────────────────────────────────
+    def td_export_xlsx(store, path, tickets):
+        """Two sheets: the tickets shown in the list, and every event of those tickets."""
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Tickets"
+        head = ["Ticket", "Title", "Requester", "Contact", "Area", "Priority", "Status", "Level", "Assignee",
+                "Classification", "Closing tag", "Resolution", "Created", "Resolved", "Closed", "Time on hold",
+                "Escalations", "Sent back", "Re-assignments", "Suspended", "Reopened", "SLA"]
+        ws.append(head)
+        settings = store.settings()
+        for t in tickets:
+            tags = ", ".join(x["name"] for x in store.ticket_tags(t["id"]))
+            ws.append([td_code(t["id"]), t["title"], t["requester"], t["contact"], t["area_name"] or "",
+                       TD_PRIORITIES.get(t["priority"], ""), t["status"], ("Level %d" % t["level"]) if t["level"] else "",
+                       t["assignee_name"] or "", tags, t["close_tag_name"] or "", t["resolution"], t["created"],
+                       t["resolved_at"] or "", t["closed_at"] or "", td_span(t["hold_seconds"]), t["escalations"],
+                       t["returns"], t["reassignments"], t["holds"], t["reopens"], td_sla_text(store, t, settings)])
+        ev = wb.create_sheet("History")
+        ev.append(["Ticket", "When", "Who", "What", "From", "To", "Person before", "Person after", "Area before",
+                   "Area after", "Note"])
+        for t in tickets:
+            for e in store.events(t["id"]):
+                ev.append([td_code(t["id"]), e["at"], e["actor"], e["kind"], TD_STAGE_NAMES.get(e["from_stage"], ""),
+                           TD_STAGE_NAMES.get(e["to_stage"], ""), e["from_agent"], e["to_agent"], e["from_area"],
+                           e["to_area"], e["note"]])
+        for sheet in (ws, ev):
+            for cell in sheet[1]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = PatternFill("solid", fgColor="000080")
+                cell.alignment = Alignment(vertical="center")
+            sheet.freeze_panes = "A2"
+            for column in sheet.columns:
+                width = max(len(str(c.value or "")) for c in column[:200])
+                sheet.column_dimensions[column[0].column_letter].width = min(60, max(9, width + 2))
+        wb.save(path)
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    # TICKET DESK 95 - the window
+    # ═════════════════════════════════════════════════════════════════════════════════════════════════════════
+    import tkinter.font as tkfont
+
+    TD_FACE, TD_SHADOW, TD_LIGHT, TD_NAVY, TD_WHITE, TD_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#ffffff", "#000000"
+    TD_FONT = ("MS Sans Serif", 8)
+    TD_FONT_B = ("MS Sans Serif", 8, "bold")
+    TD_FONT_BIG = ("MS Sans Serif", 10, "bold")
+    TD_PRIORITY_COLOURS = {1: "#c00000", 2: "#d06000", 3: TD_BLACK, 4: TD_SHADOW}
+    TD_EDGE_COLOURS = {"forward": TD_NAVY, "back": "#c00000", "reopen": "#d07000", "hold": "#800080", "moved": TD_SHADOW}
+    TD_LANE_COLOURS = {"triage": "#ffffa0", "l1": "#a0c8ff", "l2": "#7090ff", "hold": "#e0a0e0", "resolved": "#a0e0a0",
+                       "closed": "#c8c8c8"}
+    TD_VIEWS = [("open", "All open"), ("triage", "New - to triage"), ("l1", "Level 1"), ("l2", "Level 2"),
+                ("hold", "On hold (suspended)"), ("answer", "Requester wrote (to answer)"), ("sent_back", "Sent back"), ("reassigned", "Re-assigned"),
+                ("reopened", "Reopened"), ("overdue", "Over SLA"), ("mine", "My tickets"), ("unassigned", "Unassigned"),
+                ("resolved", "Resolved"), ("closed", "Closed"), ("all", "All tickets")]
+
+
+    def td_button(parent, text, command, width=None, bold=False):
+        b = tk.Button(parent, text=text, command=command, font=TD_FONT_B if bold else TD_FONT, bg=TD_FACE, fg=TD_BLACK,
+                      activebackground=TD_FACE, relief="raised", bd=2, highlightthickness=0, takefocus=0, padx=5, pady=1,
+                      disabledforeground=TD_SHADOW)
+        if width:
+            b.config(width=width)
+        return b
+
+
+    def td_label(parent, text="", **kw):
+        opts = dict(text=text, font=TD_FONT, bg=TD_FACE, fg=TD_BLACK, anchor="w")
+        opts.update(kw)
+        return tk.Label(parent, **opts)
+
+
+    def td_entry(parent, width=30, value=""):
+        e = tk.Entry(parent, font=TD_FONT, bg=TD_WHITE, fg=TD_BLACK, relief="sunken", bd=2, highlightthickness=0,
+                     width=width, insertbackground=TD_BLACK)
+        e.insert(0, value or "")
+        return e
+
+
+    def td_text(parent, width=50, height=5, value=""):
+        frame = tk.Frame(parent, bg=TD_FACE)
+        t = tk.Text(frame, font=TD_FONT, bg=TD_WHITE, fg=TD_BLACK, relief="sunken", bd=2, highlightthickness=0,
+                    width=width, height=height, wrap="word", insertbackground=TD_BLACK, undo=True)
+        sb = td_scrollbar(frame, "vertical", t.yview)
+        t.config(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        t.pack(side="left", fill="both", expand=True)
+        t.insert("1.0", value or "")
+        return frame, t
+
+
+    def td_spin(parent, lo, hi, value, width=6):
+        s = tk.Spinbox(parent, from_=lo, to=hi, increment=1, width=width, font=TD_FONT, bg=TD_WHITE, relief="sunken",
+                       bd=2, buttonbackground=TD_FACE, highlightthickness=0, justify="right")
+        s.delete(0, "end")
+        s.insert(0, ("%g" % value))
+        return s
+
+
+    def td_checkbox(parent, text, variable, command=None):
+        return tk.Checkbutton(parent, text=text, variable=variable, font=TD_FONT, bg=TD_FACE, activebackground=TD_FACE,
+                              selectcolor=TD_WHITE, highlightthickness=0, takefocus=0, anchor="w", command=command,
+                              disabledforeground=TD_SHADOW)
+
+
+    def td_radio(parent, text, variable, value, command=None):
+        return tk.Radiobutton(parent, text=text, variable=variable, value=value, font=TD_FONT, bg=TD_FACE,
+                              activebackground=TD_FACE, selectcolor=TD_WHITE, highlightthickness=0, takefocus=0,
+                              anchor="w", command=command, disabledforeground=TD_SHADOW)
+
+
+    def td_scrollbar(parent, orient, command):
+        return tk.Scrollbar(parent, orient=orient, command=command, bg=TD_FACE, troughcolor="#dfdfdf",
+                            activebackground=TD_FACE, bd=1, relief="raised", highlightthickness=0, width=16)
+
+
+    def td_group(parent, text):
+        return tk.LabelFrame(parent, text=text, font=TD_FONT, bg=TD_FACE, fg=TD_BLACK, bd=2, relief="groove", padx=6,
+                             pady=4)
+
+
+    def td_listbox(parent, height=10, width=30, multiple=False):
+        frame = tk.Frame(parent, bg=TD_FACE)
+        lb = tk.Listbox(frame, font=TD_FONT, bg=TD_WHITE, fg=TD_BLACK, relief="sunken", bd=2, highlightthickness=0,
+                        selectbackground=TD_NAVY, selectforeground=TD_WHITE, activestyle="none", height=height,
+                        width=width, exportselection=False, selectmode="multiple" if multiple else "browse")
+        sb = td_scrollbar(frame, "vertical", lb.yview)
+        lb.config(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        lb.pack(side="left", fill="both", expand=True)
+        return frame, lb
+
+
+    def td_modal(win):
+        def grab():
+            try:
+                if win.winfo_exists() and win.winfo_viewable():
+                    win.grab_set()
+                    win.focus_force()
+                elif win.winfo_exists():
+                    win.after(80, grab)
+            except tk.TclError:
+                pass
+        win.after(120, grab)
+
+
+    def td_dialog(parent, title):
+        win = W95Toplevel(parent)
+        win.title(title)
+        win.configure(bg=TD_FACE)
+        win.resizable(False, False)
+        body = tk.Frame(win, bg=TD_FACE, padx=12, pady=10)
+        body.pack(fill="both", expand=True)
+        return win, body
+
+
+    def td_buttons(body, row, ok_text, ok, cancel, columnspan=2):
+        bar = tk.Frame(body, bg=TD_FACE)
+        bar.grid(row=row, column=0, columnspan=columnspan, sticky="e", pady=(10, 0))
+        td_button(bar, ok_text, ok, width=12, bold=True).pack(side="left", padx=3)
+        td_button(bar, "Cancel", cancel, width=10).pack(side="left", padx=3)
+        return bar
+
+
+    def td_text_colour(hex_colour):
+        try:
+            c = hex_colour.lstrip("#")
+            r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+            return TD_BLACK if r * 0.299 + g * 0.587 + b * 0.114 > 140 else TD_WHITE
+        except (ValueError, IndexError):
+            return TD_BLACK
+
+
+    class TDCombo(tk.Frame):
+        """A Windows 95 drop-down list of (label, value) pairs."""
+
+        def __init__(self, parent, items, value=None, command=None, width=24):
+            tk.Frame.__init__(self, parent, bg=TD_WHITE, bd=2, relief="sunken")
+            self.items = list(items)
+            self.command = command
+            self.value = None
+            self.label = tk.Label(self, text="", bg=TD_WHITE, fg=TD_BLACK, font=TD_FONT, anchor="w", width=width, padx=2)
+            self.label.pack(side="left", fill="x", expand=True)
+            self._pixel = tk.PhotoImage(master=self, width=1, height=1)
+            marlett = "Marlett" in tkfont.families(self)
+            self.button = tk.Button(self, text="6" if marlett else "v", font=("Marlett", 8) if marlett else TD_FONT_B,
+                                    image=self._pixel, compound="center", width=13, height=13, padx=0, pady=0, bg=TD_FACE,
+                                    activebackground=TD_FACE, bd=2, relief="raised", highlightthickness=0, takefocus=0,
+                                    command=self.open)
+            self.button.pack(side="right")
+            self.label.bind("<Button-1>", lambda e: self.open())
+            self.set(value if value is not None or not self.items else self.items[0][1])
+
+        def set_items(self, items, value=None):
+            self.items = list(items)
+            values = [v for _l, v in self.items]
+            self.set(value if value in values else (values[0] if values else None))
+
+        def get(self):
+            return self.value
+
+        def set(self, value):
+            self.value = value
+            label = next((l for l, v in self.items if v == value), "")
+            self.label.config(text=label)
+
+        def open(self):
+            if str(self.button.cget("state")) == "disabled":
+                return
+            menu = tk.Menu(self, tearoff=0, font=TD_FONT, bg=TD_WHITE, fg=TD_BLACK, activebackground=TD_NAVY,
+                           activeforeground=TD_WHITE)
+            for label, value in self.items:
+                menu.add_command(label=label, command=lambda v=value: self.choose(v))
+            menu.tk_popup(self.winfo_rootx(), self.winfo_rooty() + self.winfo_height())
+
+        def choose(self, value):
+            self.set(value)
+            if self.command:
+                self.command(value)
+
+        def enable(self, on):
+            self.button.config(state="normal" if on else "disabled")
+            self.label.config(fg=TD_BLACK if on else TD_SHADOW)
+
+
+    # ───────────────────────────────────────── the ticket list (a Windows 95 list view) ─────────────────
+    class TDTable(tk.Frame):
+        ROW_H, HEAD_H = 19, 20
+
+        def __init__(self, parent, columns, on_select, on_double=None):
+            """columns: [(key, title, width, align)]; width 0 = takes the remaining room."""
+            tk.Frame.__init__(self, parent, bg=TD_FACE, bd=2, relief="sunken")
+            self.columns = columns
+            self.on_select, self.on_double = on_select, on_double
+            self.rows, self.keys = [], []
+            self.selected = None
+            self.sort_key, self.sort_rev = None, False
+            self.top = 0
+            self.font = tkfont.Font(family=TD_FONT[0], size=TD_FONT[1])
+            self.canvas = tk.Canvas(self, bg=TD_WHITE, highlightthickness=0, bd=0, takefocus=1)
+            self.vbar = td_scrollbar(self, "vertical", self._scroll)
+            self.vbar.pack(side="right", fill="y")
+            self.canvas.pack(side="left", fill="both", expand=True)
+            self.canvas.bind("<Configure>", lambda e: self.draw())
+            self.canvas.bind("<Button-1>", self._click)
+            self.canvas.bind("<Double-Button-1>", self._double)
+            self.canvas.bind("<MouseWheel>", lambda e: self._scroll("scroll", -1 if e.delta > 0 else 1, "units"))
+            self.canvas.bind("<Button-4>", lambda e: self._scroll("scroll", -1, "units"))
+            self.canvas.bind("<Button-5>", lambda e: self._scroll("scroll", 1, "units"))
+            self.canvas.bind("<Up>", lambda e: self.move(-1))
+            self.canvas.bind("<Down>", lambda e: self.move(1))
+            self.canvas.bind("<Prior>", lambda e: self.move(-self.visible()))
+            self.canvas.bind("<Next>", lambda e: self.move(self.visible()))
+
+        def widths(self):
+            total = max(100, self.canvas.winfo_width())
+            fixed = sum(w for _k, _t, w, _a in self.columns if w)
+            flex = max(80, total - fixed)
+            return [w or flex for _k, _t, w, _a in self.columns]
+
+        def visible(self):
+            return max(1, (self.canvas.winfo_height() - self.HEAD_H) // self.ROW_H)
+
+        def set_rows(self, rows, keep=True):
+            """rows: [(key, {column: (text, colour)}, sort_values)]"""
+            self.rows = rows
+            if self.sort_key:
+                index = [k for k, _t, _w, _a in self.columns].index(self.sort_key)
+                self.rows.sort(key=lambda r: r[2][index], reverse=self.sort_rev)
+            self.keys = [r[0] for r in self.rows]
+            if not keep or self.selected not in self.keys:
+                self.selected = None
+            self.top = max(0, min(self.top, len(self.rows) - self.visible()))
+            self.draw()
+
+        def select(self, key, notify=True):
+            self.selected = key
+            if key in self.keys:
+                i = self.keys.index(key)
+                if i < self.top:
+                    self.top = i
+                elif i >= self.top + self.visible():
+                    self.top = i - self.visible() + 1
+            self.draw()
+            if notify:
+                self.on_select(key)
+
+        def move(self, step):
+            if not self.keys:
+                return "break"
+            i = self.keys.index(self.selected) if self.selected in self.keys else -1
+            self.select(self.keys[max(0, min(len(self.keys) - 1, i + step))])
+            return "break"
+
+        def _scroll(self, *args):
+            if args[0] == "moveto":
+                self.top = int(float(args[1]) * max(1, len(self.rows)))
+            else:
+                step = int(args[1]) * (self.visible() if args[2] == "pages" else 3)
+                self.top += step
+            self.top = max(0, min(self.top, len(self.rows) - self.visible()))
+            self.draw()
+
+        def _row_at(self, event):
+            if event.y < self.HEAD_H:
+                return None
+            i = self.top + (event.y - self.HEAD_H) // self.ROW_H
+            return self.keys[i] if 0 <= i < len(self.keys) else None
+
+        def _click(self, event):
+            self.canvas.focus_set()
+            if event.y < self.HEAD_H:
+                x = 0
+                for (key, _t, _w, _a), w in zip(self.columns, self.widths()):
+                    if x <= event.x < x + w:
+                        self.sort_rev = not self.sort_rev if self.sort_key == key else False
+                        self.sort_key = key
+                        self.set_rows(self.rows)
+                        return
+                    x += w
+                return
+            key = self._row_at(event)
+            if key is not None:
+                self.select(key)
+
+        def _double(self, event):
+            key = self._row_at(event)
+            if key is not None and self.on_double:
+                self.on_double(key)
+
+        def fit(self, text, width):
+            if self.font.measure(text) <= width:
+                return text
+            while text and self.font.measure(text + "...") > width:
+                text = text[:-1]
+            return text + "..."
+
+        def draw(self):
+            c = self.canvas
+            c.delete("all")
+            widths = self.widths()
+            cw = max(100, c.winfo_width())
+            x = 0
+            for (key, title, _w, align), w in zip(self.columns, widths):
+                c.create_rectangle(x, 0, x + w, self.HEAD_H, fill=TD_FACE, outline="")
+                c.create_line(x, self.HEAD_H - 1, x, 0, x + w - 1, 0, fill=TD_LIGHT)
+                c.create_line(x, self.HEAD_H - 1, x + w - 1, self.HEAD_H - 1, x + w - 1, 0, fill=TD_SHADOW)
+                mark = (" v" if self.sort_rev else " ^") if key == self.sort_key else ""
+                c.create_text(x + 5, self.HEAD_H // 2, text=self.fit(title + mark, w - 8), anchor="w", font=TD_FONT)
+                x += w
+            y = self.HEAD_H
+            for key, cells, _sort in self.rows[self.top:self.top + self.visible() + 1]:
+                selected = key == self.selected
+                if selected:
+                    c.create_rectangle(0, y, cw, y + self.ROW_H, fill=TD_NAVY, outline="")
+                x = 0
+                for (ckey, _t, _w, align), w in zip(self.columns, widths):
+                    text, colour = cells.get(ckey, ("", TD_BLACK))
+                    tx = x + w - 5 if align == "e" else x + 5
+                    c.create_text(tx, y + self.ROW_H // 2, text=self.fit(text, w - 10), anchor=align, font=TD_FONT,
+                                  fill=TD_WHITE if selected else colour)
+                    x += w
+                y += self.ROW_H
+            if not self.rows:
+                c.create_text(cw // 2, self.HEAD_H + 30, text="No tickets in this view.", font=TD_FONT, fill=TD_SHADOW)
+            total = max(1, len(self.rows))
+            self.vbar.set(self.top / float(total), min(1.0, (self.top + self.visible()) / float(total)))
+
+
+    # ───────────────────────────────────────── the main window ──────────────────────────────────────────
+    class TDApp(object):
+        COLUMNS = [("code", "Ticket", 70, "w"), ("prio", "Priority", 62, "w"), ("title", "Title", 0, "w"),
+                   ("req", "Requester", 100, "w"), ("area", "Area", 110, "w"), ("stage", "Where", 76, "w"),
+                   ("status", "Status", 78, "w"), ("agent", "Assigned to", 96, "w"), ("msgs", "Msgs", 44, "e"),
+                   ("age", "Age", 58, "e"),
+                   ("sla", "SLA", 112, "w")]
+        ACTIONS = [("triage", "Triage..."), ("start", "Start work"), ("assign", "Assign..."), ("area", "Change area..."),
+                   ("escalate", "Escalate..."), ("back", "Send back..."), ("suspend", "Suspend..."), ("resume", "Resume"),
+                   ("resolve", "Resolve..."), ("close", "Close"), ("reopen", "Reopen..."), ("note", "Message..."),
+                   ("edit", "Edit...")]
+        TABS = [("stream", "Stream"), ("flow", "Flow"), ("timeline", "Timeline"), ("history", "History"),
+                ("overview", "Desk overview")]
+        STREAM_COLOURS = {"from requester": ("#ffffff", TD_SHADOW), "to requester": ("#dce8ff", TD_NAVY),
+                          "note": ("#fff6c0", "#a08000")}
+
+        def __init__(self, root, store=None):
+            self.root = root
+            self.store = store or TDStore()
+            self.desk = TDDesk(self.store)
+            self.app = W95App(root, TD_APP_NAME, self.on_close, 1400, 900, (1080, 640), ("#000080", "#ff4040"))
+            self.view = self.store.settings().get("last_view") or "open"
+            self.tab = "stream"
+            self.current = None
+            self.msg_summary = {}
+            self._stream_state = None
+            self.tickets = []
+            self.hover_items = {}
+            root.report_callback_exception = self.on_error
+            self.build_menus()
+            self.build_toolbar()
+            self.build_body()
+            self.st_count = self.app.status_field("", 18)
+            self.st_levels = self.app.status_field("", 24)
+            root.bind("<Control-n>", lambda e: self.new_ticket())
+            root.bind("<Control-N>", lambda e: self.new_ticket())
+            root.bind("<F5>", lambda e: self.reload())
+            root.bind("<Control-f>", lambda e: (self.search.focus_set(), "break")[1])
+            self.reload()
+            self._tick()
+
+        # ═════════════════════════════════════ building ══════════════════════════════════════════════════
+        def build_menus(self):
+            a = self.app
+            a.add_menu("File", [("New ticket...", "Ctrl+N", self.new_ticket), None,
+                                ("Export list to Excel...", "", self.export), None, ("Exit", "", self.on_close)])
+            self.ticket_menu = a.add_menu("Ticket", [(label, "", lambda k=key: self.do(k)) for key, label in self.ACTIONS])
+            a.add_menu("View", [("Flow of the ticket", "", lambda: self.set_tab("flow")),
+                                ("Timeline of the ticket", "", lambda: self.set_tab("timeline")),
+                                ("History of the ticket", "", lambda: self.set_tab("history")),
+                                ("Desk overview", "", lambda: self.set_tab("overview")), None,
+                                ("Refresh", "F5", self.reload)])
+            a.add_menu("Setup", [("Areas and responsible people...", "", self.areas_dialog),
+                                 ("People...", "", self.people_dialog), ("Tags...", "", self.tags_dialog), None,
+                                 ("Support levels and rules...", "", self.rules_dialog)])
+            a.add_menu("Help", [("How a ticket moves", "", self.help_flow), ("About", "", self.about)])
+
+        def build_toolbar(self):
+            bar = tk.Frame(self.app.body, bg=TD_FACE, bd=1, relief="raised")
+            bar.pack(side="top", fill="x")
+            td_button(bar, "New ticket...", self.new_ticket, bold=True).pack(side="left", padx=(4, 2), pady=3)
+            td_button(bar, "Refresh", self.reload).pack(side="left", padx=2, pady=3)
+            td_button(bar, "Export...", self.export).pack(side="left", padx=2, pady=3)
+            tk.Frame(bar, bg=TD_SHADOW, width=2, height=22).pack(side="left", padx=8)
+            td_label(bar, "Acting as:").pack(side="left")
+            self.acting = TDCombo(bar, [], None, self.set_acting, width=20)
+            self.acting.pack(side="left", padx=(4, 8))
+            tk.Frame(bar, bg=TD_SHADOW, width=2, height=22).pack(side="left", padx=4)
+            td_label(bar, "Search:").pack(side="left", padx=(4, 4))
+            self.search_var = tk.StringVar()
+            self.search = tk.Entry(bar, textvariable=self.search_var, font=TD_FONT, bg=TD_WHITE, relief="sunken", bd=2,
+                                   highlightthickness=0, width=28)
+            self.search.pack(side="left")
+            self.search_var.trace_add("write", lambda *a: self.fill_list())
+            td_button(bar, "x", lambda: self.search_var.set(""), width=2).pack(side="left", padx=2)
+
+        def build_body(self):
+            body = tk.Frame(self.app.body, bg=TD_FACE)
+            body.pack(fill="both", expand=True, padx=4, pady=4)
+            left = tk.Frame(body, bg=TD_FACE)
+            left.pack(side="left", fill="y", padx=(0, 4))
+            td_label(left, "Views", font=TD_FONT_B).pack(anchor="w")
+            frame, self.views = td_listbox(left, height=len(TD_VIEWS), width=26)
+            frame.pack(fill="x")
+            self.views.bind("<<ListboxSelect>>", self.on_view)
+            self.summary = tk.Label(left, text="", font=TD_FONT, bg=TD_FACE, justify="left", anchor="nw")
+            self.summary.pack(fill="x", pady=(8, 0))
+            pane = tk.PanedWindow(body, orient="vertical", bg=TD_FACE, sashwidth=6, sashrelief="raised", bd=0)
+            pane.pack(side="left", fill="both", expand=True)
+            self.table = TDTable(pane, self.COLUMNS, self.on_select, lambda key: self.set_tab("flow"))
+            pane.add(self.table, minsize=120, height=250)
+            detail = tk.Frame(pane, bg=TD_FACE)
+            pane.add(detail, minsize=280)
+            self.build_detail(detail)
+
+        def build_detail(self, parent):
+            head = tk.Frame(parent, bg=TD_FACE)
+            head.pack(fill="x", pady=(4, 0))
+            self.d_title = tk.Label(head, text="", font=TD_FONT_BIG, bg=TD_FACE, anchor="w")
+            self.d_title.pack(side="left", fill="x", expand=True)
+            self.d_chip = tk.Label(head, text="", font=TD_FONT_B, bg=TD_NAVY, fg=TD_WHITE, padx=8, pady=1)
+            self.d_chip.pack(side="right", padx=4)
+            info = tk.Frame(parent, bg=TD_FACE)
+            info.pack(fill="x")
+            self.d_info = []
+            for r in range(2):
+                for c in range(4):
+                    name = td_label(info, "", font=TD_FONT_B)
+                    name.grid(row=r, column=c * 2, sticky="w", padx=(0, 4))
+                    value = td_label(info, "")
+                    value.grid(row=r, column=c * 2 + 1, sticky="w", padx=(0, 18))
+                    self.d_info.append((name, value))
+            self.d_tags = tk.Frame(parent, bg=TD_FACE)
+            self.d_tags.pack(fill="x", pady=(3, 0))
+            self.d_guide = tk.Label(parent, text="", font=TD_FONT, bg="#ffffe0", fg=TD_BLACK, anchor="w", justify="left",
+                                    relief="solid", bd=1, padx=6, pady=3)
+            self.d_guide.pack(fill="x", pady=(4, 2))
+            actions = tk.Frame(parent, bg=TD_FACE)
+            actions.pack(fill="x", pady=(2, 2))
+            self.buttons = {}
+            for key, label in self.ACTIONS:
+                b = td_button(actions, label, lambda k=key: self.do(k))
+                b.pack(side="left", padx=(0, 2))
+                b.bind("<Enter>", lambda e, k=key: self.explain(k))
+                b.bind("<Leave>", lambda e: self.app.status(""))
+                self.buttons[key] = b
+            tabs = tk.Frame(parent, bg=TD_FACE)
+            tabs.pack(fill="x", pady=(4, 0))
+            self.tab_buttons = {}
+            for key, label in self.TABS:
+                b = tk.Label(tabs, text=label, font=TD_FONT, bg=TD_FACE, relief="raised", bd=2, padx=10, pady=1,
+                             cursor="hand2")
+                b.pack(side="left")
+                b.bind("<Button-1>", lambda e, k=key: self.set_tab(k))
+                self.tab_buttons[key] = b
+            area = tk.Frame(parent, bg=TD_FACE, bd=2, relief="sunken")
+            area.pack(fill="both", expand=True)
+            self.graph = tk.Canvas(area, bg=TD_WHITE, highlightthickness=0, bd=0)
+            self.graph_bar = td_scrollbar(area, "vertical", self.graph.yview)
+            self.graph.config(yscrollcommand=self.graph_bar.set)
+            self.graph_bar.pack(side="right", fill="y")
+            self.graph.pack(side="left", fill="both", expand=True)
+            self.graph.bind("<Configure>", lambda e: self.draw_tab())
+            self.graph.bind("<Motion>", self.on_graph_motion)
+            self.graph.bind("<Button-1>", self.on_graph_click)
+            self.graph.bind("<MouseWheel>", lambda e: self.graph.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+            self.history = tk.Text(area, font=TD_FONT, bg=TD_WHITE, relief="flat", bd=0, wrap="word", padx=8, pady=6,
+                                   state="disabled", cursor="arrow")
+            for kind, colour in (("escalated", TD_NAVY), ("sent back", "#c00000"), ("reopened", "#d07000"),
+                                 ("suspended", "#800080"), ("resumed", "#800080"), ("resolved", "#008000"),
+                                 ("closed", "#008000")):
+                self.history.tag_config(kind.replace(" ", "_"), foreground=colour)
+            self.history.tag_config("when", foreground=TD_SHADOW)
+            self.history.tag_config("bold", font=TD_FONT_B)
+            self.history.tag_config("note", lmargin1=40, lmargin2=40, foreground="#404040")
+            self.build_stream(area)
+
+        def build_stream(self, area):
+            """The stream of a ticket: the request, every message and (optionally) every move, in time order, with a
+            box at the bottom to write in it."""
+            frame = self.stream_frame = tk.Frame(area, bg=TD_FACE)
+            top = tk.Frame(frame, bg=TD_FACE)
+            top.pack(side="top", fill="x", padx=4, pady=(2, 2))
+            self.show_moves = tk.IntVar(value=1)
+            td_checkbox(top, "Show the moves of the ticket between the messages", self.show_moves,
+                        self.draw_stream).pack(side="left")
+            self.stream_info = td_label(top, "", fg=TD_SHADOW)
+            self.stream_info.pack(side="right")
+            compose = tk.Frame(frame, bg=TD_FACE, bd=2, relief="groove")
+            compose.pack(side="bottom", fill="x", padx=2, pady=(3, 2))
+            kinds = tk.Frame(compose, bg=TD_FACE)
+            kinds.pack(fill="x", padx=4, pady=(3, 0))
+            self.msg_kind = tk.StringVar(value="note")
+            self.kind_radios = []
+            for kind in ("note", "to requester", "from requester"):
+                r = td_radio(kinds, TD_MESSAGE_KINDS[kind], self.msg_kind, kind, self.update_composer)
+                r.pack(side="left", padx=(0, 12))
+                self.kind_radios.append(r)
+            self.then_suspend = tk.IntVar(value=0)
+            self.suspend_check = td_checkbox(kinds, "then suspend it: waiting for the requester", self.then_suspend)
+            self.suspend_check.pack(side="left", padx=(8, 0))
+            row = tk.Frame(compose, bg=TD_FACE)
+            row.pack(fill="x", padx=4, pady=(2, 4))
+            box, self.compose = td_text(row, 60, 3)
+            box.pack(side="left", fill="x", expand=True)
+            side = tk.Frame(row, bg=TD_FACE)
+            side.pack(side="left", fill="y", padx=(6, 0))
+            self.post_button = td_button(side, "Post", self.post_message, width=10, bold=True)
+            self.post_button.pack(anchor="n")
+            self.compose_hint = td_label(side, "Ctrl+Enter", fg=TD_SHADOW)
+            self.compose_hint.pack(anchor="n", pady=(4, 0))
+            self.compose.bind("<Control-Return>", lambda e: (self.post_message(), "break")[1])
+            holder = tk.Frame(frame, bg=TD_FACE, bd=1, relief="sunken")
+            holder.pack(side="top", fill="both", expand=True, padx=2)
+            self.stream = tk.Canvas(holder, bg="#f4f4f4", highlightthickness=0, bd=0)
+            bar = td_scrollbar(holder, "vertical", self.stream.yview)
+            self.stream.config(yscrollcommand=bar.set)
+            bar.pack(side="right", fill="y")
+            self.stream.pack(side="left", fill="both", expand=True)
+            self.stream.bind("<Configure>", lambda e: self.draw_stream())
+            self.stream.bind("<MouseWheel>", lambda e: self.stream.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+            self.stream.bind("<Button-4>", lambda e: self.stream.yview_scroll(-1, "units"))
+            self.stream.bind("<Button-5>", lambda e: self.stream.yview_scroll(1, "units"))
+            self.stream.bind("<Button-3>", self.stream_menu)
+            self.stream.bind("<Motion>", self.stream_motion)
+            self.stream_items = {}
+
+        # ═════════════════════════════════════ data ══════════════════════════════════════════════════════
+        def reload(self):
+            s = self.store.settings()
+            self.settings = s
+            agents = self.store.agents(include_inactive=False)
+            self.acting.set_items([("(Dispatcher)", "")] + [(a["name"], a["name"]) for a in agents], s["acting_as"])
+            self.tickets = self.store.tickets()
+            self.msg_summary = self.store.message_summary()
+            levels = self.desk.levels()
+            self.st_levels.config(text="Level 1: %s   Level 2: %s" % ("on" if 1 in levels else "OFF",
+                                                                       "on" if 2 in levels else "OFF"))
+            self.fill_views()
+            self.fill_list()
+            self.show_ticket()
+
+        def in_view(self, t, view, me):
+            st, stage = t["status"], td_stage(t["status"], t["level"])
+            open_ = st in TD_OPEN_STATUSES
+            if view == "open":
+                return open_
+            if view in ("triage", "l1", "l2", "hold", "resolved", "closed"):
+                return stage == view
+            if view == "answer":
+                return open_ and self.msg_summary.get(t["id"], (0, ""))[1] == "from requester"
+            if view == "sent_back":
+                return open_ and t["returns"] > 0
+            if view == "reassigned":
+                return open_ and t["reassignments"] > 0
+            if view == "reopened":
+                return open_ and t["reopens"] > 0
+            if view == "overdue":
+                return open_ and (td_sla(self.store, t, self.settings)[2] or 0) < 0
+            if view == "mine":
+                return open_ and me is not None and t["assignee_id"] == me["id"]
+            if view == "unassigned":
+                return st in ("Open", "On hold") and not t["assignee_id"] and t["level"]
+            return True
+
+        def fill_views(self):
+            me = self.store.agent_by_name(self.settings["acting_as"])
+            levels = self.desk.levels()
+            self.views.delete(0, "end")
+            for key, label in TD_VIEWS:
+                n = sum(1 for t in self.tickets if self.in_view(t, key, me))
+                off = (key == "l1" and 1 not in levels) or (key == "l2" and 2 not in levels)
+                self.views.insert("end", "%s  (%d)%s" % (label, n, "  - off" if off else ""))
+                if key in ("overdue", "answer") and n:
+                    self.views.itemconfig("end", fg="#c00000")
+                if off:
+                    self.views.itemconfig("end", fg=TD_SHADOW)
+            keys = [k for k, _l in TD_VIEWS]
+            i = keys.index(self.view) if self.view in keys else 0
+            self.views.selection_clear(0, "end")
+            self.views.selection_set(i)
+            ov = td_overview(self.store)
+            lines = ["Open tickets: %d" % ov["open"], "Over SLA: %d" % ov["overdue"],
+                     "Suspended: %d" % ov["counts"]["hold"]]
+            for reason, n in sorted(ov["hold"].items()):
+                lines.append("   %s: %d" % (reason, n))
+            lines += ["Sent back (open): %d" % ov["sent_back"], "Re-assigned (open): %d" % ov["reassigned"],
+                      "Reopened (open): %d" % ov["reopened"]]
+            self.summary.config(text="\n".join(lines))
+
+        def on_view(self, event=None):
+            sel = self.views.curselection()
+            if not sel:
+                return
+            self.view = TD_VIEWS[sel[0]][0]
+            self.store.save_settings(last_view=self.view)
+            self.fill_list()
+
+        def fill_list(self):
+            me = self.store.agent_by_name(self.settings["acting_as"])
+            needle = self.search_var.get().strip().lower()
+            rows = []
+            now = self.store.now()
+            for t in self.tickets:
+                if not self.in_view(t, self.view, me):
+                    continue
+                if needle and needle not in " ".join([td_code(t["id"]).lower(), t["title"].lower(), t["requester"].lower(),
+                                                      t["description"].lower(), (t["area_name"] or "").lower(),
+                                                      (t["assignee_name"] or "").lower()]):
+                    continue
+                stage = td_stage(t["status"], t["level"])
+                age = (now - td_parse(t["created"])).total_seconds()
+                sla = td_sla_text(self.store, t, self.settings)
+                left = td_sla(self.store, t, self.settings)[2]
+                sla_colour = "#c00000" if (left is not None and left < 0) or sla.startswith("missed") else (
+                    "#800080" if "paused" in sla else ("#008000" if sla == "met" else TD_BLACK))
+                cells = {"code": (td_code(t["id"]), TD_BLACK),
+                         "prio": (TD_PRIORITIES[t["priority"]], TD_PRIORITY_COLOURS[t["priority"]]),
+                         "title": (t["title"], TD_BLACK), "req": (t["requester"], TD_BLACK),
+                         "area": (t["area_name"] or "-", TD_BLACK if t["area_name"] else TD_SHADOW),
+                         "stage": (TD_STAGE_NAMES[stage], TD_BLACK),
+                         "status": (t["status"], "#800080" if t["status"] == "On hold" else TD_BLACK),
+                         "agent": (t["assignee_name"] or "-", TD_BLACK if t["assignee_name"] else TD_SHADOW),
+                         "age": (td_span(age), TD_BLACK), "sla": (sla, sla_colour)}
+                msgs, last_kind = self.msg_summary.get(t["id"], (0, ""))
+                cells["msgs"] = (str(msgs) if msgs else "", "#c00000" if last_kind == "from requester" and
+                                 t["status"] in TD_OPEN_STATUSES else TD_BLACK)
+                sort = (t["id"], t["priority"], t["title"].lower(), t["requester"].lower(), (t["area_name"] or "~").lower(),
+                        TD_STAGES.index(stage), TD_STATUSES.index(t["status"]), (t["assignee_name"] or "~").lower(),
+                        msgs, age, left if left is not None else 10 ** 12)
+                rows.append((t["id"], cells, sort))
+            self.table.set_rows(rows)
+            self.st_count.config(text="%d ticket(s) shown" % len(rows))
+            if self.current is not None and self.current not in self.table.keys:
+                pass                                                     # the ticket stays shown below
+
+        def on_select(self, ticket_id):
+            self.current = ticket_id
+            if self.tab == "overview":
+                self.tab = "stream"
+            self.show_ticket()
+
+        def set_acting(self, name):
+            self.store.save_settings(acting_as=name or "")
+            self.reload()
+            self.app.status("Acting as %s: the actions are written in the history with this name." % (name or "Dispatcher"))
+
+        # ═════════════════════════════════════ the ticket panel ═══════════════════════════════════════════
+        def show_ticket(self):
+            t = self.store.ticket(self.current) if self.current else None
+            if t is None:
+                self.current = None
+                self.d_title.config(text="No ticket selected - pick one in the list, or see the whole desk below")
+                self.d_chip.config(text="", bg=TD_FACE)
+                for name, value in self.d_info:
+                    name.config(text="")
+                    value.config(text="")
+                for child in self.d_tags.winfo_children():
+                    child.destroy()
+                self.d_guide.config(text="Click a station in the Desk overview to list its tickets.")
+                for b in self.buttons.values():
+                    b.config(state="disabled")
+                self.update_composer()
+                self.tab = "overview"
+                self.set_tab("overview")
+                return
+            stage = td_stage(t["status"], t["level"])
+            self.d_title.config(text="%s   %s" % (td_code(t["id"]), t["title"]))
+            chip = t["status"] if t["status"] == TD_STAGE_NAMES[stage] else "%s  -  %s" % (t["status"], TD_STAGE_NAMES[stage])
+            self.d_chip.config(text=chip,
+                               bg={"hold": "#800080", "resolved": "#008000", "closed": TD_SHADOW,
+                                   "triage": "#808000"}.get(stage, TD_NAVY))
+            area = self.store.area(t["area_id"])
+            agent = self.store.agent(t["assignee_id"])
+            values = [("Requester:", t["requester"] + (("  (%s)" % t["contact"]) if t["contact"] else "")),
+                      ("Area:", area["name"] if area else "- (decided at triage)"),
+                      ("Priority:", TD_PRIORITIES[t["priority"]]),
+                      ("Assigned to:", agent["name"] if agent else "nobody (queue)"),
+                      ("Created:", td_parse(t["created"]).strftime("%d.%m.%Y %H:%M")),
+                      ("SLA:", "%s  (%g h)" % (td_sla_text(self.store, t, self.settings),
+                                               self.store.sla_hours(t["priority"], self.settings))),
+                      ("Time on hold:", td_span(t["hold_seconds"] + (
+                          (self.store.now() - td_parse(t["hold_since"])).total_seconds() if t["hold_since"] else 0))),
+                      ("Counters:", "escalated %d, sent back %d, re-assigned %d, suspended %d, reopened %d" % (
+                          t["escalations"], t["returns"], t["reassignments"], t["holds"], t["reopens"]))]
+            for (name, value), (n, v) in zip(self.d_info, values):
+                name.config(text=n)
+                value.config(text=v, fg=TD_PRIORITY_COLOURS[t["priority"]] if n == "Priority:" else TD_BLACK)
+            for child in self.d_tags.winfo_children():
+                child.destroy()
+            td_label(self.d_tags, "Classification:", font=TD_FONT_B).pack(side="left", padx=(0, 4))
+            tags = self.store.ticket_tags(t["id"])
+            for tag in tags:
+                tk.Label(self.d_tags, text=tag["name"], font=TD_FONT, bg=tag["color"], fg=td_text_colour(tag["color"]),
+                         relief="solid", bd=1, padx=4).pack(side="left", padx=2)
+            if not tags:
+                td_label(self.d_tags, "none", fg=TD_SHADOW).pack(side="left")
+            close_tag = self.store.tag(t["close_tag_id"])
+            if close_tag:
+                td_label(self.d_tags, "   Closing tag:", font=TD_FONT_B).pack(side="left", padx=(8, 4))
+                tk.Label(self.d_tags, text=close_tag["name"], font=TD_FONT, bg=close_tag["color"],
+                         fg=td_text_colour(close_tag["color"]), relief="solid", bd=1, padx=4).pack(side="left")
+                td_label(self.d_tags, "  " + t["resolution"][:120]).pack(side="left")
+            self.d_guide.config(text="Now: " + td_guidance(self.store, t))
+            allowed = self.desk.allowed(t)
+            for key, b in self.buttons.items():
+                if key == "back":
+                    on = allowed["back_l1"][0] or allowed["back_triage"][0]
+                else:
+                    on = allowed[key][0]
+                b.config(state="normal" if on else "disabled")
+            self.update_composer()
+            self.set_tab(self.tab)
+
+        def explain(self, key):
+            t = self.store.ticket(self.current) if self.current else None
+            if t is None:
+                self.app.status("Pick a ticket first.")
+                return
+            allowed = self.desk.allowed(t)
+            info = {"triage": "Choose the area, priority, classification and the level (New -> Level 1 / Level 2).",
+                    "start": "The person acting takes the ticket and starts work (Open -> In progress).",
+                    "assign": "Give the ticket to another person at the same level, or back to the queue.",
+                    "area": "Wrong area: the ticket goes to another area at the same level.",
+                    "escalate": "Level 1 -> Level 2, with what Level 1 already tried.",
+                    "back": "A return: Level 2 -> Level 1, or back to triage.",
+                    "suspend": "On hold: the SLA clock stops until the ticket is resumed.",
+                    "resume": "Back from On hold to where the ticket was.",
+                    "resolve": "Finished: choose the closing tag and write the resolution.",
+                    "close": "The requester confirmed: Resolved -> Closed.",
+                    "reopen": "It came back: to the level that resolved it.",
+                    "note": "Write in the ticket's stream: an internal note, a reply to the requester, or the requester's answer.",
+                    "edit": "Title, requester, priority, tags."}
+            if key == "back":
+                ok = allowed["back_l1"][0] or allowed["back_triage"][0]
+                why = allowed["back_triage"][1]
+            else:
+                ok, why = allowed[key]
+            self.app.status(info[key] if ok else "Not now: " + why)
+
+        # ═════════════════════════════════════ tabs ════════════════════════════════════════════════════════
+        def set_tab(self, key):
+            if key != "overview" and self.current is None:
+                key = "overview"
+            self.tab = key
+            for k, b in self.tab_buttons.items():
+                b.config(relief="sunken" if k == key else "raised", bg=TD_WHITE if k == key else TD_FACE,
+                         font=TD_FONT_B if k == key else TD_FONT)
+            for widget in (self.graph, self.graph_bar, self.history, self.stream_frame):
+                widget.pack_forget()
+            if key == "history":
+                self.history.pack(fill="both", expand=True)
+            elif key == "stream":
+                self.stream_frame.pack(fill="both", expand=True)
+            else:
+                self.graph_bar.pack(side="right", fill="y")
+                self.graph.pack(side="left", fill="both", expand=True)
+            self.draw_tab()
+
+        def draw_tab(self):
+            if self.tab == "history":
+                self.draw_history()
+                return
+            if self.tab == "stream":
+                self.draw_stream()
+                return
+            self.graph.delete("all")
+            self.hover_items = {}
+            width, height = max(600, self.graph.winfo_width()), max(240, self.graph.winfo_height())
+            if self.tab == "overview":
+                used = self.draw_overview(width, height)
+            elif self.tab == "timeline":
+                used = self.draw_timeline(width, height)
+            else:
+                used = self.draw_flow(width, height)
+            self.graph.config(scrollregion=(0, 0, width, max(height, used)))
+
+        # ----- the station map (flow of one ticket, and the desk overview) ----------------------------------
+        def station_xy(self, width, top, map_h):
+            pos = {"logged": (0.07, 0.36), "triage": (0.22, 0.36), "l1": (0.41, 0.36), "l2": (0.61, 0.36),
+                   "resolved": (0.79, 0.36), "closed": (0.93, 0.36), "hold": (0.51, 0.86)}
+            return {k: (int(x * width), int(top + y * map_h)) for k, (x, y) in pos.items()}
+
+        def edge_kind(self, a, b):
+            order = ["logged", "triage", "l1", "l2", "resolved", "closed"]
+            if "hold" in (a, b):
+                return "hold"
+            if a in ("resolved", "closed") and b in ("triage", "l1", "l2"):
+                return "reopen"
+            if a in order and b in order and order.index(b) < order.index(a):
+                return "back"
+            return "forward"
+
+        def draw_edge(self, xy, a, b, kind, width=2, label="", colour=None, dash=None, faint=False, tip=""):
+            c = self.graph
+            (x1, y1), (x2, y2) = xy[a], xy[b]
+            nw, nh = self.node_w // 2, self.node_h // 2
+            colour = colour or TD_EDGE_COLOURS[kind]
+            order = ["logged", "triage", "l1", "l2", "resolved", "closed"]
+            if kind == "hold":
+                hx, hy = xy["hold"]
+                stage_x, stage_y = (x1, y1) if b == "hold" else (x2, y2)
+                spread = (stage_x - hx) * 0.18                            # each station meets the hold box elsewhere
+                if b == "hold":                                           # down to the hold station (left line)
+                    sx, sy, ex, ey = stage_x - 12, stage_y + nh, hx + spread - 14, hy - nh
+                else:                                                     # back up from it (right line)
+                    sx, sy, ex, ey = hx + spread + 14, hy - nh, stage_x + 12, stage_y + nh
+                points = [sx, sy, ex, ey]
+                lx, ly = sx + (ex - sx) * 0.4, sy + (ey - sy) * 0.4       # the two labels do not meet
+            elif a in order and b in order and abs(order.index(a) - order.index(b)) == 1 and kind in ("forward", "moved"):
+                off = -6 if kind == "moved" else 0
+                sx = x1 + (nw if x2 > x1 else -nw)
+                ex = x2 - (nw if x2 > x1 else -nw)
+                points = [sx, y1 + off, ex, y2 + off]
+                lx, ly = (sx + ex) / 2, y1 - 10 + off
+            else:
+                distance = abs(order.index(a) - order.index(b)) if a in order and b in order else 1
+                up = kind in ("forward", "moved")
+                sx, sy = x1 + (10 if x2 > x1 else -10), y1 + (-nh if up else nh)
+                ex, ey = x2 - (10 if x2 > x1 else -10), y2 + (-nh if up else nh)
+                bulge = (26 + 16 * distance) * (-1 if up else 1)
+                if kind == "reopen":
+                    bulge += 18
+                cx, cy = (sx + ex) / 2, sy + bulge * 2
+                points = [sx, sy, cx, cy, ex, ey]
+                lx, ly = cx, (sy + cy) / 2
+            item = c.create_line(*points, smooth=True, width=width, fill="#d8d8d8" if faint else colour, arrow="last",
+                                 arrowshape=(9 + width, 11 + width, 4 + width // 2), dash=dash or ())
+            if label:
+                text = c.create_text(lx, ly, text=label, font=TD_FONT_B, fill=colour)
+                box = c.bbox(text)
+                back = c.create_rectangle(box[0] - 3, box[1] - 1, box[2] + 3, box[3] + 1, fill=TD_WHITE, outline=colour)
+                c.tag_raise(text, back)
+                if tip:
+                    for i in (text, back, item):
+                        self.hover_items[i] = tip
+            elif tip:
+                self.hover_items[item] = tip
+
+        def draw_node(self, x, y, stage, lines, state, count=None):
+            """state: current / visited / unvisited / off"""
+            c = self.graph
+            w, h = self.node_w, self.node_h
+            x0, y0, x1, y1 = x - w // 2, y - h // 2, x + w // 2, y + h // 2
+            fill = {"current": TD_NAVY, "visited": TD_WHITE, "unvisited": "#ececec", "off": "#e0e0e0"}[state]
+            ink = {"current": TD_WHITE, "visited": TD_BLACK, "unvisited": TD_SHADOW, "off": TD_SHADOW}[state]
+            c.create_rectangle(x0 + 3, y0 + 3, x1 + 3, y1 + 3, fill="#a0a0a0", outline="")
+            rect = c.create_rectangle(x0, y0, x1, y1, fill=fill, outline=TD_BLACK, width=3 if state == "current" else 1,
+                                      stipple="gray50" if state == "off" else "", tags=("node", "node:" + stage))
+            stripe = TD_LANE_COLOURS.get(stage, TD_FACE)
+            c.create_rectangle(x0 + 1, y0 + 1, x1 - 1 if state != "current" else x1 - 2, y0 + 6, fill=stripe, outline="",
+                               tags=("node:" + stage,))
+            c.create_text(x, y0 + 16, text=TD_STAGE_NAMES[stage] + ("  (off)" if state == "off" else ""), font=TD_FONT_B,
+                          fill=ink, tags=("node:" + stage,))
+            if count is not None:
+                c.create_text(x, y + 3, text=str(count), font=("MS Sans Serif", 14, "bold"), fill=ink,
+                              tags=("node:" + stage,))
+            for i, line in enumerate(lines):
+                c.create_text(x, (y + 21 if count is not None else y + 4) + i * 12, text=line, font=TD_FONT, fill=ink,
+                              tags=("node:" + stage,))
+            return rect
+
+        def draw_flow(self, width, height):
+            path = td_path(self.store, self.current)
+            t = path["ticket"]
+            c = self.graph
+            levels = self.desk.levels()
+            self.node_w, self.node_h = max(84, min(124, int(width * 0.105))), 60
+            map_h = max(210, min(270, height - 120))
+            top = 20
+            xy = self.station_xy(width, top, map_h)
+            c.create_text(10, 8, text="The path of %s: every arrow is a move, the numbers are the steps in order." %
+                          td_code(t["id"]), anchor="nw", font=TD_FONT_B)
+            # the possible routes, faint, so the path is read on the map of the desk
+            for a, b in (("logged", "triage"), ("triage", "l1"), ("l1", "l2"), ("l2", "resolved"), ("resolved", "closed"),
+                         ("triage", "l2"), ("l1", "resolved"), ("l2", "l1"), ("resolved", "l1")):
+                self.draw_edge(xy, a, b, self.edge_kind(a, b), width=1, faint=True, dash=(3, 3))
+            steps = dict(path["steps"])
+            for (a, b), numbers in sorted(path["edges"].items(), key=lambda kv: kv[1][0]):
+                moved = all(steps[n]["kind"] == "moved" for n in numbers)
+                kind = "moved" if moved else self.edge_kind(a, b)
+                tip = "   ".join("%d. %s %s%s" % (n, steps[n]["at"][5:16], steps[n]["kind"],
+                                                 (": " + steps[n]["note"][:60]) if steps[n]["note"] else "")
+                                 for n in numbers)
+                self.draw_edge(xy, a, b, kind, width=min(5, 1 + len(numbers)), label=", ".join(str(n) for n in numbers),
+                               dash=(6, 3) if kind in ("hold", "moved") else None, tip=tip)
+            for stage, items in path["loops"].items():                  # re-assignments inside a station
+                x, y = xy[stage]
+                y0 = y - self.node_h // 2
+                c.create_line(x - 18, y0, x - 26, y0 - 26, x + 26, y0 - 26, x + 18, y0, smooth=True, width=2,
+                              fill="#008080", arrow="last")
+                label = "%s  %s" % (", ".join(str(n) for n, _e in items), "re-assigned" if len(items) == 1 else
+                                    "x%d re-assigned" % len(items))
+                text = c.create_text(x, y0 - 28, text=label, font=TD_FONT_B, fill="#008080", anchor="s")
+                self.hover_items[text] = "   ".join("%d. %s  %s -> %s%s" % (
+                    n, e["at"][5:16], e["from_agent"] or e["from_area"] or "queue", e["to_agent"] or "queue",
+                    ("  (area %s -> %s)" % (e["from_area"], e["to_area"])) if e["from_area"] != e["to_area"] else "")
+                    for n, e in items)
+            current = path["current"]
+            for stage, (x, y) in xy.items():
+                if stage == "l1" and 1 not in levels and stage not in path["visited"]:
+                    state = "off"
+                elif stage == "l2" and 2 not in levels and stage not in path["visited"]:
+                    state = "off"
+                elif stage == current:
+                    state = "current"
+                elif stage in path["visited"]:
+                    state = "visited"
+                else:
+                    state = "unvisited"
+                lines = []
+                if stage == "logged":
+                    lines = [td_parse(t["created"]).strftime("%d.%m %H:%M")]
+                elif stage in path["time"]:
+                    lines = ["%s here" % td_span(path["time"][stage])]
+                elif stage == "closed" and t["closed_at"]:
+                    lines = [td_parse(t["closed_at"]).strftime("%d.%m %H:%M")]
+                if stage == current and stage not in ("closed",):
+                    agent = self.store.agent(t["assignee_id"])
+                    tag = self.store.tag(t["close_tag_id"])
+                    lines.append(t["hold_reason"][:18] if stage == "hold" else (tag["name"][:18] if stage == "resolved" and tag
+                                                                               else t["status"]))
+                    if agent and stage in ("l1", "l2"):
+                        lines[-1] = "%s: %s" % (t["status"], agent["name"])
+                self.draw_node(x, y, stage, lines[:2], state)
+            # the step strip: the same steps, in reading order
+            y = top + map_h + 30
+            c.create_text(10, y, text="Steps", anchor="nw", font=TD_FONT_B)
+            y += 18
+            x = 10
+            for number, e in path["steps"]:
+                text = self.step_text(e)
+                w = int(tkfont.Font(family=TD_FONT[0], size=TD_FONT[1]).measure(text)) + 34
+                if x + w > width - 10:
+                    x, y = 10, y + 24
+                kind = self.edge_kind(e["from_stage"], e["to_stage"]) if e["from_stage"] != e["to_stage"] else "loop"
+                colour = TD_EDGE_COLOURS.get(kind, "#008080")
+                c.create_rectangle(x, y, x + w, y + 19, fill="#f4f4f4", outline=colour)
+                c.create_oval(x + 3, y + 2, x + 18, y + 17, fill=colour, outline=colour)
+                c.create_text(x + 10, y + 10, text=str(number), font=TD_FONT_B, fill=TD_WHITE)
+                item = c.create_text(x + 24, y + 10, text=text, anchor="w", font=TD_FONT)
+                self.hover_items[item] = "%d. %s  by %s%s" % (number, e["at"], e["actor"],
+                                                              ("  -  " + e["note"]) if e["note"] else "")
+                x += w + 6
+            y += 30
+            legend = [("forward", "forward"), ("back", "sent back"), ("reopen", "reopened"), ("hold", "suspended"),
+                      ("loop", "re-assigned"), ("moved", "moved (level off)")]
+            x = 10
+            for kind, text in legend:
+                colour = TD_EDGE_COLOURS.get(kind, "#008080")
+                c.create_line(x, y + 6, x + 26, y + 6, width=3, fill=colour, arrow="last",
+                              dash=(6, 3) if kind in ("hold", "moved") else ())
+                c.create_text(x + 32, y + 6, text=text, anchor="w", font=TD_FONT)
+                x += 46 + tkfont.Font(family=TD_FONT[0], size=TD_FONT[1]).measure(text)
+            return y + 24
+
+        def step_text(self, e):
+            names = TD_STAGE_NAMES
+            kind = e["kind"]
+            if kind == "logged":
+                return "Logged"
+            if e["from_stage"] != e["to_stage"]:
+                text = "%s: %s -> %s" % (kind.capitalize(), names[e["from_stage"]], names[e["to_stage"]])
+                if e["to_agent"] and e["to_stage"] in ("l1", "l2"):
+                    text += " (%s)" % e["to_agent"]
+                return text
+            if e["from_area"] != e["to_area"]:
+                return "Area: %s -> %s" % (e["from_area"], e["to_area"])
+            if e["from_agent"] != e["to_agent"]:
+                return "%s: %s -> %s" % (kind.capitalize(), e["from_agent"] or "queue", e["to_agent"] or "queue")
+            return kind.capitalize() + ((": " + e["note"][:30]) if kind == "edited" else "")
+
+        def draw_overview(self, width, height):
+            ov = td_overview(self.store)
+            c = self.graph
+            levels = self.desk.levels()
+            self.node_w, self.node_h = max(84, min(124, int(width * 0.105))), 64
+            map_h = max(230, min(300, height - 70))
+            top = 22
+            xy = self.station_xy(width, top, map_h)
+            c.create_text(10, 8, text="The whole desk now: open tickets in each station; the arrows count the moves of the "
+                                      "last %d days. Click a station to list its tickets." % ov["days"],
+                          anchor="nw", font=TD_FONT_B)
+            for a, b in (("logged", "triage"), ("triage", "l1"), ("l1", "l2"), ("l2", "resolved"), ("resolved", "closed")):
+                self.draw_edge(xy, a, b, "forward", width=1, faint=True, dash=(3, 3))
+            biggest = max([1] + list(ov["edges"].values()))
+            for (a, b), n in ov["edges"].items():
+                kind = self.edge_kind(a, b)
+                self.draw_edge(xy, a, b, kind, width=1 + int(4 * n / biggest), label=str(n),
+                               dash=(6, 3) if kind == "hold" else None,
+                               tip="%d move(s) %s -> %s in the last %d days" % (n, TD_STAGE_NAMES[a], TD_STAGE_NAMES[b],
+                                                                               ov["days"]))
+            for stage, (x, y) in xy.items():
+                n = ov["counts"][stage]
+                off = (stage == "l1" and 1 not in levels) or (stage == "l2" and 2 not in levels)
+                caption = {"logged": "last %d days" % ov["days"], "closed": "in total", "resolved": "to confirm"}.get(
+                    stage, "open")
+                if stage == "hold":
+                    caption = "suspended"
+                state = "off" if off and not n else ("current" if n and stage not in ("logged", "closed") else "visited")
+                rect = self.draw_node(x, y, stage, [caption], state, count=n)
+                self.hover_items[rect] = "%s: %d ticket(s). Click to list them." % (TD_STAGE_NAMES[stage], n)
+            y = top + map_h + 26
+            facts = ["Open: %d" % ov["open"], "Over SLA: %d" % ov["overdue"], "Sent back (open): %d" % ov["sent_back"],
+                     "Re-assigned (open): %d" % ov["reassigned"], "Reopened (open): %d" % ov["reopened"]]
+            facts += ["On hold - %s: %d" % (r, n) for r, n in sorted(ov["hold"].items())]
+            x = 10
+            for fact in facts:
+                w = tkfont.Font(family=TD_FONT[0], size=TD_FONT[1]).measure(fact) + 16
+                if x + w > width - 10:
+                    x, y = 10, y + 24
+                c.create_rectangle(x, y, x + w, y + 19, fill="#f4f4f4", outline=TD_SHADOW)
+                c.create_text(x + 8, y + 10, text=fact, anchor="w", font=TD_FONT,
+                              fill="#c00000" if fact.startswith("Over SLA") and ov["overdue"] else TD_BLACK)
+                x += w + 6
+            return y + 30
+
+        # ----- the timeline (swimlanes) ---------------------------------------------------------------------
+        def draw_timeline(self, width, height):
+            path = td_path(self.store, self.current)
+            t = path["ticket"]
+            c = self.graph
+            lanes = ["triage", "l1", "l2", "hold", "resolved"]
+            label_w, top, lane_h = 86, 46, 34
+            start = td_parse(t["created"])
+            end = td_parse(t["closed_at"]) or self.store.now()
+            allowed, used, left, paused = td_sla(self.store, t, self.settings)
+            due = None
+            if left is not None:
+                due = self.store.now() + dt.timedelta(seconds=left) if not paused else None
+                if due:
+                    end = max(end, due + dt.timedelta(minutes=5))
+            else:
+                hold_total = t["hold_seconds"]
+                due = start + dt.timedelta(hours=allowed, seconds=hold_total)
+            span = max(60.0, (end - start).total_seconds())
+            x0, x1 = label_w, width - 20
+
+            def X(moment):
+                return x0 + (x1 - x0) * (moment - start).total_seconds() / span
+            c.create_text(10, 8, text="Timeline of %s: where the ticket was, and for how long (lanes = stations)." %
+                          td_code(t["id"]), anchor="nw", font=TD_FONT_B)
+            # the time axis
+            steps = [60, 300, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800]
+            step = next((s for s in steps if span / s <= 9), 604800)
+            first = start.replace(second=0, microsecond=0)
+            if step >= 3600:
+                first = first.replace(minute=0)
+            if step >= 86400:
+                first = first.replace(hour=0)
+            moment = first
+            bottom = top + lane_h * len(lanes)
+            while moment <= end:
+                if moment >= start:
+                    x = X(moment)
+                    c.create_line(x, top - 4, x, bottom, fill="#e4e4e4")
+                    fmt = "%H:%M" if step < 86400 else "%d.%m"
+                    if step < 86400 and (moment.hour == 0 and moment.minute == 0 or moment == first):
+                        fmt = "%d.%m %H:%M"
+                    c.create_text(x, top - 8, text=moment.strftime(fmt), font=TD_FONT, fill=TD_SHADOW, anchor="s")
+                moment += dt.timedelta(seconds=step)
+            for i, lane in enumerate(lanes):
+                y = top + i * lane_h
+                c.create_rectangle(0, y, label_w - 6, y + lane_h - 2, fill=TD_FACE, outline="")
+                c.create_text(8, y + lane_h // 2, text=TD_STAGE_NAMES[lane], anchor="w", font=TD_FONT_B)
+                c.create_line(x0, y + lane_h - 1, x1, y + lane_h - 1, fill="#ececec")
+            for stage, s_from, s_to, agent in path["stays"]:
+                if stage not in lanes:
+                    continue
+                i = lanes.index(stage)
+                y = top + i * lane_h
+                bx0, bx1 = X(s_from), max(X(s_from) + 3, X(s_to))
+                c.create_rectangle(bx0, y + 6, bx1, y + lane_h - 7, fill=TD_LANE_COLOURS[stage], outline=TD_BLACK)
+                label = agent if stage in ("l1", "l2") and agent else td_span((s_to - s_from).total_seconds())
+                if stage in ("l1", "l2") and agent:
+                    label = "%s, %s" % (agent, td_span((s_to - s_from).total_seconds()))
+                if bx1 - bx0 > tkfont.Font(family=TD_FONT[0], size=TD_FONT[1]).measure(label) + 8:
+                    c.create_text((bx0 + bx1) / 2, y + lane_h // 2, text=label, font=TD_FONT)
+            # the steps on the axis (close steps are stacked so every number stays readable)
+            last_x = {}
+            for number, e in path["steps"]:
+                x = X(td_parse(e["at"]))
+                c.create_line(x, top, x, bottom, fill="#b0b0b0", dash=(2, 3))
+                kind = self.edge_kind(e["from_stage"], e["to_stage"]) if e["from_stage"] != e["to_stage"] else "loop"
+                colour = TD_EDGE_COLOURS.get(kind, "#008080")
+                row = next((r for r in range(4) if x - last_x.get(r, -99) >= 18), 3)
+                last_x[row] = x
+                yy = bottom + 4 + row * 18
+                dot = c.create_oval(x - 8, yy, x + 8, yy + 16, fill=colour, outline=colour)
+                num = c.create_text(x, yy + 8, text=str(number), font=TD_FONT_B, fill=TD_WHITE)
+                for item in (dot, num):
+                    self.hover_items[item] = "%d. %s  %s  by %s%s" % (number, e["at"], self.step_text(e), e["actor"],
+                                                                      ("  -  " + e["note"]) if e["note"] else "")
+            now_x = X(min(self.store.now(), end))
+            if not t["closed_at"]:
+                c.create_line(now_x, top - 4, now_x, bottom, fill=TD_NAVY, width=2)
+                c.create_text(now_x - 3, top - 8, text="now", anchor="se", font=TD_FONT_B, fill=TD_NAVY)
+            if due and start <= due <= end:
+                dx = X(due)
+                c.create_line(dx, top - 4, dx, bottom, fill="#c00000", width=2, dash=(6, 3))
+                c.create_text(dx + 3, top + 2, text="SLA due", anchor="nw", font=TD_FONT_B, fill="#c00000")
+            y = bottom + 4 + 18 * (max(last_x) + 1 if last_x else 1) + 14
+            c.create_text(10, y, text="Total: %s from logging to %s.  Time on hold (not counted in the SLA): %s." % (
+                td_span((end if t["closed_at"] else self.store.now()).timestamp() - start.timestamp()),
+                "closing" if t["closed_at"] else "now", td_span(path["time"].get("hold", 0))), anchor="nw", font=TD_FONT)
+            return y + 30
+
+        # ----- the stream (messages) ---------------------------------------------------------------------------
+        MOVES_WITH_TEXT = ("escalated", "sent back", "rerouted", "reassigned", "assigned", "reopened", "resolved",
+                           "closed")
+
+        def stream_entries(self, t):
+            """[(kind, side, who, at, label, text, colours)] - 'msg' entries are boxes, 'move' entries are lines."""
+            entries = [("msg", "left", "%s (requester)" % t["requester"], td_parse(t["created"]), "the request",
+                        t["title"] + (("\n\n" + t["description"]) if t["description"] else ""), ("#ffffff", TD_SHADOW))]
+            for e in self.store.events(t["id"]):
+                k = e["kind"]
+                at = td_parse(e["at"])
+                if k in TD_MESSAGE_KINDS:
+                    side = {"from requester": "left", "to requester": "right", "note": "middle"}[k]
+                    who = e["actor"] + (" (requester)" if k == "from requester" else "")
+                    entries.append(("msg", side, who, at, TD_MESSAGE_KINDS[k].lower(), e["note"], self.STREAM_COLOURS[k]))
+                elif k == "logged":
+                    continue
+                elif k in self.MOVES_WITH_TEXT and e["note"]:
+                    kind = self.edge_kind(e["from_stage"], e["to_stage"]) if e["from_stage"] != e["to_stage"] else "loop"
+                    colour = TD_EDGE_COLOURS.get(kind, "#008080")
+                    entries.append(("reason", "right", e["actor"], at, self.step_text(e), e["note"], ("#f0f0f0", colour)))
+                else:
+                    entries.append(("move", "", e["actor"], at, self.step_text(e),
+                                    e["note"] if k in ("triaged", "suspended", "resumed") else "", None))
+            return entries
+
+        def draw_stream(self):
+            c = self.stream
+            if not c.winfo_exists():
+                return
+            state = c.yview()
+            c.delete("all")
+            self.stream_items = {}
+            t = self.store.ticket(self.current) if self.current else None
+            if t is None:
+                self.stream_info.config(text="")
+                return
+            width = max(480, c.winfo_width())
+            entries = self.stream_entries(t)
+            messages = sum(1 for e in entries if e[0] == "msg") - 1
+            reasons = sum(1 for e in entries if e[0] == "reason")
+            self.stream_info.config(text="%d message(s)%s" % (messages, (", %d written with the moves" % reasons)
+                                                              if reasons else ""))
+            bubble_max = int(min(600, width * 0.68))
+            font_b = tkfont.Font(family=TD_FONT[0], size=TD_FONT[1], weight="bold")
+            y, day = 10, None
+            for kind, side, who, at, label, text, colours in entries:
+                if kind in ("move", "reason") and not self.show_moves.get():
+                    continue                                             # only the conversation
+                if at.date() != day:                                     # a line for each new day
+                    day = at.date()
+                    caption = at.strftime("%A, %d %B %Y")
+                    c.create_line(20, y + 8, width - 20, y + 8, fill="#d0d0d0")
+                    item = c.create_text(width // 2, y + 8, text=caption, font=TD_FONT_B, fill=TD_SHADOW)
+                    bb = c.bbox(item)
+                    back = c.create_rectangle(bb[0] - 8, bb[1] - 1, bb[2] + 8, bb[3] + 1, fill="#f4f4f4", outline="")
+                    c.tag_raise(item, back)
+                    y += 26
+                if kind == "move":
+                    line = "%s   %s: %s%s" % (at.strftime("%H:%M"), who, label, ("  -  " + text) if text else "")
+                    item = c.create_text(width // 2, y + 7, text=line, font=TD_FONT, fill="#606060", width=width - 80,
+                                         justify="center")
+                    bb = c.bbox(item)
+                    c.create_line(30, (bb[1] + bb[3]) // 2, bb[0] - 10, (bb[1] + bb[3]) // 2, fill="#dcdcdc")
+                    c.create_line(bb[2] + 10, (bb[1] + bb[3]) // 2, width - 30, (bb[1] + bb[3]) // 2, fill="#dcdcdc")
+                    y = bb[3] + 10
+                    continue
+                fill, edge = colours
+                pad = 8
+                body = c.create_text(0, 0, text=text, font=TD_FONT, width=bubble_max - 2 * pad, anchor="nw")
+                head_who = c.create_text(0, 0, text=who, font=TD_FONT_B, anchor="nw", fill=TD_BLACK)
+                head_rest = c.create_text(0, 0, text="   %s   %s" % (at.strftime("%H:%M"), label), font=TD_FONT,
+                                          anchor="nw", fill=edge if edge != TD_SHADOW else TD_SHADOW)
+                bw = max(c.bbox(body)[2] - c.bbox(body)[0], 0) + 2 * pad
+                hw = font_b.measure(who) + tkfont.Font(family=TD_FONT[0], size=TD_FONT[1]).measure(
+                    "   %s   %s" % (at.strftime("%H:%M"), label))
+                bw = min(bubble_max, max(bw, 120))
+                if side == "left":
+                    x0 = 16
+                elif side == "right":
+                    x0 = width - 16 - bw
+                else:
+                    x0 = (width - bw) // 2
+                hx = x0 if side != "right" else max(16, x0 + bw - hw)
+                c.move(head_who, hx, y)
+                c.move(head_rest, hx + font_b.measure(who), y)
+                y += 16
+                bh = c.bbox(body)[3] - c.bbox(body)[1] + 2 * pad
+                c.create_rectangle(x0 + 3, y + 3, x0 + bw + 3, y + bh + 3, fill="#d4d4d4", outline="")
+                rect = c.create_rectangle(x0, y, x0 + bw, y + bh, fill=fill, outline=edge)
+                c.create_rectangle(x0, y, x0 + 4, y + bh, fill=edge, outline=edge)       # the colour of the kind
+                c.move(body, x0 + pad + 2, y + pad)
+                c.tag_raise(body)
+                for item in (rect, body):
+                    self.stream_items[item] = (text, "%s  -  %s  %s" % (who, at.strftime("%d.%m.%Y %H:%M"), label))
+                y += bh + 14
+            c.config(scrollregion=(0, 0, width, max(y + 10, c.winfo_height())))
+            key = (t["id"], len(entries), self.show_moves.get())
+            if key != self._stream_state:                                # a new ticket or a new message: the end
+                c.yview_moveto(1.0)
+                self._stream_state = key
+            else:
+                c.yview_moveto(state[0])
+
+        def stream_motion(self, event):
+            x, y = self.stream.canvasx(event.x), self.stream.canvasy(event.y)
+            for item in reversed(self.stream.find_overlapping(x, y, x + 1, y + 1)):
+                if item in self.stream_items:
+                    self.app.status(self.stream_items[item][1] + "   (right-click: copy the text)")
+                    return
+
+        def stream_menu(self, event):
+            x, y = self.stream.canvasx(event.x), self.stream.canvasy(event.y)
+            found = next((self.stream_items[i] for i in reversed(self.stream.find_overlapping(x, y, x + 1, y + 1))
+                          if i in self.stream_items), None)
+            if not found:
+                return
+            menu = tk.Menu(self.stream, tearoff=0, font=TD_FONT, bg=TD_FACE, fg=TD_BLACK, activebackground=TD_NAVY,
+                           activeforeground=TD_WHITE)
+
+            def copy():
+                self.root.clipboard_clear()
+                self.root.clipboard_append(found[0])
+                self.app.status("Copied.")
+            menu.add_command(label="Copy the text", command=copy)
+            menu.tk_popup(event.x_root, event.y_root)
+
+        def update_composer(self):
+            t = self.store.ticket(self.current) if self.current else None
+            can_write = t is not None and t["status"] != "Closed"
+            self.compose.config(state="normal" if can_write else "disabled", bg=TD_WHITE if can_write else "#ececec")
+            self.post_button.config(state="normal" if can_write else "disabled")
+            for r in self.kind_radios:
+                r.config(state="normal" if can_write else "disabled")
+            if t is None:
+                self.compose_hint.config(text="")
+            elif t["status"] == "Closed":
+                self.compose_hint.config(text="Closed:\nreopen it\nto write")
+            else:
+                self.compose_hint.config(text="Ctrl+Enter")
+            suspend_ok = can_write and self.msg_kind.get() == "to requester" and t["status"] in ("New", "Open",
+                                                                                                  "In progress")
+            self.suspend_check.config(state="normal" if suspend_ok else "disabled")
+            if not suspend_ok:
+                self.then_suspend.set(0)
+
+        def focus_composer(self, t=None):
+            self.set_tab("stream")
+            self.compose.focus_set()
+
+        def post_message(self):
+            t = self.store.ticket(self.current) if self.current else None
+            if t is None:
+                return
+            kind, text = self.msg_kind.get(), self.compose.get("1.0", "end-1c")
+            suspend_after = self.then_suspend.get()
+            if self.run(self.desk.add_message, t["id"], kind, text) is None:
+                return
+            self.compose.delete("1.0", "end")
+            self.then_suspend.set(0)
+            if kind == "to requester" and suspend_after:
+                reason = next((r for r in self.settings["hold_reason_list"] if "requester" in r.lower()),
+                              "Waiting for requester")
+                self.run(self.desk.suspend, t["id"], reason, "")
+            elif kind == "from requester" and t["status"] == "On hold":
+                if messagebox.askyesno(TD_APP_NAME, "The requester answered while the ticket waits (%s).\nResume the "
+                                       "ticket now?" % t["hold_reason"], parent=self.root):
+                    self.run(self.desk.resume, t["id"], "The requester answered")
+            self.app.status("%s posted on %s." % (TD_MESSAGE_KINDS[kind], td_code(t["id"])))
+            self.compose.focus_set()
+
+        # ----- the history (text) ---------------------------------------------------------------------------
+        def draw_history(self):
+            h = self.history
+            h.config(state="normal")
+            h.delete("1.0", "end")
+            if self.current is None:
+                h.config(state="disabled")
+                return
+            t = self.store.ticket(self.current)
+            h.insert("end", "%s  %s\n" % (td_code(t["id"]), t["title"]), "bold")
+            h.insert("end", "Requester: %s   Contact: %s\n" % (t["requester"], t["contact"] or "-"))
+            if t["description"]:
+                h.insert("end", t["description"] + "\n", "note")
+            h.insert("end", "\n")
+            number = 0
+            for e in self.store.events(self.current):
+                if e["kind"] not in TD_MESSAGE_KINDS:
+                    number += 1
+                    h.insert("end", "%3d. " % number, "bold")
+                else:
+                    h.insert("end", "      ")
+                h.insert("end", td_parse(e["at"]).strftime("%d.%m.%Y %H:%M") + "   ", "when")
+                h.insert("end", e["actor"] + "   ", "bold")
+                h.insert("end", TD_MESSAGE_KINDS[e["kind"]] if e["kind"] in TD_MESSAGE_KINDS else self.step_text(e),
+                         e["kind"].replace(" ", "_"))
+                if e["kind"] == "triaged" or (e["from_area"] != e["to_area"] and e["to_area"]):
+                    h.insert("end", "   area: %s" % e["to_area"])
+                h.insert("end", "\n")
+                if e["note"] and e["kind"] != "logged":
+                    h.insert("end", e["note"] + "\n", "note")
+            h.config(state="disabled")
+
+        # ----- hover / click on the graph -------------------------------------------------------------------
+        def on_graph_motion(self, event):
+            x, y = self.graph.canvasx(event.x), self.graph.canvasy(event.y)
+            for item in reversed(self.graph.find_overlapping(x - 2, y - 2, x + 2, y + 2)):
+                if item in self.hover_items:
+                    self.app.status(self.hover_items[item])
+                    self.graph.config(cursor="hand2")
+                    return
+            self.graph.config(cursor="")
+
+        def on_graph_click(self, event):
+            if self.tab != "overview":
+                return
+            x, y = self.graph.canvasx(event.x), self.graph.canvasy(event.y)
+            for item in self.graph.find_overlapping(x - 2, y - 2, x + 2, y + 2):
+                for tag in self.graph.gettags(item):
+                    if tag.startswith("node:"):
+                        stage = tag[5:]
+                        if stage in ("triage", "l1", "l2", "hold", "resolved", "closed"):
+                            self.view = stage
+                            self.store.save_settings(last_view=stage)
+                            self.fill_views()
+                            self.fill_list()
+                            self.app.status("Showing the tickets in %s." % TD_STAGE_NAMES[stage])
+                        return
+
+        # ═════════════════════════════════════ actions ═════════════════════════════════════════════════════
+        def run(self, func, *args, **kwargs):
+            """Runs a workflow action; a rule that stops it is shown in a Windows 95 box. -> the ticket or None"""
+            try:
+                result = func(*args, **kwargs)
+            except TDError as exc:
+                messagebox.showwarning(TD_APP_NAME, str(exc), parent=self.root)
+                return None
+            self.reload()
+            return result
+
+        def do(self, key):
+            if key != "new" and self.current is None:
+                self.app.status("Pick a ticket first.")
+                return
+            t = self.store.ticket(self.current)
+            allowed = self.desk.allowed(t)
+            check = ("back_l1" if allowed["back_l1"][0] else "back_triage") if key == "back" else key
+            if not allowed[check][0]:
+                messagebox.showinfo(TD_APP_NAME, "Not now: " + allowed[check][1], parent=self.root)
+                return
+            {"triage": self.triage_dialog, "start": self.start_work, "assign": self.assign_dialog,
+             "area": self.area_dialog, "escalate": self.escalate_dialog, "back": self.send_back_dialog,
+             "suspend": self.suspend_dialog, "resume": self.resume, "resolve": self.resolve_dialog,
+             "close": self.close_ticket, "reopen": self.reopen_dialog, "note": self.focus_composer,
+             "edit": self.edit_dialog}[key](t)
+
+        def tag_checks(self, parent, kind, chosen):
+            """Checkboxes for the classification tags. -> (frame, function returning the chosen ids)"""
+            frame = tk.Frame(parent, bg=TD_FACE)
+            variables = []
+            for i, tag in enumerate(self.store.tags(kind, include_inactive=False)):
+                var = tk.IntVar(value=1 if tag["id"] in chosen else 0)
+                cb = td_checkbox(frame, tag["name"], var)
+                cb.grid(row=i // 3, column=i % 3, sticky="w", padx=(0, 10))
+                variables.append((tag["id"], var))
+            return frame, lambda: [tag_id for tag_id, var in variables if var.get()]
+
+        def priority_combo(self, parent, value=3):
+            return TDCombo(parent, [(TD_PRIORITIES[p], p) for p in (1, 2, 3, 4)], value, width=12)
+
+        def ticket_form(self, title, t=None, after_create=False):
+            win, body = td_dialog(self.root, title)
+            fields = {}
+            rows = [("Title (what is wrong / what is needed):", "title", 56), ("Requester:", "requester", 30),
+                    ("Contact (phone, e-mail, location):", "contact", 40)]
+            for r, (label, key, width) in enumerate(rows):
+                td_label(body, label).grid(row=r, column=0, sticky="w", pady=2)
+                fields[key] = td_entry(body, width, t[key] if t else "")
+                fields[key].grid(row=r, column=1, sticky="w", pady=2)
+            td_label(body, "Description:").grid(row=3, column=0, sticky="nw", pady=2)
+            frame, desc = td_text(body, 56, 6, t["description"] if t else "")
+            frame.grid(row=3, column=1, sticky="w", pady=2)
+            td_label(body, "Priority:").grid(row=4, column=0, sticky="w", pady=2)
+            prio = self.priority_combo(body, t["priority"] if t else 3)
+            prio.grid(row=4, column=1, sticky="w", pady=2)
+            td_label(body, "Classification:").grid(row=5, column=0, sticky="nw", pady=2)
+            chosen = [x["id"] for x in self.store.ticket_tags(t["id"])] if t else []
+            tag_frame, get_tags = self.tag_checks(body, "class", chosen)
+            tag_frame.grid(row=5, column=1, sticky="w", pady=2)
+            result = {}
+
+            def save(triage_after=False):
+                values = dict(title=fields["title"].get(), requester=fields["requester"].get(),
+                              contact=fields["contact"].get(), description=desc.get("1.0", "end-1c"),
+                              priority=prio.get(), tag_ids=get_tags())
+                if t:
+                    done = self.run(self.desk.edit_details, t["id"], **values)
+                else:
+                    done = self.run(self.desk.create, **values)
+                if done:
+                    result["ticket"] = done
+                    result["triage"] = triage_after
+                    win.destroy()
+            bar = tk.Frame(body, bg=TD_FACE)
+            bar.grid(row=6, column=0, columnspan=2, sticky="e", pady=(10, 0))
+            if t:
+                td_button(bar, "Save", save, width=12, bold=True).pack(side="left", padx=3)
+            else:
+                td_button(bar, "Create", save, width=12, bold=True).pack(side="left", padx=3)
+                td_button(bar, "Create and triage...", lambda: save(True), width=18).pack(side="left", padx=3)
+            td_button(bar, "Cancel", win.destroy, width=10).pack(side="left", padx=3)
+            win.bind("<Escape>", lambda e: win.destroy())
+            fields["title"].focus_set()
+            td_modal(win)
+            self.root.wait_window(win)
+            return result
+
+        def new_ticket(self):
+            result = self.ticket_form("New ticket")
+            if result.get("ticket"):
+                self.current = result["ticket"]["id"]
+                if self.view not in ("open", "triage", "all"):
+                    self.view = "open"
+                self.reload()
+                self.table.select(self.current, notify=False)
+                self.show_ticket()
+                if result.get("triage"):
+                    self.triage_dialog(self.store.ticket(self.current))
+
+        def edit_dialog(self, t):
+            self.ticket_form("Edit %s" % td_code(t["id"]), t)
+
+        def agent_items(self, area_id, level, include_auto=True, include_queue=True):
+            items = []
+            if include_auto:
+                items.append(("(Automatic: the least busy of the area)", "auto"))
+            if include_queue:
+                items.append(("(Nobody: leave it in the queue)", None))
+            members = self.store.members(area_id, level) if area_id else []
+            load = self.store.open_load()
+            for a in members:
+                items.append(("%s  - %d open" % (a["name"], load.get(a["id"], 0)), a["id"]))
+            member_ids = {a["id"] for a in members}
+            for a in self.store.agents(include_inactive=False):
+                if a["id"] not in member_ids:
+                    items.append(("%s  (not in this area at Level %d)" % (a["name"], level), a["id"]))
+            return items
+
+        def triage_dialog(self, t):
+            win, body = td_dialog(self.root, "Triage %s" % td_code(t["id"]))
+            td_label(body, t["title"], font=TD_FONT_B).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+            areas = self.store.areas(include_inactive=False)
+            td_label(body, "Area:").grid(row=1, column=0, sticky="w", pady=2)
+            area = TDCombo(body, [("(choose the area)", None)] + [(a["name"], a["id"]) for a in areas], t["area_id"],
+                           width=30)
+            area.grid(row=1, column=1, sticky="w", pady=2)
+            td_label(body, "Priority:").grid(row=2, column=0, sticky="w", pady=2)
+            prio = self.priority_combo(body, t["priority"])
+            prio.grid(row=2, column=1, sticky="w", pady=2)
+            td_label(body, "Classification:").grid(row=3, column=0, sticky="nw", pady=2)
+            tag_frame, get_tags = self.tag_checks(body, "class", [x["id"] for x in self.store.ticket_tags(t["id"])])
+            tag_frame.grid(row=3, column=1, sticky="w", pady=2)
+            levels = self.desk.levels()
+            td_label(body, "Send to:").grid(row=4, column=0, sticky="nw", pady=2)
+            level = tk.IntVar(value=self.desk.entry_level())
+            lv = tk.Frame(body, bg=TD_FACE)
+            lv.grid(row=4, column=1, sticky="w", pady=2)
+            r1 = td_radio(lv, "Level 1 support", level, 1)
+            r2 = td_radio(lv, "Level 2 support directly", level, 2)
+            r1.pack(anchor="w")
+            r2.pack(anchor="w")
+            if 1 not in levels:
+                r1.config(state="disabled", text="Level 1 support (turned off)")
+            if 2 not in levels:
+                r2.config(state="disabled", text="Level 2 support (turned off)")
+            td_label(body, "Give it to:").grid(row=5, column=0, sticky="w", pady=2)
+            who = TDCombo(body, [], "auto", width=44)
+            who.grid(row=5, column=1, sticky="w", pady=2)
+            hint = td_label(body, "", fg=TD_SHADOW)
+            hint.grid(row=6, column=1, sticky="w")
+
+            def refresh(*_a):
+                items = self.agent_items(area.get(), level.get(), include_auto=bool(self.settings["auto_assign"]))
+                who.set_items(items, who.get() if who.get() in [v for _l, v in items] else items[0][1])
+                n = len(self.store.members(area.get(), level.get())) if area.get() else 0
+                if not area.get():
+                    hint.config(text="Choose the area first: its responsible people are offered here.")
+                else:
+                    hint.config(text=("%d person(s) responsible for this area at Level %d." % (n, level.get())) if n else
+                                "Nobody is responsible for this area at Level %d yet (Setup > Areas)." % level.get())
+            area.command = refresh
+            r1.config(command=refresh)
+            r2.config(command=refresh)
+            td_label(body, "Note (optional):").grid(row=7, column=0, sticky="w", pady=2)
+            note = td_entry(body, 50)
+            note.grid(row=7, column=1, sticky="w", pady=2)
+            refresh()
+
+            def ok():
+                if self.run(self.desk.triage, t["id"], area.get(), prio.get(), get_tags(), level.get(), who.get(),
+                            note.get()):
+                    win.destroy()
+            td_buttons(body, 8, "Triage", ok, win.destroy)
+            win.bind("<Escape>", lambda e: win.destroy())
+            td_modal(win)
+            self.root.wait_window(win)
+
+        def start_work(self, t):
+            me = self.store.agent_by_name(self.settings["acting_as"])
+            if t["assignee_id"] and me and t["assignee_id"] != me["id"]:
+                other = self.store.agent(t["assignee_id"])
+                if not messagebox.askyesno(TD_APP_NAME, "%s is given to %s.\nTake it over and start work as %s?" % (
+                        td_code(t["id"]), other["name"], me["name"]), parent=self.root):
+                    return
+            self.run(self.desk.start, t["id"])
+
+        def simple_dialog(self, title, intro, fields, ok_text, action):
+            """fields: [(label, key, widget factory)] -> runs action(values) and closes when it is accepted."""
+            win, body = td_dialog(self.root, title)
+            td_label(body, intro, justify="left", wraplength=460).grid(row=0, column=0, columnspan=2, sticky="w",
+                                                                       pady=(0, 8))
+            getters = {}
+            for r, (label, key, factory) in enumerate(fields, start=1):
+                td_label(body, label).grid(row=r, column=0, sticky="nw", pady=3, padx=(0, 8))
+                widget, getter = factory(body)
+                widget.grid(row=r, column=1, sticky="w", pady=3)
+                getters[key] = getter
+
+            def ok():
+                if self.run(action, {k: g() for k, g in getters.items()}):
+                    win.destroy()
+            td_buttons(body, len(fields) + 1, ok_text, ok, win.destroy)
+            win.bind("<Escape>", lambda e: win.destroy())
+            td_modal(win)
+            self.root.wait_window(win)
+
+        @staticmethod
+        def note_field(height=4):
+            def factory(body):
+                frame, text = td_text(body, 50, height)
+                text.after(150, text.focus_set)
+                return frame, lambda: text.get("1.0", "end-1c")
+            return factory
+
+        def assign_dialog(self, t):
+            items = self.agent_items(t["area_id"], t["level"], include_auto=False)
+
+            def factory(body):
+                combo = TDCombo(body, items, t["assignee_id"] if t["assignee_id"] else None, width=44)
+                return combo, combo.get
+            self.simple_dialog("Assign %s" % td_code(t["id"]), "Give the ticket to another person at Level %d, or back "
+                               "to the queue. A change of person counts as a re-assignment." % t["level"],
+                               [("Person:", "agent", factory), ("Note:", "note", self.note_field(3))], "Assign",
+                               lambda v: self.desk.assign(t["id"], v["agent"], v["note"]))
+
+        def area_dialog(self, t):
+            areas = [(a["name"], a["id"]) for a in self.store.areas(include_inactive=False) if a["id"] != t["area_id"]]
+
+            def factory(body):
+                combo = TDCombo(body, areas, areas[0][1] if areas else None, width=30)
+                return combo, combo.get
+            self.simple_dialog("Change area of %s" % td_code(t["id"]), "The ticket goes to another area, at the same "
+                               "level (Level %d); the person is chosen there automatically." % t["level"],
+                               [("New area:", "area", factory), ("Why:", "note", self.note_field(3))], "Change area",
+                               lambda v: self.desk.change_area(t["id"], v["area"], v["note"]))
+
+        def escalate_dialog(self, t):
+            items = self.agent_items(t["area_id"], 2, include_auto=bool(self.settings["auto_assign"]))
+
+            def factory(body):
+                combo = TDCombo(body, items, items[0][1], width=44)
+                return combo, combo.get
+            self.simple_dialog("Escalate %s to Level 2" % td_code(t["id"]),
+                               "Write what Level 1 already tried: Level 2 starts from there.",
+                               [("What was tried / why:", "note", self.note_field(5)), ("Give it to:", "agent", factory)],
+                               "Escalate", lambda v: self.desk.escalate(t["id"], v["note"], v["agent"]))
+
+        def send_back_dialog(self, t):
+            allowed = self.desk.allowed(t)
+            options = []
+            if allowed["back_l1"][0]:
+                options.append(("Back to Level 1 (Level 1 can solve it)", "l1"))
+            options.append(("Back to triage (wrong area or wrong level)", "triage"))
+
+            def factory(body):
+                combo = TDCombo(body, options, options[0][1], width=40)
+                return combo, combo.get
+            self.simple_dialog("Send back %s" % td_code(t["id"]), "A return is counted on the ticket and drawn in red in "
+                               "its flow.", [("Send to:", "target", factory), ("Why:", "note", self.note_field(4))],
+                               "Send back", lambda v: self.desk.send_back(t["id"], v["target"], v["note"]))
+
+        def suspend_dialog(self, t):
+            reasons = [(r, r) for r in self.settings["hold_reason_list"]] or [("Waiting", "Waiting")]
+
+            def factory(body):
+                combo = TDCombo(body, reasons, reasons[0][1], width=30)
+                return combo, combo.get
+            self.simple_dialog("Suspend %s" % td_code(t["id"]), "On hold the SLA clock stops. Resume the ticket when the "
+                               "answer comes; it goes back to where it was.",
+                               [("Waiting for:", "reason", factory), ("Note:", "note", self.note_field(3))], "Suspend",
+                               lambda v: self.desk.suspend(t["id"], v["reason"], v["note"]))
+
+        def resume(self, t):
+            self.run(self.desk.resume, t["id"])
+
+        def resolve_dialog(self, t):
+            tags = [(x["name"], x["id"]) for x in self.store.tags("close", include_inactive=False)]
+            if not tags:
+                messagebox.showwarning(TD_APP_NAME, "There are no closing tags. Add them in Setup > Tags.", parent=self.root)
+                return
+
+            def factory(body):
+                var = tk.IntVar(value=tags[0][1])
+                frame = tk.Frame(body, bg=TD_FACE)
+                for i, (name, tag_id) in enumerate(tags):
+                    td_radio(frame, name, var, tag_id).grid(row=i // 2, column=i % 2, sticky="w", padx=(0, 12))
+                return frame, var.get
+            self.simple_dialog("Resolve %s" % td_code(t["id"]), "How did it end? The closing tag classifies the outcome; "
+                               "the resolution says what was done.",
+                               [("Closing tag:", "tag", factory), ("Resolution:", "text", self.note_field(4))], "Resolve",
+                               lambda v: self.desk.resolve(t["id"], v["tag"], v["text"]))
+
+        def close_ticket(self, t):
+            if messagebox.askyesno(TD_APP_NAME, "Close %s?\nDo it once the requester confirmed the resolution." %
+                                   td_code(t["id"]), parent=self.root):
+                self.run(self.desk.close, t["id"])
+
+        def reopen_dialog(self, t):
+            self.simple_dialog("Reopen %s" % td_code(t["id"]), "The ticket goes back to the level that resolved it.",
+                               [("Why:", "note", self.note_field(4))], "Reopen",
+                               lambda v: self.desk.reopen(t["id"], v["note"]))
+
+        def note_dialog(self, t):
+            self.simple_dialog("Note on %s" % td_code(t["id"]), "A note stays in the history; the ticket does not move.",
+                               [("Note:", "note", self.note_field(5))], "Add note",
+                               lambda v: self.desk.add_note(t["id"], v["note"]))
+
+        # ═════════════════════════════════════ setup ═══════════════════════════════════════════════════════
+        def areas_dialog(self):
+            win, body = td_dialog(self.root, "Areas and responsible people")
+            left = tk.Frame(body, bg=TD_FACE)
+            left.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+            td_label(left, "Areas", font=TD_FONT_B).pack(anchor="w")
+            frame, lb = td_listbox(left, 16, 26)
+            frame.pack(fill="y", expand=True)
+            right = tk.Frame(body, bg=TD_FACE)
+            right.grid(row=0, column=1, sticky="n")
+            td_label(right, "Name:").grid(row=0, column=0, sticky="w", pady=2)
+            name = td_entry(right, 34)
+            name.grid(row=0, column=1, columnspan=2, sticky="w", pady=2)
+            td_label(right, "Description:").grid(row=1, column=0, sticky="w", pady=2)
+            desc = td_entry(right, 50)
+            desc.grid(row=1, column=1, columnspan=2, sticky="w", pady=2)
+            active = tk.IntVar(value=1)
+            td_checkbox(right, "Active (new tickets can go to it)", active).grid(row=2, column=1, columnspan=2,
+                                                                                  sticky="w")
+            levels = self.desk.levels()
+            lists = {}
+            for col, level in ((1, 1), (2, 2)):
+                group = td_group(right, "Level %d people%s" % (level, "" if level in levels else " (support level off)"))
+                group.grid(row=3, column=col, sticky="n", padx=(0, 8), pady=(8, 0))
+                f, box = td_listbox(group, 10, 24, multiple=True)
+                f.pack()
+                lists[level] = box
+            td_label(right, "Click people to mark who is responsible at each level. With automatic assignment\nthe "
+                            "least busy of them gets the ticket.", fg=TD_SHADOW, justify="left").grid(
+                row=4, column=1, columnspan=2, sticky="w", pady=(4, 0))
+            agents = self.store.agents(include_inactive=False)
+            state = {"areas": [], "id": None}
+
+            def fill(select_id=None):
+                state["areas"] = self.store.areas()
+                lb.delete(0, "end")
+                for a in state["areas"]:
+                    lb.insert("end", a["name"] + ("" if a["active"] else "  (inactive)"))
+                    if not a["active"]:
+                        lb.itemconfig("end", fg=TD_SHADOW)
+                for level, box in lists.items():
+                    box.delete(0, "end")
+                    for a in agents:
+                        box.insert("end", a["name"])
+                ids = [a["id"] for a in state["areas"]]
+                if select_id in ids:
+                    lb.selection_set(ids.index(select_id))
+                    show()
+                elif ids:
+                    lb.selection_set(0)
+                    show()
+
+            def show(event=None):
+                sel = lb.curselection()
+                if not sel:
+                    return
+                a = state["areas"][sel[0]]
+                state["id"] = a["id"]
+                name.delete(0, "end")
+                name.insert(0, a["name"])
+                desc.delete(0, "end")
+                desc.insert(0, a["description"])
+                active.set(a["active"])
+                for level, box in lists.items():
+                    member_ids = {m["id"] for m in self.store.members(a["id"], level)}
+                    box.selection_clear(0, "end")
+                    for i, ag in enumerate(agents):
+                        if ag["id"] in member_ids:
+                            box.selection_set(i)
+            lb.bind("<<ListboxSelect>>", show)
+
+            def new():
+                state["id"] = None
+                lb.selection_clear(0, "end")
+                for widget in (name, desc):
+                    widget.delete(0, "end")
+                active.set(1)
+                for box in lists.values():
+                    box.selection_clear(0, "end")
+                name.focus_set()
+
+            def save():
+                try:
+                    area_id = self.store.save_area(state["id"], name.get(), desc.get(), active.get())
+                except TDError as exc:
+                    messagebox.showwarning(TD_APP_NAME, str(exc), parent=win)
+                    return
+                for level, box in lists.items():
+                    self.store.set_members(area_id, level, [agents[i]["id"] for i in box.curselection()])
+                fill(area_id)
+                self.reload()
+                self.app.status("Area '%s' saved." % name.get().strip())
+
+            def delete():
+                if not state["id"]:
+                    return
+                a = self.store.area(state["id"])
+                if not messagebox.askyesno(TD_APP_NAME, "Delete the area '%s'?\nIf tickets use it, it is only made "
+                                           "inactive (the history keeps it)." % a["name"], parent=win):
+                    return
+                done = self.store.delete_area(state["id"])
+                fill()
+                self.reload()
+                self.app.status("Area '%s' %s." % (a["name"], done))
+            bar = tk.Frame(body, bg=TD_FACE)
+            bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            td_button(bar, "New area", new, width=10).pack(side="left", padx=2)
+            td_button(bar, "Save", save, width=10, bold=True).pack(side="left", padx=2)
+            td_button(bar, "Delete", delete, width=10).pack(side="left", padx=2)
+            td_button(bar, "People...", lambda: (self.people_dialog(), win.destroy(), self.areas_dialog()),
+                      width=10).pack(side="left", padx=12)
+            td_button(bar, "Close", win.destroy, width=10).pack(side="right", padx=2)
+            if not agents:
+                td_label(right, "No people yet: add them first with 'People...'.", fg="#c00000").grid(
+                    row=5, column=1, columnspan=2, sticky="w", pady=(4, 0))
+            fill()
+            win.bind("<Escape>", lambda e: win.destroy())
+            td_modal(win)
+            self.root.wait_window(win)
+
+        def people_dialog(self):
+            win, body = td_dialog(self.root, "People (who handles tickets)")
+            left = tk.Frame(body, bg=TD_FACE)
+            left.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+            frame, lb = td_listbox(left, 14, 26)
+            frame.pack(fill="y", expand=True)
+            right = tk.Frame(body, bg=TD_FACE)
+            right.grid(row=0, column=1, sticky="n")
+            td_label(right, "Name:").grid(row=0, column=0, sticky="w", pady=2)
+            name = td_entry(right, 30)
+            name.grid(row=0, column=1, sticky="w", pady=2)
+            td_label(right, "E-mail:").grid(row=1, column=0, sticky="w", pady=2)
+            email = td_entry(right, 36)
+            email.grid(row=1, column=1, sticky="w", pady=2)
+            active = tk.IntVar(value=1)
+            td_checkbox(right, "Active (can receive tickets)", active).grid(row=2, column=1, sticky="w")
+            where = td_label(right, "", justify="left", fg=TD_SHADOW)
+            where.grid(row=3, column=0, columnspan=2, sticky="w", pady=(8, 0))
+            state = {"people": [], "id": None}
+
+            def fill(select_id=None):
+                state["people"] = self.store.agents()
+                load = self.store.open_load()
+                lb.delete(0, "end")
+                for a in state["people"]:
+                    lb.insert("end", "%s  (%d open)%s" % (a["name"], load.get(a["id"], 0), "" if a["active"] else
+                                                          "  - inactive"))
+                    if not a["active"]:
+                        lb.itemconfig("end", fg=TD_SHADOW)
+                ids = [a["id"] for a in state["people"]]
+                if select_id in ids:
+                    lb.selection_set(ids.index(select_id))
+                    show()
+
+            def show(event=None):
+                sel = lb.curselection()
+                if not sel:
+                    return
+                a = state["people"][sel[0]]
+                state["id"] = a["id"]
+                name.delete(0, "end")
+                name.insert(0, a["name"])
+                email.delete(0, "end")
+                email.insert(0, a["email"])
+                active.set(a["active"])
+                areas = self.store.agent_areas(a["id"])
+                where.config(text=("Responsible for:\n" + "\n".join("   Level %d: %s" % (x["level"], x["name"])
+                                                                    for x in areas)) if areas else
+                             "Not responsible for any area yet (Setup > Areas).")
+            lb.bind("<<ListboxSelect>>", show)
+
+            def new():
+                state["id"] = None
+                lb.selection_clear(0, "end")
+                name.delete(0, "end")
+                email.delete(0, "end")
+                active.set(1)
+                where.config(text="")
+                name.focus_set()
+
+            def save():
+                try:
+                    agent_id = self.store.save_agent(state["id"], name.get(), email.get(), active.get())
+                except TDError as exc:
+                    messagebox.showwarning(TD_APP_NAME, str(exc), parent=win)
+                    return
+                fill(agent_id)
+                self.reload()
+
+            def delete():
+                if not state["id"]:
+                    return
+                a = self.store.agent(state["id"])
+                if not messagebox.askyesno(TD_APP_NAME, "Delete %s?\nIf tickets were given to this person, the person is "
+                                           "only made inactive." % a["name"], parent=win):
+                    return
+                done = self.store.delete_agent(state["id"])
+                new()
+                fill()
+                self.reload()
+                self.app.status("%s %s." % (a["name"], done))
+            bar = tk.Frame(body, bg=TD_FACE)
+            bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            td_button(bar, "New person", new, width=10).pack(side="left", padx=2)
+            td_button(bar, "Save", save, width=10, bold=True).pack(side="left", padx=2)
+            td_button(bar, "Delete", delete, width=10).pack(side="left", padx=2)
+            td_button(bar, "Close", win.destroy, width=10).pack(side="right", padx=2)
+            fill()
+            new() if not state["people"] else (lb.selection_set(0), show())
+            win.bind("<Escape>", lambda e: win.destroy())
+            td_modal(win)
+            self.root.wait_window(win)
+
+        def tags_dialog(self):
+            win, body = td_dialog(self.root, "Tags")
+            kind = tk.StringVar(value="class")
+            top = tk.Frame(body, bg=TD_FACE)
+            top.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+            td_radio(top, "Classification tags (what kind of ticket, chosen at triage)", kind, "class",
+                     lambda: fill()).pack(anchor="w")
+            td_radio(top, "Closing tags (how it ended, chosen when it is resolved)", kind, "close",
+                     lambda: fill()).pack(anchor="w")
+            frame, lb = td_listbox(body, 12, 30)
+            frame.grid(row=1, column=0, sticky="ns", padx=(0, 10))
+            right = tk.Frame(body, bg=TD_FACE)
+            right.grid(row=1, column=1, sticky="n")
+            td_label(right, "Name:").grid(row=0, column=0, sticky="w", pady=2)
+            name = td_entry(right, 28)
+            name.grid(row=0, column=1, sticky="w", pady=2)
+            td_label(right, "Colour:").grid(row=1, column=0, sticky="w", pady=2)
+            colour = tk.Label(right, text="  sample  ", font=TD_FONT, bg="#ffffff", relief="solid", bd=1)
+            colour.grid(row=1, column=1, sticky="w", pady=2)
+            active = tk.IntVar(value=1)
+            td_checkbox(right, "Active (offered in the dialogs)", active).grid(row=2, column=1, sticky="w")
+            state = {"tags": [], "id": None, "colour": "#ffffff"}
+
+            def pick_colour(event=None):
+                chosen = colorchooser.askcolor(state["colour"], parent=win, title="Tag colour")
+                if chosen and chosen[1]:
+                    state["colour"] = chosen[1]
+                    colour.config(bg=chosen[1], fg=td_text_colour(chosen[1]))
+            colour.bind("<Button-1>", pick_colour)
+            td_button(right, "Change...", pick_colour).grid(row=1, column=1, sticky="e")
+
+            def fill(select_id=None):
+                state["tags"] = self.store.tags(kind.get())
+                lb.delete(0, "end")
+                for x in state["tags"]:
+                    lb.insert("end", x["name"] + ("" if x["active"] else "  (inactive)"))
+                    lb.itemconfig("end", bg=x["color"], fg=td_text_colour(x["color"]) if x["active"] else TD_SHADOW)
+                ids = [x["id"] for x in state["tags"]]
+                if select_id in ids:
+                    lb.selection_set(ids.index(select_id))
+                    show()
+                else:
+                    new()
+
+            def show(event=None):
+                sel = lb.curselection()
+                if not sel:
+                    return
+                x = state["tags"][sel[0]]
+                state["id"], state["colour"] = x["id"], x["color"]
+                name.delete(0, "end")
+                name.insert(0, x["name"])
+                colour.config(bg=x["color"], fg=td_text_colour(x["color"]))
+                active.set(x["active"])
+            lb.bind("<<ListboxSelect>>", show)
+
+            def new():
+                state["id"], state["colour"] = None, "#ffffff"
+                name.delete(0, "end")
+                colour.config(bg="#ffffff", fg=TD_BLACK)
+                active.set(1)
+
+            def save():
+                try:
+                    tag_id = self.store.save_tag(state["id"], name.get(), kind.get(), state["colour"], active.get())
+                except TDError as exc:
+                    messagebox.showwarning(TD_APP_NAME, str(exc), parent=win)
+                    return
+                fill(tag_id)
+                self.reload()
+
+            def delete():
+                if not state["id"]:
+                    return
+                x = self.store.tag(state["id"])
+                if messagebox.askyesno(TD_APP_NAME, "Delete the tag '%s'?\nIf tickets use it, it is only made inactive." %
+                                       x["name"], parent=win):
+                    self.app.status("Tag '%s' %s." % (x["name"], self.store.delete_tag(state["id"])))
+                    fill()
+                    self.reload()
+            bar = tk.Frame(body, bg=TD_FACE)
+            bar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+            td_button(bar, "New tag", new, width=10).pack(side="left", padx=2)
+            td_button(bar, "Save", save, width=10, bold=True).pack(side="left", padx=2)
+            td_button(bar, "Delete", delete, width=10).pack(side="left", padx=2)
+            td_button(bar, "Close", win.destroy, width=10).pack(side="right", padx=2)
+            fill()
+            win.bind("<Escape>", lambda e: win.destroy())
+            td_modal(win)
+            self.root.wait_window(win)
+
+        def rules_dialog(self):
+            s = self.store.settings()
+            win, body = td_dialog(self.root, "Support levels and rules")
+            levels = td_group(body, "Support levels")
+            levels.grid(row=0, column=0, sticky="ew")
+            l1, l2 = tk.IntVar(value=s["level1_enabled"]), tk.IntVar(value=s["level2_enabled"])
+            td_checkbox(levels, "Level 1 support enabled (first line: triaged tickets go here)", l1).pack(anchor="w")
+            td_checkbox(levels, "Level 2 support enabled (specialists: escalated tickets go here)", l2).pack(anchor="w")
+            td_label(levels, "With one level only, every ticket goes to it and escalation / sending back between levels "
+                             "is not offered.", fg=TD_SHADOW, wraplength=440, justify="left").pack(anchor="w", pady=(2, 0))
+            rules = td_group(body, "Rules")
+            rules.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+            auto, need_tag = tk.IntVar(value=s["auto_assign"]), tk.IntVar(value=s["require_class_tag"])
+            td_checkbox(rules, "Assign automatically to the least busy responsible person", auto).pack(anchor="w")
+            td_checkbox(rules, "A classification tag is required at triage", need_tag).pack(anchor="w")
+            sla = td_group(body, "SLA: hours to resolve (the time on hold is not counted)")
+            sla.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+            spins = {}
+            for i, (key, label) in enumerate((("sla_critical", "Critical"), ("sla_high", "High"), ("sla_normal", "Normal"),
+                                              ("sla_low", "Low"))):
+                td_label(sla, label + ":").grid(row=0, column=i * 2, sticky="w", padx=(0, 4))
+                spins[key] = td_spin(sla, 1, 2000, s[key])
+                spins[key].grid(row=0, column=i * 2 + 1, sticky="w", padx=(0, 14))
+            hold = td_group(body, "Reasons for suspending a ticket (one per line)")
+            hold.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+            frame, reasons = td_text(hold, 50, 5, "\n".join(s["hold_reason_list"]))
+            frame.pack(fill="x")
+
+            def ok():
+                if not l1.get() and not l2.get():
+                    messagebox.showwarning(TD_APP_NAME, "At least one support level has to stay on.", parent=win)
+                    return
+                values = {"level1_enabled": l1.get(), "level2_enabled": l2.get(), "auto_assign": auto.get(),
+                          "require_class_tag": need_tag.get()}
+                try:
+                    for key, spin in spins.items():
+                        values[key] = float(spin.get().replace(",", "."))
+                        if values[key] <= 0:
+                            raise ValueError
+                except ValueError:
+                    messagebox.showwarning(TD_APP_NAME, "The SLA hours must be numbers above 0.", parent=win)
+                    return
+                lines = [r.strip().replace("|", "/") for r in reasons.get("1.0", "end-1c").splitlines() if r.strip()]
+                if not lines:
+                    messagebox.showwarning(TD_APP_NAME, "Keep at least one reason for suspending.", parent=win)
+                    return
+                values["hold_reasons"] = "|".join(lines)
+                moves = self.desk.level_switch_moves(l1.get(), l2.get())
+                if moves:
+                    off = 1 if not l1.get() else 2
+                    if not messagebox.askyesno(TD_APP_NAME, "%d open ticket(s) are at Level %d, which you are turning off.\n"
+                                               "Move them to Level %d now?\n(No = nothing is changed)" %
+                                               (len(moves), off, 3 - off), parent=win):
+                        return
+                self.store.save_settings(**values)
+                for t, level in moves:
+                    self.desk.move_level(t["id"], level, "Level %d support was turned off" % (3 - level))
+                win.destroy()
+                self.reload()
+                self.app.status("Rules saved." + (" %d ticket(s) moved." % len(moves) if moves else ""))
+            bar = tk.Frame(body, bg=TD_FACE)
+            bar.grid(row=4, column=0, sticky="e", pady=(10, 0))
+            td_button(bar, "OK", ok, width=10, bold=True).pack(side="left", padx=3)
+            td_button(bar, "Cancel", win.destroy, width=10).pack(side="left", padx=3)
+            win.bind("<Escape>", lambda e: win.destroy())
+            td_modal(win)
+            self.root.wait_window(win)
+
+        # ═════════════════════════════════════ the rest ═══════════════════════════════════════════════════
+        def export(self):
+            rows = [t for t in self.tickets if t["id"] in set(self.table.keys)]
+            if not rows:
+                messagebox.showinfo(TD_APP_NAME, "There are no tickets in this view to export.", parent=self.root)
+                return
+            path = filedialog.asksaveasfilename(parent=self.root, title="Export tickets", defaultextension=".xlsx",
+                                                initialfile="tickets_%s.xlsx" % self.store.now().strftime("%Y-%m-%d"),
+                                                filetypes=[("Excel workbook", "*.xlsx")])
+            if not path:
+                return
+            try:
+                td_export_xlsx(self.store, path, rows)
+            except PermissionError:
+                messagebox.showerror(TD_APP_NAME, "The file is open in another program. Close it and try again.",
+                                     parent=self.root)
+                return
+            except ImportError:
+                messagebox.showerror(TD_APP_NAME, "Excel export needs the openpyxl library.", parent=self.root)
+                return
+            self.app.status("Exported %d ticket(s) to %s" % (len(rows), path))
+
+        def help_flow(self):
+            messagebox.showinfo(TD_APP_NAME, "How a ticket moves\n\n"
+                                "1. Logged: someone writes down the request (New).\n"
+                                "2. Triage: the area, priority and classification are chosen and the ticket goes to "
+                                "Level 1 (or Level 2 directly).\n"
+                                "3. Level 1 works on it. If needed, it escalates to Level 2.\n"
+                                "4. Level 2 can send it back to Level 1, or back to triage when the area or the level was "
+                                "wrong.\n"
+                                "5. Anywhere on the way it can be suspended (On hold): the SLA clock stops.\n"
+                                "6. Resolved with a closing tag and a resolution; Closed when the requester confirms. "
+                                "A reopened ticket goes back to the level that resolved it.\n\n"
+                                "The Flow tab draws this path for each ticket; the Desk overview draws it for all of them.",
+                                parent=self.root)
+
+        def about(self):
+            messagebox.showinfo(TD_APP_NAME, "%s %s\n\nTickets with areas, responsible people, Level 1 and Level 2 "
+                                "support, triage, escalations, returns, suspensions, SLA and the graph of every ticket.\n\n"
+                                "Data: %s" % (TD_APP_NAME, TD_VERSION, TD_DB_PATH), parent=self.root)
+
+        def _tick(self):
+            """Ages and SLA move on their own: the list is refreshed every minute."""
+            try:
+                self.tickets = self.store.tickets()
+                self.fill_views()
+                self.fill_list()
+                if self.tab in ("timeline", "overview") or self.current:
+                    self.show_ticket()
+                self.root.after(60000, self._tick)
+            except tk.TclError:
+                pass
+
+        def on_error(self, exc_type, exc, tb):
+            text = "".join(traceback.format_exception(exc_type, exc, tb))
+            try:
+                with open(os.path.join(os.path.dirname(TD_DB_PATH), "ticket_desk_errors.log"), "a", encoding="utf-8") as f:
+                    f.write("%s\n%s\n" % (td_stamp(dt.datetime.now()), text))
+            except OSError:
+                pass
+            messagebox.showerror(TD_APP_NAME, "Something went wrong:\n%s\n\nThe details are in "
+                                 "Config/ticket_desk_errors.log." % exc, parent=self.root)
+
+        def on_close(self):
+            self.store.close()
+            self.root.destroy()
+
+
+    def ticket_desk_95_main():
+        root = tk.Tk()
+        TDApp(root)
+        root.mainloop()
+
+
+    if __name__ == "__main__":
+        ticket_desk_95_main()
