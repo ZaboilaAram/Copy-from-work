@@ -1,0 +1,1417 @@
+def run_reading_pane():
+    import os
+    import re
+    import sqlite3
+    import tkinter as tk
+    import tkinter.font as tkfont
+    from tkinter import filedialog
+
+    RP_FACE, RP_SHADOW, RP_LIGHT, RP_NAVY, RP_BLACK = "#c0c0c0", "#808080", "#ffffff", "#000080", "#000000"
+    RP_FONT = ("MS Sans Serif", 8)
+    RP_FONT_B = ("MS Sans Serif", 8, "bold")
+    RP_IS_WINDOWS = os.name == "nt"
+    W95_CUSTOM_TITLE_BAR = True    # False = the normal Windows title bar
+
+    # ══════════════════════════════════════════════════════════════
+    # THE GUIDE (one copy of every text, used by the window and by the PDF)
+    # ══════════════════════════════════════════════════════════════
+
+    OVERVIEW = r"""BITPACK - THE MOST PRODUCTIVE AND WELL-ORGANIZED STARTUP KIT FOR THE IT DEPARTMENT
+
+Bitpack is the ultimate productivity and efficiency suite designed specifically for IT support departments. This revolutionary software combines over 100 professional tools into a single, powerful file.
+
+WHY CHOOSE BITPACK?
+
+- It is an ideal tool for the initiating of an IT department and beyond
+- All-in-one solution with no additional installations required
+- Advanced security features built-in
+- Intuitive interface with retro & modern design
+- Regular updates and continuous improvement
+- Portable application - runs from anywhere
+
+TECHNOLOGY STACK & ARCHITECTURE
+
+- Programming Languages: Python
+- Deployment: Precompiled into a single file
+- Architecture: x64 (64-bit) Windows application only
+- Distribution: Single file - no installer needed
+- Installation: Portable application with one-time setup
+
+PROFESSIONAL USE CASES
+
+- IT Support Departments - Comprehensive diagnostic and task automation
+- System Administrators - Advanced monitoring and management capabilities
+- Developers - Python IDE and database management tools
+- Office Professionals - Office Lite suite and productivity tools
+- Network Engineers - Advanced network analysis and monitoring
+- Security Teams - Encryption and security management tools
+
+PERFORMANCE BENEFITS
+
+- Optimization: Optimized memory usage and CPU allocation and resource-efficient multi-tool architecture
+- Integration: All tools unified in a single file
+- Resource Management: Optimized memory usage and CPU allocation
+
+This comprehensive suite streamlines various IT tasks from system monitoring to file management, network diagnostics, development tools, and advanced AI-powered productivity features."""
+
+    SYSTEM_FEATURES = r"""SYSTEM & DIAGNOSTICS TOOLS
+
+- System Compatibility Testing
+  Built-in hardware verification to ensure optimal performance
+
+- Hardware Diagnostics & Monitoring
+  Real-time system performance tracking and analysis
+
+- Network Troubleshooting Tools
+  Complete network analysis suite for connectivity issues
+
+- Support IT Process Automation
+  Streamlined workflow management for IT tasks
+
+- Advanced Terminal Emulator
+  CMD and Linux (WSL) interface simulation
+
+- Performance Optimization
+  System tuning and enhancement capabilities
+
+- Alert Monitor
+  System alerts based on usage thresholds and performance metrics
+
+- Event Viewer
+  System log analysis (errors, warnings, information)
+
+- Manual & Automatic Repair Tool
+  Self-healing capabilities for Bitpack with comprehensive diagnostics
+
+- Real-time System Information
+  Live performance monitoring with detailed metrics
+
+- Disk Utility Visualizer
+
+- Task Manager
+  Process management with memory and network usage tracking
+
+- Process Viewer
+  CPU and GPU usage analysis by core
+
+- Bitpack Dashboard
+  For essential informations (RFLAGS)
+
+- dbo_bitpack.db Database Viewer Dashboard (dbobitpackdash/dbobitpackdash)"""
+
+    FILE_FEATURES = r"""FILE MANAGEMENT PRO TOOLS
+
+- Smart Backup Tool
+  Intelligent data backup for sensitive information
+
+- Folder Packer Tool
+  Portable folder via a tool-generated script.
+
+- Document Merge Tool
+  Document generation using templates.
+
+- Personal Storage (personalstorage/personalstorage)
+
+- Quick File Finder Tool (quickfinder/file)
+
+- Config Editor
+  Configuration parameters editing capabilities with validation (config/editor)
+
+- Advanced Files & Folders Comparator
+  Deep comparison algorithms for file differences
+
+- ZIP Password Recovery & Maker
+  Archive security management with encryption capabilities
+
+- Intelligent File Organizer
+  Automatic file categorization based on type and usage
+
+- Explorer Mode
+  Dynamic local file/folder copying with path saving functionality
+
+- Copy App
+  Network file copying from servers to C:\KIT directory with profiles
+
+- Rename Utility
+  Batch file renaming operations with pattern matching
+
+- File Archeologist
+  File history tools for tracking changes and versions
+
+- Archive Management
+  Comprehensive compression and management for ZIP files
+
+- File History Tools
+  Track and manage file modifications over time
+
+- File Fisher
+  Searching files tool
+
+- File Timeline Viewer (timeline/file)
+
+- Forensic Timeline Builder (forensic/timeline)
+
+- Batch File Editor Tool (batchfileeditor/batchfileeditor)
+
+- Folder Structure Tool (fldrcp/fldrcp)
+
+- Archive Browser Tool (arcbr/arcbr)
+
+- Report Designer (repbld/repbld)
+
+- Recovery Tunnel
+  Advanced file recovery tool"""
+
+    SECURITY_FEATURES = r"""SECURITY SUITE TOOLS
+
+- Military-grade File Encryption
+  High-complexity encryption algorithms for sensitive data protection
+
+- Advanced Password Manager & Generation Tool
+  Encrypted password database with secure storage
+
+- Multi-level Authentication System
+  Secure access control with role-based permissions
+
+- Terminal Access Restrictions
+  Security policy-based controls for system access
+
+- Password Generator Utilities
+  Multiple password generation tools with customizable parameters
+  * Basic Password Generator (passgen/passgen)
+  * Advanced Password Generator V2 (passgenV2/passgenV2)
+
+- Password Storage and Management
+  Secure password vault with encryption (password/manager)
+
+- Password Security Checker (password/checker)
+
+- File Encryption and Security Tools
+  Advanced cryptographic tools (cryptoV2/security)
+
+- ZIP Password Recovery
+  Specialized tools for archive password recovery (zippass/wordsmith)"""
+
+    OFFICE_FEATURES = r"""OFFICE SUITE LITE TOOLS
+
+- Office Document Reader
+  View Word, PowerPoint, Csv & Excel files
+
+- Spreadsheet Editor
+  Excel-compatible editor with formula support
+
+- Spreadsheet Comparator
+
+- Bitpack Office
+
+- Document Conversion Tools
+  * .pdf to .docx support (convertorpdf/toword) and .docx, .doc to pdf support (convertorword/topdf)
+  * .pdf to .xlsx/.csv support (pdfto/excelcsv)
+  * .xlsx, .docx, .csv, .txt to pdf support - plain text (document/topdftext)
+
+- PDF Tools Suite
+  * Bulk PDF convertor
+  * Encryption and security features
+  * Image extraction capabilities
+  * Page manipulation tools
+  * PDF to Word conversion (convertorpdf/toword)
+  * PDF to Excel/CSV conversion (pdfto/excelcsv)
+  * Document (Excel, Word, CSV, Text) to PDF - plain text (document/topdftext)
+  * Comprehensive PDF manipulation (pdftools/enjoyit)
+  * PDF Viewer (pdfviewer/pdfviewer)
+  * PDF Editor (pdfeditor/pdfeditor)"""
+
+    DEV_FEATURES = r"""DEVELOPMENT TOOLS
+
+- Python IDE
+  Development environment (ide/vscode)
+
+- Python Code Logic Visualizer
+
+- API Tool
+
+- Code beautify tool
+
+- Binary editor with hex view
+
+- Advanced Text Editor
+  Notepad++ functionality with syntax highlighting
+
+- Markdown Viewer
+  View and edit Markdown files (md/mdviewer)
+
+- Database Editor & Reader
+  Database management with diagrams and query tools
+
+- Version Control
+  A tool that versions a folder based on the changes made
+
+- Script Agent
+  Script runner for daily tasks and automation
+
+- Multi File Editor
+  Configuration file editing for various formats
+
+- Universal Converter
+  Conversion into binary, hex, octal, hashing, and text operations
+
+- Programmer Calculator
+
+- Graphing Calculator
+
+- Code Merger
+
+- Regular expression testing tool
+
+- Development Environment Features:
+  * Syntax highlighting for multiple languages
+  * Project management capabilities"""
+
+    AI_FEATURES = r"""AI & PRODUCTIVITY TOOLS
+
+- Activity Monitor Tool (activity/monitor)
+
+- Ticket System (ticket/system)
+
+- Sticky Notes (sticky/notes)
+
+- Calculator (calculator/calculator)
+  Simple & scientific calculator
+
+- AI Chatbot
+  Virtual assistant (chatbot/aichatbot)
+
+- Smart Calendar & Scheduling
+  Event management system with intelligent planning (calendar/calendar)
+
+- Knowledge Base System
+  Built-in documentation platform with search capabilities (kbretro/kbretro)
+
+- Workflow Automation
+  Process optimization tools for repetitive tasks
+
+- Clipboard History
+
+- Ico Converter
+
+- Ico Editor
+
+- Q&A Platform
+  Interactive help system with contextual assistance
+
+- Screen Recorder App
+  Capture and recording tools for training and documentation (screenrec/screenrec)
+
+- Visual Diagram Creator
+  Professional diagram tools for flowcharts and process mapping (diagram/beta or mindmap/diagram)
+
+- Expense Tracker
+  Financial tracking with visual diagrams and reporting (expense/tracker)
+
+- Quiz Creation and Testing
+  * Quiz Maker for content creation (quizmaker/quizmaker)
+  * Quiz Testing system for evaluation (quiz/test)
+
+- Text Search and Replace Utility
+  Advanced find and replace with pattern matching (textreplace/textfind)
+
+- Step Recorder Tool (stprcd/stprcd)
+
+- Color Picker (colorpicker/colorpicker)
+
+- Chart Builder (chartbld/chartbld)
+
+- Planogram Studio (planogram/studio)
+
+- Shift Planner (shiftpl/shiftpl)
+
+- Image Editor (imgeditor/imgeditor)
+
+- Image Resize (imgres/imgres)
+
+- Video Editor (vided/vided)
+
+- Pixel Art (px95/px95)
+
+- Data Plotter (dataplotter/dataplotter)
+
+- Decision Tree Designer (decisiontree/decisiontree)
+
+- Time Tracker (timetracker/timetracker)
+
+- Project Management Tool (projectmanager/projectmanager)
+
+- Find & Replace Text Tool
+  Advanced search and replacement with regex support
+
+- Contacts Manager
+  Contact information database with search capabilities
+
+- Paint App & Whiteboard
+  Digital drawing and diagramming tools
+
+- Todo Manager (todo/manager)"""
+
+    NETWORK_FEATURES = r"""NETWORK & CONNECTIVITY TOOLS
+
+- Network Information Display
+  Get IP & MAC address information for all network adapters
+
+- ARP Devices with autoscan
+
+- Port Scanner
+  Open port detection on network devices with service identification
+
+- Ping Tool
+  Connectivity testing with port discovery and latency analysis
+
+- Network Bandwidth Monitoring
+  Real-time usage graphs with VLAN and LAN support (bandmonitoring/networking)
+
+- Network traffic monitoring (traffic/network)
+
+- Network topology tool (topology/network)
+
+- Advanced Network Diagnostics:
+  * Connection quality testing
+  * Bandwidth utilization analysis
+  * Wi-Fi signal strength monitoring"""
+
+    ACCOUNTS = r"""USER ACCOUNTS SYSTEM
+
+Bitpack uses a comprehensive authentication system with predefined accounts for different functionalities. All accounts are stored in the Accounts.txt file.
+
+PUBLIC ACCOUNTS (Available to all users):
+
+BASIC ACCOUNTS:
+- user/nopass - File copying operations only
+- it/copy - Enhanced user functionality (user++)
+    - The tools in the IT account are limited, while the separate accounts are more complex.
+
+SPECIALIZED TOOL ACCOUNTS:
+- activity/monitor - Activity monitor tool
+- alert/monitor - Hardware alert monitoring system
+- api/api - API tool
+- arcbr/arcbr - Archive browser tool
+- backupmanager/backupmngr - File backup management
+- bandmonitoring/networking - Network bandwidth monitoring
+- batchfileeditor/batchfileeditor - Batch file editor tool
+- binhex/binhex - Binary editor with hex view
+- bo95/bo95 - Bitpack office
+- calculator/calculator - Simple & scientific calculator
+- calculator/graphing - Representing mathematical functions in a graph
+- calculator/programmer - Simple programmer calculator
+- calendar/calendar - Calendar display & event planning
+- chartbld/chartbld - Chart builder
+- chatbot/aichatbot - AI chatbot assistant
+- check/devices - Online device checker
+- clipboard/history - Clipboard history tool
+- code/beautify - Code beautify tool
+- codemerger/codemerger - Code merger tool
+- colorpicker/colorpicker - Simple color picker tool
+- commander/total - Total commander file manager
+- comparator/comparator - File comparison tool
+- config/editor - Config editor tool
+- contact/manager - Contact management system
+- convertorpdf/toword - PDF to Word document converter
+- convertorword/topdf - Word to PDF document converter
+- csv/reader - CSV reader
+- cryptoV2/security - File encryption and security tools
+- dataplotter/dataplotter - Simple data plotter
+- dbobitpackdash/dbobitpackdash - dbo_bitpack.db database viewer dashboard
+- decisiontree/decisiontree - Decision tree designer
+- device/manager - Device manager
+- diagram/beta - Diagram creation and editing (beta version)
+- disktool/utility - Disk utility visualizer
+- docmrg/docmrg - Documente merge tool
+- document/topdftext - Document converter to PDF (plain text)
+- exccmp/exccmp - Excel comparator
+- excel/lite - Lightweight spreadsheet editor
+- excel/litev2 - Lightweight spreadsheet editor (V2)
+- expense/tracker - Expense tracker with diagrams
+- extension/manager - Extension manager for Bitpack
+- fetcher/repair - Bitpack auto repair utility
+- fisher/file - Searching files tool
+- fldrcp/fldrcp - Folder structure tool
+- fldpck/fldpck - Folder packer tool
+- forensic/timeline - Forensic timeline builder
+- history/files - File history management tools
+- hardware/lite - Hardware monitoring live kit
+- ico/converter - Ico converter
+- iconed/iconed - Ico editor
+- ide/vscode - Python integrated development environment
+- imgeditor/imgeditor - Image editor tool
+- imgres/imgres - Image resize tool
+- junk/manager - Junk file management and cleanup
+- kbretro/kbretro - Knowledge base manager
+- md/mdviewer - Markdown file viewer and editor
+- mindmap/diagram - Diagram creation and editing
+- multifile/editor - Configuration file editing for various formats
+- notepad/notepad - Advanced text editor
+- paint/paint - Digital drawing tool
+- passgen/passgen - Password generator utility
+- passgenV2/passgenV2 - Advanced password generator
+- password/checker - Password security checker
+- password/manager - Password storage and management
+- pdfcnvbulk/pdfcnvbulk - Bulk PDF convertor tool
+- pdfeditor/pdfeditor - Simple PDF editor
+- pdfto/excelcsv - PDF to Excel/CSV document converter
+- pdftools/enjoyit - Comprehensive PDF manipulation tools
+- pdfviewer/pdfviewer - Simple PDF viewer
+- personalstorage/personalstorage - Personal storage
+- planogram/studio - Planogram studio tool
+- process/viewer - CPU and GPU process monitoring
+- projectmanager/projectmanager - Project management tool
+- px95/px95 - Pixel Art tool
+- pythonlogic/visualizer - Python Code Logic Visualizer
+- quickfinder/file - Quick file finder
+- quizmaker/quizmaker - Quiz creation and editing tool
+- quiz/test - Quiz testing and evaluation system
+- reader/office - Office document reader
+- recovery/tunnel - Advanced file recovery tool
+- regextest/regextest - Regular expression testing tool
+- renamemanager/renamer - File renaming utility
+- repbld/repbld - Report designer
+- screenrec/screenrec - Screen recording application
+- script/agent - Script runner for daily tasks
+- shell/integrator - Bitpack manual repair utility
+- shiftpl/shiftpl - Shift planner
+- sql/comp - SQLite and SQL comparison tool
+- sql/designer - Database designer
+- sql/diagram -  SQLite database manager and SQL query representation with diagram
+- sql/executor - SQLite database manager and SQL query processing
+- sql/explorer - SQLite database manager explorer
+- sql/querycreator - SQL query creator
+- sql/sql - Advanced SQLite (.db) database manager
+- sqlmanagementstudio/sqlmanagementstudio - SQLite management studio
+- sticky/notes - Sticky notes
+- stprcd/stprcd - Step recorder
+- system/realtime - Real-time system resource monitoring
+- terminal/terminal - Command line terminal interface
+- textreplace/textfind - Text search and replace utility
+- ticket/system - Ticket system
+- timeline/file - File timeline viewer
+- timetracker/timetracker - Simple time tracker
+- todo/manager - Todo manager
+- topology/network - Network topology tool
+- traffic/network - Network traffic monitoring
+- universal/converter - Conversion into binary, hex, octal, hashing, and text operations
+- versioncontrol/versioncontrol - A tool that versions a folder based on the changes made
+- vided/vided - Video editor tool
+- whiteboard/presentation - Whiteboard & presentation tools
+- zipmanager/zipmngr - Archive compression and management
+- zippass/wordsmith - ZIP password recovery tool
+
+DEVELOPER ACCOUNTS:
+- Reserved for development purposes
+- Not accessible to end users
+- Used for system maintenance and updates
+
+USAGE TIPS:
+- Each account provides access to specific functionality
+- Use dev mode (devcpp) to access the accounts more easily
+- Accounts are case-sensitive"""
+
+    REQUIREMENTS = r"""SYSTEM REQUIREMENTS
+
+IMPORTANT NOTICE:
+This software is designed exclusively for x64 (64-bit) systems
+
+MINIMUM REQUIREMENTS:
+- Architecture: x64 (64-bit processor required - between 1-2 GHz)
+- Operating System: Windows 10 (build 1903+) or Windows 11
+- Processor: Intel i3 or AMD equivalent (1-2 GHz)
+- RAM: 4GB minimum
+- Storage: 500MB free disk space
+- Network: Internet connection
+- Display: 100% zoom recommended (especially for laptops)
+
+RECOMMENDED SPECIFICATIONS:
+- Processor: Intel Core i5 or AMD Ryzen 5 (or equivalent)
+- RAM: 8GB recommended or 16GB for heavy development work
+- Storage: SSD for faster file operations
+- Display: 1920x1080 or higher resolution
+
+BUILT-IN COMPATIBILITY CHECK:
+Bitpack includes an integrated system compatibility checker that verifies your hardware and software configuration automatically - no need to worry about compatibility!
+
+PERFORMANCE CONSIDERATIONS:
+- SSD storage recommended for faster file operations
+- Dedicated graphics card beneficial for intensive development work
+- Multiple monitor setup supported for enhanced productivity"""
+
+    INSTALLATION = r"""INSTALLATION & SETUP GUIDE
+
+WHAT YOU GET:
+- Single file - no installer needed
+- Portable application - run from anywhere
+- All features unlocked immediately
+- No additional dependencies required
+
+SIMPLE SETUP PROCESS:
+
+1. DOWNLOAD
+   - Download the Bitpack file
+
+2. SYSTEM CHECK
+   - Ensure your system meets minimum requirements
+   - Built-in compatibility checker will verify automatically
+   - x64 (64-bit) processor required
+
+3. FIRST RUN
+   - Log in using provided accounts from the account list
+   - Choose appropriate account for your intended use (recommended dev mode (devcpp))
+
+CONFIGURATION FILES & STRUCTURE:
+- Config folder - Configuration for various modules (editing parameters using config/editor tool)
+
+FIRST-TIME SETUP CHECKLIST:
+- Verify system requirements
+- Run compatibility check
+- Configure display settings
+- Manage extensions for Bitpack
+- Preset the Bitpack config setup (config/editor):
+   * if you want the checker instance to appear, modify the parameter checker_always with the value True
+   * if you want the user handbook instance to disappear (the parameter reading_pane always be True), modify the parameter reading_pane with the value False
+- Test login with basic account (user/nopass)
+- Configure network paths if needed
+- Set up backup locations if using backup features
+
+QUICK START TIPS:
+- Preset the Config parameters (config/editor)
+- Use the extension/manager to configure Bitpack extensions
+- Try Bitpack Mail Express (mail); to activate the client, you need to open Bitpack Desktop (w95dist), then Command Prompt, and in the command line type "exec class mail_client:95"
+- Use the built-in help system for detailed guidance
+- The AI chatbot (chatbot/aichatbot) can assist with questions/tasks
+- Each tool has its own specialized account for focused work
+
+IMPORTANT NOTES:
+- No installation required - runs directly from Bitpack file
+- Portable - can be run from USB drive or network location
+- All data stored locally within application directory
+- Some features may require specific network permissions"""
+
+    SUPPORT = r"""SUPPORT & DOCUMENTATION
+
+GET HELP AND SUPPORT:
+
+BUILT-IN HELP RESOURCES:
+- Knowledge Base: Built-in local documentation platform
+- AI Chatbot: Integrated virtual assistant (chatbot/aichatbot)
+- Read Me First: Essential usage information
+- Equipment Sheets: Software configuration templates for profiles.json and paths.txt (copy app)
+- Bitpack Dashboard: For essential informations (RFLAGS)
+
+OFFICIAL SUPPORT CHANNELS:
+- Developer: Tudor Marmureanu
+- Support Email: suport@muap.ro
+- Company: Muap - Retro Computing Division
+
+REPAIR & MAINTENANCE:
+
+AUTOMATIC REPAIR (Fetcher):
+Use the Fetcher - Repair Setup feature (fetcher/repair) for automatic error correction and file restoration.
+
+MANUAL REPAIR (Shell Integrator):
+Use shell/integrator account and execute commands in sequence:
+1. init
+2. powercli Bitpack -t
+3. 1/0,12
+4. 0/0,8
+5. restart_prec
+6. launch_bitpack
+
+EXTENSION MANAGER:
+Manage extensions for Bitpack. (extension/manager)
+
+COMMON SOLUTIONS:
+
+DISPLAY ISSUES:
+- Adjust DPI settings for high-resolution displays
+- Set zoom to 100% in Windows display settings
+- Update graphics drivers
+
+PERFORMANCE ISSUES:
+- Close unnecessary background applications
+- Ensure minimum system requirements are met
+
+NETWORK CONNECTIVITY:
+- Verify firewall settings for network tools
+- Ensure proper network permissions for file copying
+
+FILE ACCESS ISSUES:
+- Check file permissions and ownership
+- Ensure adequate disk space for operations
+
+DOCUMENTATION RESOURCES:
+- Knowledge Base: Built-in local documentation platform
+- Read Me First: Essential usage information
+- Context-sensitive help throughout the application
+
+ADDITIONAL RESOURCES:
+- Company: Muap - Retro Computing Division
+- Professional IT environments with advanced capabilities
+- Some features may require specific network permissions"""
+
+    ABOUT = r"""ABOUT Bitpack
+
+COMPANY INFORMATION:
+- Developer: Tudor Marmureanu
+- Company: Muap - Retro Computing Division
+- Support Email: suport@muap.ro
+- Copyright: © 2026 Muap - Retro Computing Division
+
+APPLICATION DETAILS:
+- Name: Bitpack
+- Version: 0.95.0
+- Application Type: IT Management Tool Suite
+- Architecture: x64 (64-bit) Windows applications only
+- Distribution: Single file
+- License: Professional IT environments or Personal usage
+
+MISSION STATEMENT:
+Bitpack is designed to revolutionize IT workflow management by combining over 100 professional tools into a single, powerful file. Our mission is to provide IT support departments, system administrators, developers, and office professionals with an all-in-one solution that enhances productivity and streamlines operations.
+
+KEY ACHIEVEMENTS:
+- 100+ integrated professional tools
+- 18.8% ~ 20% faster file operations
+- Zero installation requirements
+- Military-grade security features
+- AI assistant
+- Comprehensive network analysis capabilities
+- Advanced development environment
+- Real-time system monitoring
+
+DEVELOPMENT PHILOSOPHY:
+Built with Python, Bitpack represents a modern approach to IT tool consolidation. Every feature has been carefully crafted to provide maximum efficiency while maintaining the familiar Windows 95 aesthetic that IT professionals love.
+
+PERFORMANCE METRICS:
+- Single file to run
+- Optimized memory usage and CPU allocation
+- Resource-efficient multi-tool architecture
+
+INNOVATION HIGHLIGHTS:
+- Portable application design
+- Built-in compatibility checker
+- Self-healing repair capabilities
+- AI assistant
+- Comprehensive security suite
+- Professional development tools
+
+RECOGNITION:
+Designed specifically for initiating an IT department and beyond and, of course, for professional IT environments with advanced network and system management capabilities. Trusted by IT professionals for comprehensive diagnostic and task automation needs.
+
+GET IN TOUCH:
+For technical support, feature requests, or additional configuration assistance:
+- Use the built-in Knowledge Base system
+- Chat with our integrated AI assistant
+- Contact our support team at suport@muap.ro
+
+SUMMARY:
+- The application runs fully offline.
+- Initial setup is required on any PC. Afterwards, you may archive the application folder and transfer it to another PC, server, or external drive for easier deployment.
+- During installation, it is recommended not to select Program Files. Otherwise, the application cannot create the required files. Installing in another folder (e.g., Music) is acceptable.
+- Login credentials for dev mode:
+    * Username: devcpp
+    * Password: (leave blank)
+- It is recommended to enable and configure the Auto Login option.
+- Do not modify the Config folder. If the application malfunctions, use one of the provided repair tools.
+- At this stage, all features are accessible only after login (pending optimization of memory and resource allocation).
+- On the first run, startup may take up to 30 seconds depending on system resources. Typical startup time is 10–15 seconds. This is expected due to the application’s codebase (220,000+ lines, excluding integrated libraries). A splash screen will be added in future builds.
+- The application is safe and poses no security risks.
+- Requirements:
+    * Architecture: x64
+    * OS: Windows 10 or Windows 11
+    * Minimum 500 MB free disk space (installation + usage)
+- The tools are under continuous development but are currently stable (project started in 2024). Minor bugs may still occur.
+- Some time may be required to become familiar with the application. The interface may seem complex at first; users are encouraged to explore its functionalities.
+- For questions or issues, please contact support via email.
+- Usage scenarios are determined by the user.
+- Occasionally, my name (Tudor Marmureanu) still appears in the help/about section to protect my copyright.
+- Current build (0.95.0): since this is build 0.95.0, the application theme is retro (old school, old memories).
+- Please keep the product key confidential.
+
+Thank you for choosing Bitpack - The ultimate all-in-one productivity and IT management solution!"""
+
+    # key, contents title, page title, text (the order of the PDF too)
+    TOPICS = [
+        ("overview", "Overview", "Bitpack Overview", OVERVIEW),
+        ("system", "System & Diagnostics", "System & Diagnostics Features", SYSTEM_FEATURES),
+        ("files", "File Management", "File Management Pro Features", FILE_FEATURES),
+        ("security", "Security Suite", "Security Suite Features", SECURITY_FEATURES),
+        ("office", "Office Suite", "Office Suite Lite Features", OFFICE_FEATURES),
+        ("dev", "Development Tools", "Development Tools", DEV_FEATURES),
+        ("ai", "AI & Productivity", "AI & Productivity Features", AI_FEATURES),
+        ("network", "Network Features", "Network & Connectivity Features", NETWORK_FEATURES),
+        ("accounts", "User Accounts", "User Accounts Guide", ACCOUNTS),
+        ("requirements", "System Requirements", "System Requirements", REQUIREMENTS),
+        ("installation", "Installation Guide", "Installation & Setup Guide", INSTALLATION),
+        ("support", "Support", "Support & Documentation", SUPPORT),
+        ("about", "About Bitpack", "About Bitpack", ABOUT),
+    ]
+    FEATURE_KEYS = ["system", "files", "security", "office", "dev", "ai", "network"]
+    TOPIC = {key: (short, title, text) for key, short, title, text in TOPICS}
+
+    class MultiappInfoDashboard:
+        def __init__(self, rootuserinfo):
+            self.rootuserinfo = root = rootuserinfo
+            root.title("Bitpack - User Guide")
+            root.configure(bg=RP_FACE)
+            # Fix: the window fits the screen (1200x800 went past the bottom of 768-pixel laptop screens)
+            width = min(1100, root.winfo_screenwidth() - 60)
+            height = min(760, root.winfo_screenheight() - 80)
+            root.geometry("%dx%d+%d+%d" % (width, height, max(0, (root.winfo_screenwidth() - width) // 2),
+                                           max(0, (root.winfo_screenheight() - height) // 2 - 20)))
+            root.minsize(760, 480)
+            self.custom_frame = RP_IS_WINDOWS and W95_CUSTOM_TITLE_BAR
+            self.maximized = False
+            self.normal_geometry = None
+            self.minimizing = False
+            self.current = None
+            self.feature_tab = "system"
+            self.export_enabled = self._export_enabled()
+
+            self._make_icons()
+            self.create_title_bar()
+            self.create_menu_bar()
+            self.create_toolbar()
+            self.create_main_content()
+            root.protocol("WM_DELETE_WINDOW", root.destroy)
+            root.bind_all("<ButtonPress-1>", self._focus_on_click, add="+")
+            root.bind("<Control-f>", lambda e: (self.find_entry.focus_force(), "break")[1])
+            root.bind("<F3>", lambda e: self.find_next())
+            if self.custom_frame:
+                root.configure(bd=2, relief=tk.RAISED)
+                root.after(10, self._enable_custom_frame)
+            self.show_overview()
+
+        # ─── Windows 95 frame ────────────────────────────────────────
+        def _make_icons(self):
+            """Pixel icons like the Help Topics of Windows 95: a closed book and a page."""
+            def draw(rows, palette):
+                image = tk.PhotoImage(width=16, height=16)
+                for y, row in enumerate(rows):
+                    for x, ch in enumerate(row):
+                        if ch in palette:
+                            image.put(palette[ch], (x, y))
+                return image
+            book = ["................", "...KKKKKKKKKK...", "..KBBBBBBBBBK...", "..KBBBBBBBBBKW..",
+                    "..KBBYYYYYBBKW..", "..KBBBBBBBBBKW..", "..KBBBBBBBBBKW..", "..KBBBBBBBBBKW..",
+                    "..KBBBBBBBBBKW..", "..KBBBBBBBBBKW..", "..KBBBBBBBBBKW..", "..KBBBBBBBBBKW..",
+                    "..KKKKKKKKKKKW..", "...WWWWWWWWWWW..", "................", "................"]
+            page = ["................", "..KKKKKKKK......", "..KWWWWWWKK.....", "..KWWWWWWKWK....",
+                    "..KWQQQQWKKKK...", "..KWWWWWWWWWK...", "..KWQQQQQQWWK...", "..KWWWWWWWWWK...",
+                    "..KWQQQQQQWWK...", "..KWWWWWWWWWK...", "..KWQQQQQWWWK...", "..KWWWWWWWWWK...",
+                    "..KWWWWWWWWWK...", "..KKKKKKKKKKK...", "................", "................"]
+            self.icon_book = draw(book, {"K": "#000000", "B": "#000080", "Y": "#ffff00", "W": "#808080"})
+            self.icon_page = draw(page, {"K": "#000000", "W": "#ffffff", "Q": "#808080"})
+            self.icon_book_open = draw(book, {"K": "#000000", "B": "#800000", "Y": "#ffff00", "W": "#808080"})
+
+        def create_title_bar(self):
+            """Fix: a real Windows 95 title bar (the old one sat inside the Windows one and its buttons did nothing)."""
+            root = self.rootuserinfo
+            marlett = "Marlett" in tkfont.families(root)
+            self.glyphs = ({"min": "0", "max": "1", "restore": "2", "close": "r"} if marlett
+                           else {"min": "_", "max": "[]", "restore": "=", "close": "X"})
+            self.glyph_font = ("Marlett", 7) if marlett else ("MS Sans Serif", 7, "bold")
+            self._pixel = tk.PhotoImage(width=1, height=1)
+            if RP_IS_WINDOWS and not W95_CUSTOM_TITLE_BAR:
+                return
+            bar = tk.Frame(root, bg=RP_NAVY, height=20)
+            bar.pack(side=tk.TOP, fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            icon = tk.Label(bar, image=self.icon_book, bg=RP_NAVY)
+            icon.pack(side=tk.LEFT, padx=(2, 3))
+            title = tk.Label(bar, text="Bitpack - User Guide", bg=RP_NAVY, fg=RP_LIGHT, font=RP_FONT_B, anchor="w")
+            title.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.caption_parts = (bar, title, icon)
+            self.caption_button(bar, "close", root.destroy).pack(side=tk.RIGHT, padx=(2, 2))
+            self.btn_max = self.caption_button(bar, "max", self.toggle_maximize)
+            self.btn_max.pack(side=tk.RIGHT)
+            self.caption_button(bar, "min", self._minimize).pack(side=tk.RIGHT)
+            for widget in self.caption_parts:
+                widget.bind("<ButtonPress-1>", self._caption_press)
+                widget.bind("<B1-Motion>", self._caption_drag)
+                widget.bind("<Double-Button-1>", lambda e: self.toggle_maximize())
+            root.bind("<Activate>", lambda e: self._set_caption_active(True) if e.widget is root else None)
+            root.bind("<Deactivate>", lambda e: self._set_caption_active(False) if e.widget is root else None)
+            root.bind("<Map>", self._on_map)
+
+        def caption_button(self, parent, key, command):
+            return tk.Button(parent, text=self.glyphs[key], command=command, font=self.glyph_font, image=self._pixel,
+                             compound="center", width=12, height=10, padx=0, pady=0, bg=RP_FACE, fg=RP_BLACK,
+                             activebackground=RP_FACE, relief=tk.RAISED, bd=2, highlightthickness=0, takefocus=0)
+
+        def _set_caption_active(self, active):
+            if not hasattr(self, "caption_parts"):
+                return
+            for widget in self.caption_parts:
+                widget.config(bg=RP_NAVY if active else RP_SHADOW)
+            self.caption_parts[1].config(fg=RP_LIGHT if active else RP_FACE)
+
+        def _enable_custom_frame(self):
+            self.rootuserinfo.overrideredirect(True)
+            self._apply_taskbar_style()
+
+        def _apply_taskbar_style(self):
+            root = self.rootuserinfo
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.GetParent(root.winfo_id())
+                style = user32.GetWindowLongW(hwnd, -20)
+                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
+            except Exception:
+                return
+            root.withdraw()
+            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+
+        def _on_map(self, event):
+            root = self.rootuserinfo
+            if event.widget is root and self.minimizing and root.state() == "normal":
+                self.minimizing = False
+                root.overrideredirect(True)
+                root.after(10, self._apply_taskbar_style)
+
+        def _minimize(self):
+            if self.custom_frame:
+                self.minimizing = True
+                self.rootuserinfo.overrideredirect(False)
+            self.rootuserinfo.iconify()
+
+        def toggle_maximize(self):
+            root = self.rootuserinfo
+            if self.maximized:
+                root.geometry(self.normal_geometry)
+            else:
+                self.normal_geometry = root.geometry()
+                x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
+                if RP_IS_WINDOWS:
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        rect = wintypes.RECT()
+                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
+                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
+                    except Exception:
+                        pass
+                root.geometry("%dx%d+%d+%d" % (width, height, x, y))
+            self.maximized = not self.maximized
+            if hasattr(self, "btn_max"):
+                self.btn_max.config(text=self.glyphs["restore" if self.maximized else "max"])
+
+        def _caption_press(self, event):
+            self._drag = (event.x_root - self.rootuserinfo.winfo_x(), event.y_root - self.rootuserinfo.winfo_y())
+
+        def _caption_drag(self, event):
+            if self.custom_frame and not self.maximized:
+                self.rootuserinfo.geometry("+%d+%d" % (event.x_root - self._drag[0], event.y_root - self._drag[1]))
+
+        def _grip_press(self, event):
+            root = self.rootuserinfo
+            self._resize = (event.x_root, event.y_root, root.winfo_width(), root.winfo_height())
+
+        def _grip_drag(self, event):
+            if not self.maximized:
+                x0, y0, width, height = self._resize
+                self.rootuserinfo.geometry("%dx%d" % (max(760, width + event.x_root - x0),
+                                                      max(480, height + event.y_root - y0)))
+
+        def _focus_on_click(self, event):
+            """Windows: a window without the Windows title bar does not take the keyboard back by itself once
+            another window had it. A click in a text field gives it the keyboard again."""
+            if isinstance(event.widget, (tk.Entry, tk.Text)):
+                try:
+                    event.widget.focus_force()
+                except tk.TclError:
+                    pass
+
+        # ─── message box (always in front) ───────────────────────────
+        def message(self, title, text, icon="info"):
+            root = self.rootuserinfo
+            win = tk.Toplevel(root)
+            win.overrideredirect(True)
+            win.configure(bg=RP_FACE, bd=2, relief=tk.RAISED)
+            win.transient(root)
+            win.attributes("-topmost", True)
+            bar = tk.Frame(win, bg=RP_NAVY, height=20)
+            bar.pack(fill=tk.X, padx=1, pady=(1, 0))
+            bar.pack_propagate(False)
+            tk.Label(bar, text=title, bg=RP_NAVY, fg=RP_LIGHT, font=RP_FONT_B).pack(side=tk.LEFT, padx=4)
+            self.caption_button(bar, "close", win.destroy).pack(side=tk.RIGHT, padx=2)
+            body = tk.Frame(win, bg=RP_FACE)
+            body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(12, 6))
+            picture = tk.Canvas(body, width=32, height=32, bg=RP_FACE, highlightthickness=0)
+            if icon == "error":
+                picture.create_oval(2, 2, 30, 30, fill="#ff0000", outline="#800000")
+                picture.create_line(10, 10, 22, 22, fill="white", width=3)
+                picture.create_line(22, 10, 10, 22, fill="white", width=3)
+            else:
+                picture.create_oval(2, 2, 30, 30, fill=RP_LIGHT, outline=RP_BLACK)
+                picture.create_text(16, 16, text="i", fill="#0000ff", font=("Times New Roman", 16, "bold"))
+            picture.pack(side=tk.LEFT, anchor="n", padx=(0, 12))
+            tk.Label(body, text=text, bg=RP_FACE, font=RP_FONT, justify="left", wraplength=380).pack(side=tk.LEFT)
+            self._button(win, "OK", win.destroy, width=9, default=True).pack(pady=(4, 12))
+            win.bind("<Return>", lambda e: win.destroy())
+            win.bind("<Escape>", lambda e: win.destroy())
+            win.update_idletasks()
+            w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (root.winfo_rootx() + max(0, (root.winfo_width() - w) // 2),
+                                     root.winfo_rooty() + max(0, (root.winfo_height() - h) // 3)))
+            win.lift()
+            win.focus_force()
+
+            def take_clicks():
+                try:
+                    if win.winfo_exists() and win.winfo_viewable():
+                        win.grab_set()
+                except tk.TclError:
+                    pass
+            clicks_job = win.after(100, take_clicks)
+            # when the box closes (even within 100 ms, or with the whole window) nothing is left waiting
+            win.bind("<Destroy>", lambda e, w=win, j=clicks_job: w.after_cancel(j) if e.widget is w else None,
+                     add="+")
+
+        def _button(self, parent, text, command, width=None, default=False):
+            button = tk.Button(parent, text=text, command=command, font=RP_FONT_B if default else RP_FONT,
+                               bg=RP_FACE, fg=RP_BLACK, activebackground=RP_FACE, relief=tk.RAISED, bd=2, padx=6,
+                               pady=1, highlightthickness=1 if default else 0, highlightbackground=RP_BLACK,
+                               takefocus=0)
+            if width:
+                button.config(width=width)
+            return button
+
+        # ─── menus and toolbar ───────────────────────────────────────
+        def _export_enabled(self):
+            """The Export to PDF extension (0x00097), as before."""
+            try:
+                conn = sqlite3.connect(os.path.join("Config", "dbo_bitpack.db"))
+                row = conn.execute("SELECT enabled FROM extensions WHERE extension_id='0x00097'").fetchone()
+                conn.close()
+                return bool(row and row[0])
+            except sqlite3.Error:
+                return False
+
+        def create_menu_bar(self):
+            bar = tk.Frame(self.rootuserinfo, bg=RP_FACE)
+            bar.pack(side=tk.TOP, fill=tk.X)
+
+            def menubutton(text):
+                button = tk.Menubutton(bar, text=text, font=RP_FONT, bg=RP_FACE, fg=RP_BLACK,
+                                       activebackground=RP_NAVY, activeforeground=RP_LIGHT, relief="flat", bd=0,
+                                       padx=6, pady=2, underline=0, takefocus=0, highlightthickness=0)
+                button.pack(side=tk.LEFT)
+                menu = tk.Menu(button, tearoff=0, font=RP_FONT, bg=RP_FACE, fg=RP_BLACK, activebackground=RP_NAVY,
+                               activeforeground=RP_LIGHT)
+                button.config(menu=menu)
+                return menu
+
+            m = menubutton("File")
+            m.add_command(label="Save Page As Text...", command=self.save_page_as_text)
+            if self.export_enabled:
+                m.add_command(label="Export to PDF...", command=self.save_to_pdf)
+            m.add_separator()
+            m.add_command(label="Go to Login Form", command=self.rootuserinfo.destroy)
+            m.add_command(label="Exit", command=self.rootuserinfo.destroy)
+            m = menubutton("Edit")
+            m.add_command(label="Copy", accelerator="Ctrl+C", command=lambda: self.text.event_generate("<<Copy>>"))
+            m.add_command(label="Select All", command=lambda: self.text.tag_add(tk.SEL, "1.0", "end-1c"))
+            m.add_separator()
+            m.add_command(label="Find...", accelerator="Ctrl+F", command=lambda: self.find_entry.focus_force())
+            m.add_command(label="Find Next", accelerator="F3", command=self.find_next)
+            m = menubutton("View")
+            m.add_command(label="Overview", command=self.show_overview)
+            m.add_command(label="Features", command=self.show_features)
+            m.add_command(label="Accounts", command=self.show_accounts)
+            m.add_command(label="System Requirements", command=self.show_requirements)
+            m.add_command(label="Installation", command=self.show_installation)
+            m = menubutton("Help")
+            m.add_command(label="Support", command=self.show_support)
+            m.add_command(label="About", command=self.show_about)
+
+        def create_toolbar(self):
+            toolbar = tk.Frame(self.rootuserinfo, bg=RP_FACE, bd=1, relief=tk.RAISED)
+            toolbar.pack(side=tk.TOP, fill=tk.X)
+
+            def tb(text, command, default=False):
+                self._button(toolbar, text, command, default=default).pack(side=tk.LEFT, padx=1, pady=3)
+
+            def separator():
+                tk.Frame(toolbar, bg=RP_FACE, width=2, height=22, bd=1, relief=tk.SUNKEN).pack(side=tk.LEFT, padx=5)
+
+            tb("Overview", self.show_overview)
+            tb("Features", self.show_features)
+            tb("Accounts", self.show_accounts)
+            tb("System Req", self.show_requirements)
+            separator()
+            tb("Install", self.show_installation)
+            tb("Help", self.show_support)
+            tb("About", self.show_about)
+            if self.export_enabled:
+                tb("Export to PDF", self.save_to_pdf)
+            separator()
+            tb("Go to Login Form", self.rootuserinfo.destroy, default=True)
+            find = tk.Frame(toolbar, bg=RP_FACE)
+            find.pack(side=tk.RIGHT, padx=6)
+            tk.Label(find, text="Find:", font=RP_FONT, bg=RP_FACE).pack(side=tk.LEFT)
+            self.find_var = tk.StringVar()
+            self.find_entry = tk.Entry(find, textvariable=self.find_var, width=18, font=RP_FONT, bg=RP_LIGHT,
+                                       relief=tk.SUNKEN, bd=2, highlightthickness=0)
+            self.find_entry.pack(side=tk.LEFT, padx=4)
+            self.find_entry.bind("<Return>", lambda e: self.find_next())
+            self.find_var.trace_add("write", lambda *a: self._highlight_find())
+            self._button(find, "Find Next", self.find_next).pack(side=tk.LEFT)
+
+        def create_main_content(self):
+            root = self.rootuserinfo
+            sbar = tk.Frame(root, bg=RP_FACE)
+            sbar.pack(side=tk.BOTTOM, fill=tk.X, padx=2, pady=(0, 2))
+            grip = tk.Canvas(sbar, width=14, height=14, bg=RP_FACE, bd=0, highlightthickness=0,
+                             cursor="size_nw_se" if RP_IS_WINDOWS else "bottom_right_corner")
+            for i in (2, 6, 10):
+                grip.create_line(13, i, i, 13, fill=RP_LIGHT)
+                grip.create_line(13, i + 1, i + 1, 13, fill=RP_SHADOW)
+                grip.create_line(13, i + 2, i + 2, 13, fill=RP_SHADOW)
+            grip.pack(side=tk.RIGHT, anchor="se")
+            grip.bind("<ButtonPress-1>", self._grip_press)
+            grip.bind("<B1-Motion>", self._grip_drag)
+            self.status_right = tk.Label(sbar, text="", font=RP_FONT, bg=RP_FACE, relief=tk.SUNKEN, bd=1, width=24,
+                                         anchor="w", padx=4)
+            self.status_right.pack(side=tk.RIGHT, padx=1)
+            self.status = tk.Label(sbar, text="", font=RP_FONT, bg=RP_FACE, relief=tk.SUNKEN, bd=1, anchor="w", padx=4)
+            self.status.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+
+            body = tk.PanedWindow(root, orient=tk.HORIZONTAL, sashwidth=5, sashrelief=tk.RAISED, bg=RP_FACE, bd=0)
+            body.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+            # Contents (like the Help Topics of Windows 95)
+            nav = tk.Frame(body, bg=RP_FACE)
+            body.add(nav, minsize=170, width=215)
+            tk.Label(nav, text="Contents", font=RP_FONT_B, bg=RP_FACE, anchor="w").pack(fill=tk.X, padx=2, pady=(0, 2))
+            tree = tk.Frame(nav, bg=RP_LIGHT, bd=2, relief=tk.SUNKEN)
+            tree.pack(fill=tk.BOTH, expand=True)
+            self.nav_rows = {}
+            entries = [("overview", 0), ("features", 0)] + [(k, 1) for k in FEATURE_KEYS] + [
+                ("accounts", 0), ("requirements", 0), ("installation", 0), ("support", 0), ("about", 0)]
+            for key, level in entries:
+                label = "Features" if key == "features" else TOPIC[key][0]
+                icon = self.icon_book if key == "features" else self.icon_page
+                row = tk.Label(tree, text=" " + label, image=icon, compound="left", font=RP_FONT, bg=RP_LIGHT,
+                               anchor="w", padx=4 + 18 * level, pady=1)
+                row.pack(fill=tk.X)
+                row.bind("<Button-1>", lambda e, k=key: self.open_topic(k))
+                self.nav_rows[key] = row
+
+            # Topic page: title band, Features tabs, text
+            page = tk.Frame(body, bg=RP_FACE)
+            body.add(page, minsize=400)
+            self.title_band = tk.Label(page, text="", font=("MS Sans Serif", 12, "bold"), bg=RP_NAVY, fg=RP_LIGHT,
+                                       anchor="w", padx=8, pady=4)
+            self.title_band.pack(fill=tk.X)
+            self.tabrow = tk.Frame(page, bg=RP_FACE)
+            self.tab_labels = {}
+            for key in FEATURE_KEYS:
+                label = tk.Label(self.tabrow, text=TOPIC[key][0], font=RP_FONT, bg=RP_FACE, bd=2, relief=tk.RAISED,
+                                 padx=6, pady=2)
+                label.pack(side=tk.LEFT, anchor="s")
+                label.bind("<Button-1>", lambda e, k=key: self.show_features(k))
+                self.tab_labels[key] = label
+            holder = tk.Frame(page, bg=RP_LIGHT, bd=2, relief=tk.SUNKEN)
+            holder.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
+            self.text_holder = holder
+            scroll = tk.Scrollbar(holder, orient=tk.VERTICAL)
+            scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            self.text = tk.Text(holder, bg=RP_LIGHT, fg=RP_BLACK, font=("MS Sans Serif", 9), wrap=tk.WORD, bd=0,
+                                highlightthickness=0, padx=14, pady=10, spacing1=1, spacing3=1, cursor="arrow",
+                                selectbackground=RP_NAVY, selectforeground=RP_LIGHT, yscrollcommand=scroll.set)
+            self.text.pack(fill=tk.BOTH, expand=True)
+            scroll.config(command=self.text.yview)
+            t = self.text
+            t.tag_config("h1", font=("MS Sans Serif", 11, "bold"), foreground=RP_NAVY, spacing3=6)
+            t.tag_config("h2", font=("MS Sans Serif", 9, "bold"), foreground=RP_NAVY, spacing1=8, spacing3=2)
+            t.tag_config("bullet", lmargin1=8, lmargin2=22)
+            t.tag_config("sub", lmargin1=24, lmargin2=34, foreground="#404040")
+            t.tag_config("sub2", lmargin1=40, lmargin2=50, foreground="#404040")
+            t.tag_config("account", font=("Courier New", 9, "bold"), foreground="#800000")
+            t.tag_config("step", font=("MS Sans Serif", 9, "bold"))
+            t.tag_config("found", background="#ffff00")
+            t.tag_config("found_now", background=RP_NAVY, foreground=RP_LIGHT)
+            t.tag_raise("sel")
+            for key in ("<Key>",):
+                t.bind(key, lambda e: None if (e.state & 4 and e.keysym.lower() in ("c", "a")) or e.keysym in (
+                    "Up", "Down", "Prior", "Next", "Home", "End", "Left", "Right") else "break")
+
+        # ─── showing a topic ─────────────────────────────────────────
+        def _render(self, text):
+            """The guide's plain text, laid out like a help topic (headings, bullets, accounts)."""
+            t = self.text
+            t.config(state=tk.NORMAL)
+            t.delete("1.0", tk.END)
+            lines = text.split("\n")
+            for index, line in enumerate(lines):
+                stripped = line.strip()
+                indent = len(line) - len(line.lstrip(" "))
+                end = "\n" if index < len(lines) - 1 else ""
+                letters = re.sub(r"[^A-Za-z]", "", stripped.split("(")[0])
+                if index == 0:
+                    t.insert(tk.END, stripped + end, "h1")
+                elif stripped and letters and letters.isupper() and not stripped.startswith(("-", "*")):
+                    t.insert(tk.END, stripped + end, "h2")
+                elif re.match(r"^\d+\.\s", stripped) and indent == 0:
+                    t.insert(tk.END, stripped + end, "step")
+                elif stripped.startswith(("- ", "* ")):
+                    tag = "bullet" if indent == 0 else ("sub" if indent <= 3 else "sub2")
+                    symbol = "\u2022 " if stripped.startswith("- ") else "\u00b7 "
+                    body = stripped[2:]
+                    account = re.match(r"^(\S+/\S*)( - .*)$", body)
+                    t.insert(tk.END, symbol, tag)
+                    if account:
+                        t.insert(tk.END, account.group(1), (tag, "account"))
+                        t.insert(tk.END, account.group(2) + end, tag)
+                    else:
+                        t.insert(tk.END, body + end, tag)
+                elif indent > 0 and stripped:
+                    t.insert(tk.END, stripped + end, "sub")
+                else:
+                    t.insert(tk.END, stripped + end)
+            t.yview_moveto(0)
+            self._highlight_find()
+
+        def open_topic(self, key):
+            if key == "features":
+                self.show_features()
+                return
+            short, title, text = TOPIC[key]
+            self.current = key
+            self.tabrow.pack_forget()
+            self.title_band.config(text=title)
+            self._render(text)
+            self._mark_nav(key)
+            self.status.config(text=title)
+            self.status_right.config(text="%d lines" % text.count("\n"))
+
+        def _mark_nav(self, key):
+            for name, row in self.nav_rows.items():
+                selected = name == key or (key in FEATURE_KEYS and name == "features")
+                exact = name == key
+                row.config(bg=RP_NAVY if exact else RP_LIGHT, fg=RP_LIGHT if exact else RP_BLACK)
+                if name == "features":
+                    row.config(image=self.icon_book_open if selected else self.icon_book)
+
+        def show_features(self, key=None):
+            """The seven feature groups on Windows 95 tabs (the ttk Notebook is gone)."""
+            key = key or self.feature_tab
+            self.feature_tab = key
+            short, title, text = TOPIC[key]
+            self.current = key
+            self.title_band.config(text="Features - " + title)
+            self.tabrow.pack(fill=tk.X, pady=(4, 0), before=self.text_holder)
+            for name, label in self.tab_labels.items():
+                selected = name == key
+                label.config(font=RP_FONT_B if selected else RP_FONT, pady=4 if selected else 2)
+                label.pack_configure(pady=(0 if selected else 3, 0))
+            self._render(text)
+            self._mark_nav(key)
+            self.status.config(text="Features - %s" % short)
+            self.status_right.config(text="%d lines" % text.count("\n"))
+
+        # the original entry points
+        def show_overview(self):
+            self.open_topic("overview")
+
+        def show_system_features(self):
+            self.show_features("system")
+
+        def show_file_features(self):
+            self.show_features("files")
+
+        def show_security_features(self):
+            self.show_features("security")
+
+        def show_office_features(self):
+            self.show_features("office")
+
+        def show_dev_features(self):
+            self.show_features("dev")
+
+        def show_ai_features(self):
+            self.show_features("ai")
+
+        def show_network_features(self):
+            self.show_features("network")
+
+        def show_accounts(self):
+            self.open_topic("accounts")
+
+        def show_requirements(self):
+            self.open_topic("requirements")
+
+        def show_installation(self):
+            self.open_topic("installation")
+
+        def show_support(self):
+            self.open_topic("support")
+
+        def show_about(self):
+            self.open_topic("about")
+
+        # the original text getters (one source now)
+        def get_overview_content(self):
+            return OVERVIEW
+
+        def get_system_features(self):
+            return SYSTEM_FEATURES
+
+        def get_file_features(self):
+            return FILE_FEATURES
+
+        def get_security_features(self):
+            return SECURITY_FEATURES
+
+        def get_office_features(self):
+            return OFFICE_FEATURES
+
+        def get_dev_features(self):
+            return DEV_FEATURES
+
+        def get_ai_features(self):
+            return AI_FEATURES
+
+        def get_network_features(self):
+            return NETWORK_FEATURES
+
+        def get_accounts_content(self):
+            return ACCOUNTS
+
+        def get_requirements_content(self):
+            return REQUIREMENTS
+
+        def get_installation_content(self):
+            return INSTALLATION
+
+        def get_support_content(self):
+            return SUPPORT
+
+        def get_about_content(self):
+            return ABOUT
+
+        # ─── Find (in every topic) ───────────────────────────────────
+        def _highlight_find(self):
+            t = self.text
+            t.tag_remove("found", "1.0", tk.END)
+            t.tag_remove("found_now", "1.0", tk.END)
+            term = self.find_var.get().strip() if hasattr(self, "find_var") else ""
+            if not term:
+                return 0
+            count, start = 0, "1.0"
+            while True:
+                start = t.search(term, start, stopindex=tk.END, nocase=True)
+                if not start:
+                    break
+                end = "%s+%dc" % (start, len(term))
+                t.tag_add("found", start, end)
+                start = end
+                count += 1
+            self.status_right.config(text="%d match(es) here" % count)
+            return count
+
+        def find_next(self):
+            term = self.find_var.get().strip()
+            if not term:
+                self.find_entry.focus_force()
+                return
+            t = self.text
+            current = t.tag_ranges("found_now")
+            start = current[1] if current else "1.0"
+            t.tag_remove("found_now", "1.0", tk.END)
+            hit = t.search(term, start, stopindex=tk.END, nocase=True)
+            if not hit:
+                # not further down this page: the next topic that contains it
+                order = [k for k, *_ in TOPICS]
+                position = order.index(self.current) if self.current in order else -1
+                for step in range(1, len(order) + 1):
+                    key = order[(position + step) % len(order)]
+                    if term.lower() in TOPIC[key][2].lower():
+                        if key in FEATURE_KEYS:
+                            self.show_features(key)
+                        else:
+                            self.open_topic(key)
+                        hit = t.search(term, "1.0", stopindex=tk.END, nocase=True)
+                        break
+            if not hit:
+                self.status.config(text="'%s' was not found in the guide." % term)
+                return
+            end = "%s+%dc" % (hit, len(term))
+            t.tag_add("found_now", hit, end)
+            t.see(hit)
+            self.status.config(text="Found '%s' in %s" % (term, TOPIC[self.current][1]))
+
+        # ─── saving ──────────────────────────────────────────────────
+        def save_page_as_text(self):
+            """Replaces 'Print Info' (it only showed 'would be implemented here')."""
+            short, title, text = TOPIC[self.current]
+            path = filedialog.asksaveasfilename(parent=self.rootuserinfo, title="Save Page As",
+                                                defaultextension=".txt", initialfile="Bitpack - %s.txt" % short.replace(
+                                                    "&", "and").replace("/", "-"),
+                                                filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+            if not path:
+                return
+            try:
+                with open(path, "w", encoding="utf-8-sig", newline="\r\n") as fh:
+                    fh.write(text + "\n")
+                self.status.config(text="Saved: %s" % path)
+            except OSError as exc:
+                self.message("Save Page As", "The page could not be saved:\n%s" % exc, "error")
+
+        def save_to_pdf(self):
+            """All the guide in one PDF, with the name in the top corner (as before); indents are kept now."""
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.enums import TA_LEFT
+                from xml.sax.saxutils import escape
+            except ImportError:
+                self.message("Export to PDF", "The reportlab library is required!\nInstall it with: pip install reportlab",
+                             "error")
+                return
+            filename = filedialog.asksaveasfilename(parent=self.rootuserinfo, defaultextension=".pdf",
+                                                    filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+                                                    initialfile="Bitpack_UserGuide.pdf")
+            if not filename:
+                return
+
+            def add_watermark(canvas_obj, doc):
+                canvas_obj.saveState()
+                canvas_obj.setFont("Helvetica-Bold", 9)
+                canvas_obj.setFillColorRGB(0.6, 0.6, 0.6, alpha=0.5)
+                canvas_obj.drawRightString(540, 760, "Tudor Marmureanu")
+                canvas_obj.drawRightString(580, 750, "@ Retro Computing Division")
+                canvas_obj.restoreState()
+
+            try:
+                styles = getSampleStyleSheet()
+                normal = ParagraphStyle("CustomNormal", parent=styles["Normal"], fontSize=10, leading=14,
+                                        alignment=TA_LEFT)
+                story = []
+                for _key, _short, title, text in TOPICS:
+                    story += [Paragraph(escape(title), styles["Heading1"]), Spacer(1, 12)]
+                    for line in text.split("\n"):
+                        if line.strip():
+                            indent = len(line) - len(line.lstrip(" "))
+                            style = ParagraphStyle("i%d" % indent, parent=normal, leftIndent=indent * 5)
+                            story += [Paragraph(escape(line.strip()), style), Spacer(1, 6)]
+                    story.append(PageBreak())
+                SimpleDocTemplate(filename, pagesize=letter).build(story, onFirstPage=add_watermark,
+                                                                   onLaterPages=add_watermark)
+                self.message("Export to PDF", "PDF saved successfully to:\n%s" % filename)
+            except Exception as exc:
+                self.message("Export to PDF", "Failed to save the PDF:\n%s" % exc, "error")
+
+    def main():
+        rootuserinfo = tk.Tk()
+        app = MultiappInfoDashboard(rootuserinfo)
+        rootuserinfo.mainloop()
+        return app
+
+    main()
