@@ -35084,6 +35084,9 @@ if compvar == 9:
                 area_widget.tag_configure('current', background="#c0c0ff")
                 area_widget.tag_raise('search')
                 area_widget.tag_raise('sel')
+                area_widget.bind("<<Paste>>", lambda e: "break")
+                area_widget.bind("<<Cut>>", lambda e: "break")
+                area_widget.bind("<Button-2>", lambda e: "break")
                 # read-only, but selecting and copying work
                 area_widget.bind("<Key>", lambda e: None if (e.state & 4 and e.keysym.lower() in ("c", "a")) or e.keysym in (
                     "Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End") else "break")
@@ -35092,6 +35095,15 @@ if compvar == 9:
                 widget.bind("<Button-4>", self._wheel)
                 widget.bind("<Button-5>", self._wheel)
                 widget.config(state="normal")
+            for widget in (self.leftLinenumbers, self.rightLinenumbers):
+                widget.bind("<Key>", lambda e: "break")
+                widget.bind("<<Paste>>", lambda e: "break")
+                widget.bind("<<Cut>>", lambda e: "break")
+                widget.bind("<Button-1>", lambda e: "break")
+                widget.bind("<B1-Motion>", lambda e: "break")
+                widget.bind("<Double-Button-1>", lambda e: "break")
+                widget.bind("<Triple-Button-1>", lambda e: "break")
+                widget.bind("<Button-2>", lambda e: "break")
 
         # ----- scrolling (as before: the four texts move together) ---------------------------------------
         def scrollBothY(self, *args):
