@@ -30852,7 +30852,7 @@ if zipvar == 8:
         ZIPF()
         
 if compvar == 9:
-    ibitpack95_validation("9")
+    bitpack95_validation("9")
 
     import os
     import queue
@@ -31128,17 +31128,8 @@ if compvar == 9:
             self._apply_taskbar_style()
 
         def _apply_taskbar_style(self):
-            root = self.main_window
-            try:
-                import ctypes
-                user32 = ctypes.windll.user32
-                hwnd = user32.GetParent(root.winfo_id())
-                style = user32.GetWindowLongW(hwnd, -20)
-                user32.SetWindowLongW(hwnd, -20, (style & ~0x00000080) | 0x00040000)
-            except Exception:
-                return
-            root.withdraw()
-            root.after(10, lambda: (root.deiconify(), root.lift(), root.focus_force()))
+            """The taskbar button of this window without the Windows frame is kept by the global Bitpack layer."""
+            return None
 
         def _on_map(self, event):
             root = self.main_window
@@ -31161,14 +31152,9 @@ if compvar == 9:
                 self.normal_geometry = root.geometry()
                 x, y, width, height = 0, 0, root.winfo_screenwidth(), root.winfo_screenheight()
                 if CP_IS_WINDOWS:
-                    try:
-                        import ctypes
-                        from ctypes import wintypes
-                        rect = wintypes.RECT()
-                        ctypes.windll.user32.SystemParametersInfoW(0x30, 0, ctypes.byref(rect), 0)
-                        x, y, width, height = rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
-                    except Exception:
-                        pass
+                    area = w95_work_area()                        # the screen without the taskbar (global layer)
+                    if area:
+                        x, y, width, height = area[0], area[1], area[2] - area[0], area[3] - area[1]
                 root.geometry("%dx%d+%d+%d" % (width, height, x, y))
             self.maximized = not self.maximized
             if hasattr(self, "btn_max"):
@@ -31470,6 +31456,9 @@ if compvar == 9:
                 area_widget.tag_configure('current', background="#c0c0ff")
                 area_widget.tag_raise('search')
                 area_widget.tag_raise('sel')
+                area_widget.bind("<<Paste>>", lambda e: "break")
+                area_widget.bind("<<Cut>>", lambda e: "break")
+                area_widget.bind("<Button-2>", lambda e: "break")
                 # read-only, but selecting and copying work
                 area_widget.bind("<Key>", lambda e: None if (e.state & 4 and e.keysym.lower() in ("c", "a")) or e.keysym in (
                     "Up", "Down", "Left", "Right", "Prior", "Next", "Home", "End") else "break")
@@ -31478,6 +31467,15 @@ if compvar == 9:
                 widget.bind("<Button-4>", self._wheel)
                 widget.bind("<Button-5>", self._wheel)
                 widget.config(state="normal")
+            for widget in (self.leftLinenumbers, self.rightLinenumbers):
+                widget.bind("<Key>", lambda e: "break")
+                widget.bind("<<Paste>>", lambda e: "break")
+                widget.bind("<<Cut>>", lambda e: "break")
+                widget.bind("<Button-1>", lambda e: "break")
+                widget.bind("<B1-Motion>", lambda e: "break")
+                widget.bind("<Double-Button-1>", lambda e: "break")
+                widget.bind("<Triple-Button-1>", lambda e: "break")
+                widget.bind("<Button-2>", lambda e: "break")
 
         # ----- scrolling (as before: the four texts move together) ---------------------------------------
         def scrollBothY(self, *args):
